@@ -236,7 +236,7 @@ export function ChatArea({ conversationId }: ChatAreaProps) {
   }, [conversationId])
 
   useEffect(() => {
-    if (!loading && messages.length > 0) {
+    if (!loading && messages.length > 0 && autoScrollRef.current) {
       setTimeout(() => scrollToBottom('instant' as ScrollBehavior), 50)
     }
   }, [loading, messages.length, scrollToBottom])
