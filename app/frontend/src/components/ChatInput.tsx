@@ -73,7 +73,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
           border: '1px solid rgba(255,255,255,0.1)',
           borderRadius: 12,
           display: 'flex',
-          alignItems: 'flex-end',
+          alignItems: 'center',
           gap: 8,
           padding: '10px 12px',
           opacity: isDisabled ? 0.7 : 1,
