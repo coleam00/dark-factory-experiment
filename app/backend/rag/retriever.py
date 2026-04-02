@@ -5,6 +5,7 @@ Loads all chunk embeddings from SQLite (via repository), computes cosine
 similarity against a query embedding, and returns the top-K most relevant
 chunks with their video metadata.
 """
+
 from __future__ import annotations
 
 import logging
