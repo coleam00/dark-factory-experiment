@@ -308,7 +308,7 @@ export function ChatArea({ conversationId }: ChatAreaProps) {
       setFailedMessageText(content)
 
       // Show error toast
-      addToast(errMsg || 'Network error — message not sent', 'error')
+      addToast(errMsg, 'error')
 
       // Restore message text to input
       setTimeout(() => {
@@ -337,8 +337,6 @@ export function ChatArea({ conversationId }: ChatAreaProps) {
   const showError    = !loading && !!error && !showEmpty
   const showMessages = !loading && !error && !showEmpty
   const showSkeleton = loading && !showEmpty
-
-  const showStreamingBubble = isStreaming
 
   return (
     <div style={{
@@ -388,7 +386,7 @@ export function ChatArea({ conversationId }: ChatAreaProps) {
             )}
 
             {/* Streaming assistant bubble */}
-            {showStreamingBubble && (
+            {isStreaming && (
               <Message
                 role="assistant"
                 content={streamingContent}
