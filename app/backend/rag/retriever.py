@@ -12,6 +12,7 @@ from typing import List
 
 import numpy as np
 
+from backend import config
 from backend.db import repository
 
 logger = logging.getLogger(__name__)
@@ -19,14 +20,14 @@ logger = logging.getLogger(__name__)
 
 async def retrieve(
     query_embedding: List[float],
-    k: int = 5,
+    k: int = config.RETRIEVAL_TOP_K,
 ) -> List[dict]:
     """
     Find the top-K chunks most similar to *query_embedding*.
 
     Args:
         query_embedding: A list of floats representing the query vector.
-        k: Maximum number of results to return (default 5).
+        k: Maximum number of results to return (default ``config.RETRIEVAL_TOP_K``).
 
     Returns:
         A list of dicts (length <= k), each containing:
