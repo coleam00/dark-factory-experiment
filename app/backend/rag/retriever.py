@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 async def retrieve(
     query_embedding: List[float],
     k: int = 5,
+    min_score: float = 0.5,
 ) -> List[dict]:
     """
     Find the top-K chunks most similar to *query_embedding*.
@@ -27,6 +28,9 @@ async def retrieve(
     Args:
         query_embedding: A list of floats representing the query vector.
         k: Maximum number of results to return (default 5).
+        min_score: Minimum cosine similarity threshold (default 0.5).
+                   Chunks below this score are excluded even if they are
+                   in the top-K by rank, preventing irrelevant citations.
 
     Returns:
         A list of dicts (length <= k), each containing:
@@ -35,7 +39,8 @@ async def retrieve(
           - video_id: str
           - video_title: str
           - score: float (cosine similarity, -1.0 to 1.0)
-        Sorted by score descending. Returns [] if the DB has no chunks.
+        Sorted by score descending. Returns [] if the DB has no chunks
+        or if no chunks meet the min_score threshold.
     """
     # Load all chunks from the DB (includes deserialized embeddings)
     all_chunks = await repository.list_chunks()
@@ -63,6 +68,12 @@ async def retrieve(
     results: list[dict] = []
     for idx in top_indices:
         chunk = all_chunks[int(idx)]
+        score = float(scores[int(idx)])
+
+        # Skip chunks below the relevance threshold
+        if score < min_score:
+            continue
+
         video_id = chunk["video_id"]
 
         if video_id not in video_title_cache:
@@ -75,7 +86,7 @@ async def retrieve(
                 "content": chunk["content"],
                 "video_id": video_id,
                 "video_title": video_title_cache[video_id],
-                "score": float(scores[int(idx)]),
+                "score": score,
             }
         )
 
