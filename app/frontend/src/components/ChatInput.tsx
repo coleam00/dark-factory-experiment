@@ -129,7 +129,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
             transition: 'background 0.15s, color 0.15s',
           }}
           onMouseEnter={(e) => { if (!isDisabled) e.currentTarget.style.background = '#1d4ed8' }}
-          onMouseLeave={(e) => { if (!isDisabled) e.currentTarget.style.background = isDisabled ? '#1e293b' : '#3b82f6' }}
+          onMouseLeave={(e) => { if (!isDisabled) e.currentTarget.style.background = '#3b82f6' }}
         >
           {isStreaming ? (
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
