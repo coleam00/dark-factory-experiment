@@ -342,8 +342,6 @@ export function ChatArea({ conversationId }: ChatAreaProps) {
   const showMessages = !loading && !error && !showEmpty
   const showSkeleton = loading && !showEmpty
 
-  const showStreamingBubble = isStreaming
-
   return (
     <div style={{
       display: 'flex',
@@ -392,7 +390,7 @@ export function ChatArea({ conversationId }: ChatAreaProps) {
             )}
 
             {/* Streaming assistant bubble */}
-            {showStreamingBubble && (
+            {isStreaming && (
               <Message
                 role="assistant"
                 content={streamingContent}
@@ -439,7 +437,6 @@ export function ChatArea({ conversationId }: ChatAreaProps) {
             ref={chatInputRef}
             onSend={handleSend}
             isStreaming={isStreaming}
-            disabled={!conversationId}
           />
         </div>
       )}
