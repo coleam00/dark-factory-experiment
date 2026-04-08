@@ -12,8 +12,8 @@ from typing import List
 
 import numpy as np
 
-from backend.db import repository
 from backend import config
+from backend.db import repository
 
 logger = logging.getLogger(__name__)
 

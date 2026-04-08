@@ -6,3 +6,5 @@ python-dotenv
 openai
 docling-core[chunking]
 numpy
+pytest
+pytest-asyncio
