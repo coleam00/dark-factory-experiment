@@ -126,9 +126,9 @@ async def retrieve(
 
 
 def _cosine_similarity_batch(
-    query: "np.ndarray",
-    matrix: "np.ndarray",
-) -> "np.ndarray":
+    query: np.ndarray,
+    matrix: np.ndarray,
+) -> np.ndarray:
     """
     Compute cosine similarity between *query* (1-D) and every row of *matrix*.
 

@@ -183,11 +183,10 @@ async def _maybe_set_conversation_title(conv_id: str, first_user_message: str) -
     the first user message (simple truncation for Sprint 2; LLM-based in Sprint 6).
     """
     conv = await repository.get_conversation(conv_id)
-    if not conv:
+    if not conv or conv.get("title") != "New Conversation":
         return
-    if conv.get("title") == "New Conversation":
-        if len(first_user_message) > 50:
-            title = first_user_message[:47].strip() + "…"
-        else:
-            title = first_user_message.strip()
-        await repository.update_conversation_title(conv_id, title)
+    if len(first_user_message) > 50:
+        title = first_user_message[:47].strip() + "…"
+    else:
+        title = first_user_message.strip()
+    await repository.update_conversation_title(conv_id, title)
