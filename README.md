@@ -62,7 +62,7 @@ cd app && ./start.sh
 cd app && start.bat
 ```
 
-This will set up the Python venv, install dependencies, seed the database with 10 sample videos, and start both servers.
+This will set up the Python venv, install dependencies, and start both servers.
 
 3. Open [http://localhost:5173](http://localhost:5173)
 
