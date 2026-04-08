@@ -212,7 +212,7 @@ export function ChatArea({ conversationId }: ChatAreaProps) {
 
   const chatInputRef = useRef<ChatInputHandle>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
-  const bottomRef = useRef<HTMLDivElement>(null)
+
   const autoScrollRef = useRef(true)
   const [, forceUpdate] = useState(0)
 
@@ -223,8 +223,12 @@ export function ChatArea({ conversationId }: ChatAreaProps) {
   const pendingUserMsgIdRef = useRef<string | null>(null)
 
   // ── Auto-scroll logic ──
+  // Scroll the container to its maximum position so paddingBottom provides
+  // visible clearance above the chat input bar.
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
-    bottomRef.current?.scrollIntoView({ behavior, block: 'end' })
+    const el = scrollContainerRef.current
+    if (!el) return
+    el.scrollTo({ top: el.scrollHeight, behavior })
   }, [])
 
   useEffect(() => {
@@ -354,7 +358,7 @@ export function ChatArea({ conversationId }: ChatAreaProps) {
           display: 'flex',
           flexDirection: 'column',
           padding: '24px 0 0',
-          paddingBottom: 140,
+          paddingBottom: 220,
         }}
       >
         {showEmpty && <EmptyState onStarterClick={handleStarterClick} />}
@@ -403,7 +407,6 @@ export function ChatArea({ conversationId }: ChatAreaProps) {
           </div>
         )}
 
-        <div ref={bottomRef} style={{ height: 1 }} />
       </div>
 
       {/* ── Gradient fade above input ── */}
