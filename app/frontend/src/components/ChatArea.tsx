@@ -232,10 +232,14 @@ export function ChatArea({ conversationId }: ChatAreaProps) {
   }, [messages.length, streamingContent, scrollToBottom])
 
   useEffect(() => {
-    if (!loading && messages.length > 0) {
+    autoScrollRef.current = true
+  }, [conversationId])
+
+  useEffect(() => {
+    if (!loading && messages.length > 0 && autoScrollRef.current) {
       setTimeout(() => scrollToBottom('instant' as ScrollBehavior), 50)
     }
-  }, [loading, scrollToBottom]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loading, messages.length, scrollToBottom])
 
   const handleScroll = useCallback(() => {
     const el = scrollContainerRef.current
