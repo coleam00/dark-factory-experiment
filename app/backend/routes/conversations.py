@@ -1,8 +1,8 @@
 """Conversation management routes."""
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+
 from backend.db import repository
 
 router = APIRouter()
@@ -18,7 +18,7 @@ async def list_conversations():
 
 
 @router.post("/conversations", status_code=201)
-async def create_conversation(body: Optional[ConversationCreate] = None):
+async def create_conversation(body: ConversationCreate | None = None):
     """Create a new empty conversation. Body is optional; defaults to title='New Conversation'."""
     title = body.title if body else "New Conversation"
     return await repository.create_conversation(title)

@@ -25,7 +25,11 @@ dependencies = [
     "httpx",
     "python-dotenv",
     "openai",
-    "docling-core[chunking]",
+    # `chunking` brings HybridChunker + its HF-based default tokenizer (which
+    # HybridChunker imports at module load time, even if you don't use it).
+    # `chunking-openai` brings tiktoken so we can use OpenAITokenizer instead,
+    # matching our text-embedding-3-small pipeline without any HF round-trip.
+    "docling-core[chunking,chunking-openai]",
     "numpy",
 ]
 

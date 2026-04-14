@@ -6,13 +6,13 @@ chunking → embedding → storage pipeline, and returns a summary.
 
 All DB access goes through repository.py — no raw SQL here.
 """
+
 from __future__ import annotations
 
 import logging
-from typing import Annotated
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field, field_validator, AnyUrl
+from pydantic import AnyUrl, BaseModel, Field, field_validator
 
 from backend.db import repository
 from backend.rag.chunker import chunk_video
@@ -26,6 +26,7 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 # Request / Response models
 # ---------------------------------------------------------------------------
+
 
 class IngestRequest(BaseModel):
     title: str = Field(..., min_length=1, description="Video title (non-empty)")
@@ -50,6 +51,7 @@ class IngestResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Route handler
 # ---------------------------------------------------------------------------
+
 
 @router.post("/ingest", response_model=IngestResponse)
 async def ingest_video(body: IngestRequest) -> IngestResponse:
@@ -106,7 +108,7 @@ async def ingest_video(body: IngestRequest) -> IngestResponse:
         )
 
     # 4. Store each chunk with its embedding
-    for idx, (text, embedding) in enumerate(zip(chunk_texts, embeddings)):
+    for idx, (text, embedding) in enumerate(zip(chunk_texts, embeddings, strict=False)):
         await repository.create_chunk(
             video_id=video_id,
             content=text,
@@ -114,9 +116,7 @@ async def ingest_video(body: IngestRequest) -> IngestResponse:
             chunk_index=idx,
         )
 
-    logger.info(
-        "Ingestion complete for '%s': %d chunks stored", body.title, len(chunk_texts)
-    )
+    logger.info("Ingestion complete for '%s': %d chunks stored", body.title, len(chunk_texts))
 
     return IngestResponse(
         video_id=video_id,

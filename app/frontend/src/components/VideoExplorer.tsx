@@ -1,54 +1,61 @@
-import { useEffect, useState, useCallback } from 'react'
-import { getVideos, type Video } from '../lib/api'
+import { useCallback, useEffect, useState } from 'react';
+import { type Video, getVideos } from '../lib/api';
 
 // ── Skeleton card ────────────────────────────────────────────────
 function SkeletonCard() {
   return (
-    <div style={{
-      background: '#1e293b',
-      border: '1px solid rgba(255,255,255,0.06)',
-      borderRadius: 10,
-      padding: '14px 16px',
-    }}>
+    <div
+      style={{
+        background: '#1e293b',
+        border: '1px solid rgba(255,255,255,0.06)',
+        borderRadius: 10,
+        padding: '14px 16px',
+      }}
+    >
       <div className="skeleton" style={{ height: 14, width: '65%', marginBottom: 10 }} />
       <div className="skeleton" style={{ height: 11, width: '90%', marginBottom: 6 }} />
       <div className="skeleton" style={{ height: 11, width: '75%' }} />
     </div>
-  )
+  );
 }
 
 // ── Video card ───────────────────────────────────────────────────
 function VideoCard({ video }: { video: Video }) {
   return (
-    <div style={{
-      background: '#1e293b',
-      border: '1px solid rgba(255,255,255,0.06)',
-      borderRadius: 10,
-      padding: '14px 16px',
-      transition: 'border-color 0.15s',
-    }}
+    <div
+      style={{
+        background: '#1e293b',
+        border: '1px solid rgba(255,255,255,0.06)',
+        borderRadius: 10,
+        padding: '14px 16px',
+        transition: 'border-color 0.15s',
+      }}
       onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'rgba(59,130,246,0.3)')}
       onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)')}
     >
       {/* Title */}
-      <p style={{
-        margin: '0 0 6px',
-        fontSize: 14,
-        fontWeight: 600,
-        color: '#f1f5f9',
-        lineHeight: 1.4,
-      }}>
+      <p
+        style={{
+          margin: '0 0 6px',
+          fontSize: 14,
+          fontWeight: 600,
+          color: '#f1f5f9',
+          lineHeight: 1.4,
+        }}
+      >
         {video.title}
       </p>
 
       {/* Description */}
       {video.description && (
-        <p style={{
-          margin: '0 0 8px',
-          fontSize: 13,
-          color: '#94a3b8',
-          lineHeight: 1.5,
-        }}>
+        <p
+          style={{
+            margin: '0 0 8px',
+            fontSize: 13,
+            color: '#94a3b8',
+            lineHeight: 1.5,
+          }}
+        >
           {video.description.length > 120
             ? video.description.slice(0, 117) + '…'
             : video.description}
@@ -72,7 +79,16 @@ function VideoCard({ video }: { video: Video }) {
           onMouseEnter={(e) => (e.currentTarget.style.textDecoration = 'underline')}
           onMouseLeave={(e) => (e.currentTarget.style.textDecoration = 'none')}
         >
-          <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <svg
+            width="11"
+            height="11"
+            viewBox="0 0 11 11"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <path d="M5,1 H9.5 V5.5" />
             <line x1="9.5" y1="1" x2="2" y2="8.5" />
             <path d="M2,3 H1 V10 H8 V9" />
@@ -81,49 +97,49 @@ function VideoCard({ video }: { video: Video }) {
         </a>
       )}
     </div>
-  )
+  );
 }
 
 // ── Main VideoExplorer panel ──────────────────────────────────────
 interface VideoExplorerProps {
-  isOpen: boolean
-  onClose: () => void
+  isOpen: boolean;
+  onClose: () => void;
 }
 
 export function VideoExplorer({ isOpen, onClose }: VideoExplorerProps) {
-  const [videos, setVideos] = useState<Video[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [videos, setVideos] = useState<Video[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchVideos = useCallback(async () => {
-    setLoading(true)
-    setError(null)
+    setLoading(true);
+    setError(null);
     try {
-      const data = await getVideos()
-      setVideos(data)
+      const data = await getVideos();
+      setVideos(data);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load videos')
+      setError(e instanceof Error ? e.message : 'Failed to load videos');
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }, [])
+  }, []);
 
   // Load videos when panel opens
   useEffect(() => {
     if (isOpen && videos.length === 0 && !loading && !error) {
-      fetchVideos()
+      fetchVideos();
     }
-  }, [isOpen, videos.length, loading, error, fetchVideos])
+  }, [isOpen, videos.length, loading, error, fetchVideos]);
 
   // Close on Escape key
   useEffect(() => {
-    if (!isOpen) return
+    if (!isOpen) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    document.addEventListener('keydown', handler)
-    return () => document.removeEventListener('keydown', handler)
-  }, [isOpen, onClose])
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [isOpen, onClose]);
 
   return (
     <>
@@ -163,14 +179,16 @@ export function VideoExplorer({ isOpen, onClose }: VideoExplorerProps) {
         }}
       >
         {/* Header */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '16px 20px',
-          borderBottom: '1px solid rgba(255,255,255,0.06)',
-          flexShrink: 0,
-        }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '16px 20px',
+            borderBottom: '1px solid rgba(255,255,255,0.06)',
+            flexShrink: 0,
+          }}
+        >
           <div>
             <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: '#f1f5f9' }}>
               Video Library
@@ -197,15 +215,23 @@ export function VideoExplorer({ isOpen, onClose }: VideoExplorerProps) {
               transition: 'color 0.15s, background 0.15s',
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.color = '#f1f5f9'
-              e.currentTarget.style.background = '#1e293b'
+              e.currentTarget.style.color = '#f1f5f9';
+              e.currentTarget.style.background = '#1e293b';
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.color = '#94a3b8'
-              e.currentTarget.style.background = 'transparent'
+              e.currentTarget.style.color = '#94a3b8';
+              e.currentTarget.style.background = 'transparent';
             }}
           >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 14 14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            >
               <line x1="3" y1="3" x2="11" y2="11" />
               <line x1="11" y1="3" x2="3" y2="11" />
             </svg>
@@ -213,7 +239,16 @@ export function VideoExplorer({ isOpen, onClose }: VideoExplorerProps) {
         </div>
 
         {/* Content */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div
+          style={{
+            flex: 1,
+            overflowY: 'auto',
+            padding: '16px 20px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10,
+          }}
+        >
           {loading && (
             <>
               <SkeletonCard />
@@ -224,22 +259,30 @@ export function VideoExplorer({ isOpen, onClose }: VideoExplorerProps) {
           )}
 
           {!loading && error && (
-            <div style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: 12,
-              padding: '32px 0',
-              textAlign: 'center',
-            }}>
-              <svg width="32" height="32" viewBox="0 0 32 32" fill="none" stroke="#ef4444" strokeWidth="1.5" strokeLinecap="round">
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 12,
+                padding: '32px 0',
+                textAlign: 'center',
+              }}
+            >
+              <svg
+                width="32"
+                height="32"
+                viewBox="0 0 32 32"
+                fill="none"
+                stroke="#ef4444"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              >
                 <circle cx="16" cy="16" r="14" />
                 <line x1="16" y1="9" x2="16" y2="17" />
                 <circle cx="16" cy="22" r="1" fill="#ef4444" stroke="none" />
               </svg>
-              <p style={{ margin: 0, color: '#ef4444', fontSize: 14 }}>
-                Failed to load videos
-              </p>
+              <p style={{ margin: 0, color: '#ef4444', fontSize: 14 }}>Failed to load videos</p>
               <p style={{ margin: 0, color: '#475569', fontSize: 13 }}>{error}</p>
               <button
                 onClick={fetchVideos}
@@ -259,21 +302,21 @@ export function VideoExplorer({ isOpen, onClose }: VideoExplorerProps) {
           )}
 
           {!loading && !error && videos.length === 0 && (
-            <div style={{
-              padding: '32px 0',
-              textAlign: 'center',
-              color: '#475569',
-              fontSize: 14,
-            }}>
+            <div
+              style={{
+                padding: '32px 0',
+                textAlign: 'center',
+                color: '#475569',
+                fontSize: 14,
+              }}
+            >
               No videos in the knowledge base yet.
             </div>
           )}
 
-          {!loading && !error && videos.map((video) => (
-            <VideoCard key={video.id} video={video} />
-          ))}
+          {!loading && !error && videos.map((video) => <VideoCard key={video.id} video={video} />)}
         </div>
       </div>
     </>
-  )
+  );
 }

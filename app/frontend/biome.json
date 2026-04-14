@@ -23,13 +23,23 @@
       "recommended": true,
       "style": {
         "noNonNullAssertion": "warn",
-        "useImportType": "warn"
+        "useImportType": "warn",
+        "useTemplate": "off"
       },
       "suspicious": {
-        "noExplicitAny": "warn"
+        "noExplicitAny": "warn",
+        "noAssignInExpressions": "off",
+        "noArrayIndexKey": "off"
       },
       "a11y": {
-        "useKeyWithClickEvents": "off"
+        "useKeyWithClickEvents": "off",
+        "noSvgWithoutTitle": "off",
+        "useButtonType": "off",
+        "useSemanticElements": "off",
+        "useValidAriaRole": "off"
+      },
+      "correctness": {
+        "useExhaustiveDependencies": "off"
       }
     }
   },

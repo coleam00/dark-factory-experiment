@@ -10,20 +10,21 @@ Orchestrates the full RAG pipeline:
   6. Send sources event before [DONE]
   7. Persist assistant message after stream completes
 """
+
 from __future__ import annotations
 
 import json
 import logging
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
 from backend.db import repository
+from backend.llm.openrouter import stream_chat
 from backend.rag.embeddings import embed_text
 from backend.rag.retriever import retrieve
-from backend.llm.openrouter import stream_chat
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,7 @@ class MessageCreate(BaseModel):
 # ---------------------------------------------------------------------------
 # POST /api/conversations/{conv_id}/messages
 # ---------------------------------------------------------------------------
+
 
 @router.post("/conversations/{conv_id}/messages")
 async def create_message(conv_id: str, body: MessageCreate):
@@ -72,10 +74,7 @@ async def create_message(conv_id: str, body: MessageCreate):
 
     # 3. Retrieve conversation history for LLM context
     all_messages = await repository.list_messages(conv_id)
-    llm_messages = [
-        {"role": m["role"], "content": m["content"]}
-        for m in all_messages
-    ]
+    llm_messages = [{"role": m["role"], "content": m["content"]} for m in all_messages]
 
     # 4. Embed the user query and retrieve relevant chunks
     context = ""
@@ -90,11 +89,7 @@ async def create_message(conv_id: str, body: MessageCreate):
 
     # Extract unique source video titles for the SSE sources event
     source_titles: list[str] = list(
-        dict.fromkeys(
-            c.get("video_title", "")
-            for c in chunks
-            if c.get("video_title")
-        )
+        dict.fromkeys(c.get("video_title", "") for c in chunks if c.get("video_title"))
     )
 
     # 5. Stream the response
@@ -134,6 +129,7 @@ async def create_message(conv_id: str, body: MessageCreate):
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _format_context(chunks: list[dict]) -> str:
     """Format retrieved chunks into a context block with video title citations."""
     parts = []
@@ -154,7 +150,7 @@ def _extract_text_from_sse(sse_chunks: list[str]) -> str:
     for chunk in sse_chunks:
         if not chunk.startswith("data: "):
             continue
-        content = chunk[len("data: "):].rstrip("\n")
+        content = chunk[len("data: ") :].rstrip("\n")
         if not content or content == "[DONE]":
             continue
         # Skip JSON error payloads

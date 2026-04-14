@@ -11,15 +11,18 @@ Exposes:
 The FastAPI route wraps this generator in a StreamingResponse with
 media_type="text/event-stream" and Cache-Control: no-cache.
 """
+
 from __future__ import annotations
 
 import json
 import logging
-from typing import AsyncGenerator, List
+from collections.abc import AsyncGenerator
+from typing import cast
 
-from openai import AsyncOpenAI, APIError, APIConnectionError, APIStatusError
+from openai import APIConnectionError, APIError, APIStatusError, AsyncOpenAI
+from openai.types.chat import ChatCompletionMessageParam
 
-from backend.config import OPENROUTER_API_KEY, OPENROUTER_BASE_URL, CHAT_MODEL
+from backend.config import CHAT_MODEL, OPENROUTER_API_KEY, OPENROUTER_BASE_URL
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +66,7 @@ def build_system_prompt(context: str) -> str:
 
 
 async def stream_chat(
-    messages: List[dict],
+    messages: list[dict],
     context: str = "",
 ) -> AsyncGenerator[str, None]:
     """
@@ -86,8 +89,13 @@ async def stream_chat(
     client = _get_async_client()
     system_prompt = build_system_prompt(context)
 
-    # Prepend system message
-    full_messages = [{"role": "system", "content": system_prompt}] + messages
+    # Prepend system message. The openai SDK wants a union of TypedDicts; we
+    # only pass role+content dicts so the shape is fine but mypy can't narrow
+    # a plain `list[dict]` into the TypedDict union — cast explicitly.
+    full_messages: list[ChatCompletionMessageParam] = [
+        {"role": "system", "content": system_prompt},
+        *cast(list[ChatCompletionMessageParam], messages),
+    ]
 
     tokens_yielded = 0
     try:

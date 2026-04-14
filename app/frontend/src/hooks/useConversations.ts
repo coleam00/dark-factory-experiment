@@ -1,26 +1,26 @@
-import { useState, useEffect } from 'react'
-import { getConversations, type Conversation } from '../lib/api'
+import { useEffect, useState } from 'react';
+import { type Conversation, getConversations } from '../lib/api';
 
 export function useConversations() {
-  const [conversations, setConversations] = useState<Conversation[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchConversations = async () => {
     try {
-      setLoading(true)
-      const data = await getConversations()
-      setConversations(data)
+      setLoading(true);
+      const data = await getConversations();
+      setConversations(data);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load conversations')
+      setError(e instanceof Error ? e.message : 'Failed to load conversations');
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   useEffect(() => {
-    fetchConversations()
-  }, [])
+    fetchConversations();
+  }, []);
 
-  return { conversations, loading, error, refetch: fetchConversations }
+  return { conversations, loading, error, refetch: fetchConversations };
 }

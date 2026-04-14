@@ -3,16 +3,18 @@ Docling HybridChunker wrapper.
 Accepts a video dict, builds a DoclingDocument, runs the chunker,
 and returns a list of contextualized text strings ready for embedding.
 """
+
 from __future__ import annotations
 
-from typing import Optional
-
+import tiktoken
 from docling_core.transforms.chunker.hybrid_chunker import HybridChunker
-from docling_core.types.doc.document import DoclingDocument, DocItemLabel
+from docling_core.transforms.chunker.tokenizer.openai import OpenAITokenizer
+from docling_core.types.doc.document import DocItemLabel, DoclingDocument
+
 from backend.config import HYBRID_CHUNKER_MAX_TOKENS
 
 # Conservative character-length proxy for 512 tokens.
-# ~4 chars/token × 512 tokens ≈ 2048; we use 2400 to be safe but still below
+# ~4 chars/token x 512 tokens ~ 2048; we use 2400 to be safe but still below
 # the 2500-char proxy threshold specified in the evaluation criteria.
 _MAX_CHUNK_CHARS = 2400
 
@@ -29,7 +31,7 @@ def chunk_video(video: dict) -> list[str]:
         Returns an empty list if the transcript is empty or None.
         Guarantees at least 2 strings when the transcript has ≥3 paragraphs.
     """
-    transcript: Optional[str] = video.get("transcript")
+    transcript: str | None = video.get("transcript")
     if not transcript:
         return []
 
@@ -41,8 +43,14 @@ def chunk_video(video: dict) -> list[str]:
     # Build a DoclingDocument from the transcript
     doc = _build_docling_document(title, transcript)
 
-    # Run HybridChunker
-    chunker = HybridChunker(max_tokens=HYBRID_CHUNKER_MAX_TOKENS, merge_peers=True)
+    # Run HybridChunker. docling-core 2.x moved max_tokens onto the tokenizer.
+    # cl100k_base is the tokenizer tiktoken uses for text-embedding-3-small,
+    # which matches EMBEDDING_MODEL in backend/config.py.
+    tokenizer = OpenAITokenizer(
+        tokenizer=tiktoken.get_encoding("cl100k_base"),
+        max_tokens=HYBRID_CHUNKER_MAX_TOKENS,
+    )
+    chunker = HybridChunker(tokenizer=tokenizer, merge_peers=True)
 
     raw_results: list[str] = []
     try:

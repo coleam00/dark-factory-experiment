@@ -1,13 +1,13 @@
-import { useState } from 'react'
-import { MarkdownRenderer } from './MarkdownRenderer'
+import { useState } from 'react';
+import { MarkdownRenderer } from './MarkdownRenderer';
 
 interface MessageProps {
-  role: 'user' | 'assistant'
-  content: string
+  role: 'user' | 'assistant';
+  content: string;
   /** When true and content is empty, renders typing indicator */
-  isStreaming?: boolean
+  isStreaming?: boolean;
   /** RAG source video titles to display below the message */
-  sources?: string[]
+  sources?: string[];
 }
 
 // ── Typing indicator (3 pulsing dots) ────────────────────────────
@@ -18,20 +18,20 @@ function TypingIndicator() {
       <div className="typing-dot" />
       <div className="typing-dot" />
     </div>
-  )
+  );
 }
 
 // ── Source citations section ──────────────────────────────────────
 function SourceCitations({ sources }: { sources: string[] }) {
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(false);
 
-  if (!sources || sources.length === 0) return null
+  if (!sources || sources.length === 0) return null;
 
   return (
     <div style={{ marginTop: 10, borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 8 }}>
       {/* Toggle button */}
       <button
-        onClick={() => setExpanded(v => !v)}
+        onClick={() => setExpanded((v) => !v)}
         style={{
           background: 'transparent',
           border: 'none',
@@ -95,13 +95,13 @@ function SourceCitations({ sources }: { sources: string[] }) {
         </div>
       )}
     </div>
-  )
+  );
 }
 
 // ── Main message component ────────────────────────────────────────
 export function Message({ role, content, isStreaming, sources }: MessageProps) {
-  const isUser = role === 'user'
-  const hasSources = !isUser && Array.isArray(sources) && sources.length > 0
+  const isUser = role === 'user';
+  const hasSources = !isUser && Array.isArray(sources) && sources.length > 0;
 
   return (
     <div
@@ -117,9 +117,7 @@ export function Message({ role, content, isStreaming, sources }: MessageProps) {
           maxWidth: isUser ? '70%' : '80%',
           background: isUser ? '#2563eb' : '#1e293b',
           color: '#f1f5f9',
-          borderRadius: isUser
-            ? '18px 18px 4px 18px'
-            : '18px 18px 18px 4px',
+          borderRadius: isUser ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
           padding: '12px 16px',
           lineHeight: 1.7,
           wordBreak: 'break-word',
@@ -137,5 +135,5 @@ export function Message({ role, content, isStreaming, sources }: MessageProps) {
         )}
       </div>
     </div>
-  )
+  );
 }

@@ -7,14 +7,14 @@ Exposes:
 
 Uses model: openai/text-embedding-3-small (dimensionality: 1536)
 """
+
 from __future__ import annotations
 
 import logging
-from typing import List
 
 from openai import OpenAI
 
-from backend.config import OPENROUTER_API_KEY, OPENROUTER_BASE_URL, EMBEDDING_MODEL
+from backend.config import EMBEDDING_MODEL, OPENROUTER_API_KEY, OPENROUTER_BASE_URL
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ def _get_client() -> OpenAI:
 # ---------------------------------------------------------------------------
 
 
-def embed_text(text: str) -> List[float]:
+def embed_text(text: str) -> list[float]:
     """
     Embed a single text string via OpenRouter.
 
@@ -67,15 +67,13 @@ def embed_text(text: str) -> List[float]:
         )
     except Exception as exc:
         logger.error("OpenRouter embeddings API call failed: %s", exc)
-        raise RuntimeError(
-            f"Embeddings API request failed: {exc}"
-        ) from exc
+        raise RuntimeError(f"Embeddings API request failed: {exc}") from exc
 
     embedding = response.data[0].embedding
     return list(embedding)
 
 
-def embed_batch(texts: List[str]) -> List[List[float]]:
+def embed_batch(texts: list[str]) -> list[list[float]]:
     """
     Embed a list of text strings via OpenRouter in a single batched API call.
 
@@ -97,8 +95,7 @@ def embed_batch(texts: List[str]) -> List[List[float]]:
     for i, text in enumerate(texts):
         if not text or not text.strip():
             raise ValueError(
-                f"embed_batch() requires all texts to be non-empty; "
-                f"got empty string at index {i}."
+                f"embed_batch() requires all texts to be non-empty; got empty string at index {i}."
             )
 
     client = _get_client()
@@ -109,9 +106,7 @@ def embed_batch(texts: List[str]) -> List[List[float]]:
         )
     except Exception as exc:
         logger.error("OpenRouter embeddings batch API call failed: %s", exc)
-        raise RuntimeError(
-            f"Embeddings batch API request failed: {exc}"
-        ) from exc
+        raise RuntimeError(f"Embeddings batch API request failed: {exc}") from exc
 
     # The API guarantees results in the same order as inputs
     # but we sort by index just to be safe

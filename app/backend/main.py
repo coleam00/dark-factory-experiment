@@ -2,15 +2,16 @@
 FastAPI application entry point.
 Handles lifespan startup (DB init + seeding) and route registration.
 """
-from contextlib import asynccontextmanager
+
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from backend.db.schema import init_db
 from backend.data.seed import seed_if_empty
+from backend.db.schema import init_db
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -43,7 +44,7 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 # Routes (imported here to keep main.py clean)
 # ---------------------------------------------------------------------------
-from backend.routes import conversations, messages, ingest  # noqa: E402
+from backend.routes import conversations, ingest, messages  # noqa: E402
 
 app.include_router(conversations.router, prefix="/api")
 app.include_router(messages.router, prefix="/api")
@@ -61,6 +62,7 @@ async def health():
     video_count = await repository.count_videos()
     chunk_count = await repository.count_chunks()
     from backend.config import DB_PATH
+
     return {
         "status": "ok",
         "video_count": video_count,
@@ -72,6 +74,7 @@ async def health():
 # ---------------------------------------------------------------------------
 # Sprint 2 SSE test route — verifies streaming format without full RAG
 # ---------------------------------------------------------------------------
+
 
 @app.post("/api/stream-test")
 async def stream_test():

@@ -2,10 +2,10 @@
 Database schema definitions and migration utilities.
 Creates all four tables: videos, chunks, conversations, messages.
 """
-import aiosqlite
-from pathlib import Path
-from backend.config import DB_PATH
 
+import aiosqlite
+
+from backend.config import DB_PATH
 
 CREATE_VIDEOS_TABLE = """
 CREATE TABLE IF NOT EXISTS videos (

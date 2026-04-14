@@ -1,70 +1,73 @@
-import { forwardRef, useImperativeHandle, useRef, useCallback, useState } from 'react'
+import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from 'react';
 
 export interface ChatInputHandle {
   /** Restore text to the input (e.g. after a failed send) and focus */
-  setInputText: (text: string) => void
-  focus: () => void
+  setInputText: (text: string) => void;
+  focus: () => void;
 }
 
 interface ChatInputProps {
-  onSend: (content: string) => void
-  isStreaming?: boolean
-  disabled?: boolean
+  onSend: (content: string) => void;
+  isStreaming?: boolean;
+  disabled?: boolean;
 }
 
 export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
   ({ onSend, isStreaming = false, disabled = false }, ref) => {
-    const textareaRef = useRef<HTMLTextAreaElement>(null)
-    const [focused, setFocused] = useState(false)
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const [focused, setFocused] = useState(false);
 
-    const isDisabled = disabled || isStreaming
+    const isDisabled = disabled || isStreaming;
 
     // ── Auto-resize ─────────────────────────────────────────────────
     const adjustHeight = useCallback(() => {
-      const el = textareaRef.current
-      if (!el) return
-      el.style.height = 'auto'
-      const maxH = 144 // ~6 lines × 24px
-      el.style.height = `${Math.min(el.scrollHeight, maxH)}px`
-      el.style.overflowY = el.scrollHeight > maxH ? 'auto' : 'hidden'
-    }, [])
+      const el = textareaRef.current;
+      if (!el) return;
+      el.style.height = 'auto';
+      const maxH = 144; // ~6 lines × 24px
+      el.style.height = `${Math.min(el.scrollHeight, maxH)}px`;
+      el.style.overflowY = el.scrollHeight > maxH ? 'auto' : 'hidden';
+    }, []);
 
     // ── Expose imperative handle ────────────────────────────────────
     useImperativeHandle(ref, () => ({
       setInputText: (text: string) => {
-        const el = textareaRef.current
-        if (!el) return
-        el.value = text
+        const el = textareaRef.current;
+        if (!el) return;
+        el.value = text;
         // Trigger resize after setting value
-        setTimeout(adjustHeight, 0)
-        el.focus()
+        setTimeout(adjustHeight, 0);
+        el.focus();
       },
       focus: () => textareaRef.current?.focus(),
-    }))
+    }));
 
     // ── Send ─────────────────────────────────────────────────────────
     const handleSend = useCallback(() => {
-      const el = textareaRef.current
-      if (!el) return
-      const content = el.value.trim()
-      if (!content || isDisabled) return
+      const el = textareaRef.current;
+      if (!el) return;
+      const content = el.value.trim();
+      if (!content || isDisabled) return;
 
-      onSend(content)
+      onSend(content);
 
       // Reset textarea
-      el.value = ''
-      el.style.height = 'auto'
-      el.style.overflowY = 'hidden'
-    }, [onSend, isDisabled])
+      el.value = '';
+      el.style.height = 'auto';
+      el.style.overflowY = 'hidden';
+    }, [onSend, isDisabled]);
 
     // ── Keyboard ─────────────────────────────────────────────────────
-    const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault()
-        handleSend()
-      }
-      // Shift+Enter: default textarea behavior (inserts newline)
-    }, [handleSend])
+    const handleKeyDown = useCallback(
+      (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          handleSend();
+        }
+        // Shift+Enter: default textarea behavior (inserts newline)
+      },
+      [handleSend],
+    );
 
     return (
       <div
@@ -84,7 +87,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
         {/* ── Textarea ── */}
         <textarea
           ref={textareaRef}
-          placeholder={isStreaming ? 'Waiting for response…' : 'Ask anything about the video library…'}
+          placeholder={
+            isStreaming ? 'Waiting for response…' : 'Ask anything about the video library…'
+          }
           disabled={isDisabled}
           onInput={adjustHeight}
           onKeyDown={handleKeyDown}
@@ -128,25 +133,45 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
             width: 34,
             transition: 'background 0.15s, color 0.15s',
           }}
-          onMouseEnter={(e) => { if (!isDisabled) e.currentTarget.style.background = '#1d4ed8' }}
-          onMouseLeave={(e) => { if (!isDisabled) e.currentTarget.style.background = isDisabled ? '#1e293b' : '#3b82f6' }}
+          onMouseEnter={(e) => {
+            if (!isDisabled) e.currentTarget.style.background = '#1d4ed8';
+          }}
+          onMouseLeave={(e) => {
+            if (!isDisabled) e.currentTarget.style.background = isDisabled ? '#1e293b' : '#3b82f6';
+          }}
         >
           {isStreaming ? (
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <circle cx="8" cy="8" r="5" fill="none" stroke="currentColor" strokeWidth="2"
-                strokeDasharray="14 6" style={{ animation: 'spin 1s linear infinite', transformOrigin: '8px 8px' }} />
+              <circle
+                cx="8"
+                cy="8"
+                r="5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeDasharray="14 6"
+                style={{ animation: 'spin 1s linear infinite', transformOrigin: '8px 8px' }}
+              />
             </svg>
           ) : (
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor"
-              strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
               <line x1="8" y1="14" x2="8" y2="3" />
               <polyline points="3,8 8,3 13,8" />
             </svg>
           )}
         </button>
       </div>
-    )
-  }
-)
+    );
+  },
+);
 
-ChatInput.displayName = 'ChatInput'
+ChatInput.displayName = 'ChatInput';
