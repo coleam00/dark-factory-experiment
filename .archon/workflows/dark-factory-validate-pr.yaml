@@ -1,0 +1,905 @@
+name: dark-factory-validate-pr
+description: |
+  Use when: Dark Factory orchestrator wants to validate a PR labeled `factory:needs-review`
+            against its linked issue, run static + unit + E2E (agent-browser) checks under
+            the holdout pattern, optionally self-fix issues in a fresh-context session,
+            re-validate, and render a final verdict.
+  Triggers: Orchestrator dispatch for `factory:needs-review`, or manual "validate PR #N".
+  Does: Fetches PR + linked issue + base-branch governance -> starts the app on dynamic
+        ports -> runs static checks + unit tests + four parallel HOLDOUT reviewers
+        (behavioral, agent-browser E2E, security, code review) -> synthesizes a verdict.
+        If request_changes, runs a fresh-context fix pass, then a second full validation
+        pass (all reviewers re-run on the updated diff). Always tears down the app,
+        then applies the final verdict (approve / request_changes / reject).
+  NOT for: Triage (dark-factory-triage), initial implementation (dark-factory-fix-github-issue),
+           weekly full-suite E2E (dark-factory-comprehensive-test).
+
+  Combines what used to be two workflows (validate-pr + fix-pr) into one state machine,
+  so fix and re-validate happen in the same orchestrator dispatch with different
+  fresh-context sessions. This is the user-requested "validate it AND fix it in one
+  workflow" shape.
+
+  ═══════════════════════════════════════════════════════════════════════════
+  HOLDOUT PRINCIPLE — the core design constraint
+  ═══════════════════════════════════════════════════════════════════════════
+
+  The validator must NEVER see implementation artifacts or coder rationale. It
+  tests the OUTCOME (diff + running app + tests) against the CONTRACT (issue body
+  + base-branch governance). This is the StrongDM holdout pattern — the single
+  most important defense against AI coding agents gaming their own quality
+  signal.
+
+  How the holdout is enforced in this workflow (six overlapping layers):
+
+  1. Cross-workflow isolation — runs as a separate Archon workflow with its own
+     $ARTIFACTS_DIR and worktree. Never references sibling-workflow state.
+
+  2. Holdout-safe fetches — gh pr view excludes `comments`/`reviews`; gh issue
+     view fetches only title/body/labels. No coder chatter reaches the reviewers.
+
+  3. Poison immunity — FACTORY_RULES.md, MISSION.md, CLAUDE.md are fetched from
+     `origin/main` BEFORE `gh pr checkout`. A PR cannot weaken its own rulebook.
+     Any diff touching governance files is an automatic REJECT.
+
+  4. Fresh context + empty tool lists on every AI reviewer node. The behavioral
+     static reviewer has `allowed_tools: []`. The E2E reviewer has `[Bash]` (only
+     to drive agent-browser) and is explicitly forbidden from reading source.
+
+  5. Command-file explicit prohibitions — every AI node loads a .md command file
+     whose leading section enumerates what must not be read (plans, commit
+     messages, coder rationale, prior comments, sibling-workflow files).
+
+  6. Fix/validate session isolation — the fix phase (Phase 6) runs in a fresh
+     context. When Phase 7's validators re-run, they ALSO run in fresh contexts.
+     The fixer's reasoning never leaks into the second validation pass — pass-2
+     reviewers see only the updated diff and the running app.
+
+  Prerequisite: `agent-browser` must be installed and available on PATH. On the
+  dark-factory VPS this is installed globally. Locally, `npm i -g agent-browser`
+  then `agent-browser install` to fetch Chrome for Testing. See the
+  `.claude/skills/agent-browser/SKILL.md` skill for CLI reference.
+
+provider: claude
+model: sonnet
+
+nodes:
+  # ═══════════════════════════════════════════════════════════════
+  # PHASE 1: EXTRACT + HOLDOUT-SAFE CONTEXT FETCH
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: extract-pr-number
+    command: dark-factory-extract-pr-number
+    model: haiku
+    allowed_tools: [Bash]
+
+  - id: fetch-pr
+    bash: |
+      set -euo pipefail
+      PR_NUMBER=$(echo "$extract-pr-number.output" | tr -d "'\"\`\n " | grep -oE '[0-9]+' | head -1)
+      if [ -z "$PR_NUMBER" ]; then
+        echo "ERROR: Failed to extract PR number from: $extract-pr-number.output" >&2
+        exit 1
+      fi
+      echo "$PR_NUMBER" > "$ARTIFACTS_DIR/.pr-number"
+      # HOLDOUT: fetch only fields the validator needs.
+      # NO comments, NO reviews, NO commit messages.
+      gh pr view "$PR_NUMBER" --json number,title,body,url,headRefName,baseRefName,additions,deletions,changedFiles,state,author,labels
+    depends_on: [extract-pr-number]
+    timeout: 20000
+
+  - id: fetch-diff
+    bash: |
+      set -euo pipefail
+      PR_NUMBER=$(cat "$ARTIFACTS_DIR/.pr-number")
+      # Cap at 3000 lines — FACTORY_RULES.md §3 already caps PRs at 500 lines
+      # changed; the 3000-line cap here is a defense against accidental huge diffs.
+      gh pr diff "$PR_NUMBER" | head -3000
+    depends_on: [fetch-pr]
+    timeout: 20000
+
+  - id: fetch-linked-issue
+    bash: |
+      set -euo pipefail
+      PR_NUMBER=$(cat "$ARTIFACTS_DIR/.pr-number")
+      ISSUE_NUM=$(gh pr view "$PR_NUMBER" --json body -q '.body' \
+        | grep -oiE '(fixes|closes|resolves) #[0-9]+' \
+        | grep -oE '[0-9]+' | head -1)
+      if [ -n "$ISSUE_NUM" ]; then
+        # HOLDOUT: title + body + labels only. NO comments.
+        gh issue view "$ISSUE_NUM" --json number,title,body,labels,state,url
+      else
+        echo '{"error": "No linked issue found in PR body. Factory PRs must link via Fixes/Closes/Resolves per FACTORY_RULES.md."}'
+      fi
+    depends_on: [fetch-pr]
+    timeout: 20000
+
+  - id: fetch-base-governance
+    bash: |
+      set -euo pipefail
+      # POISON IMMUNITY: read governance files from origin/main, NOT from the PR.
+      git fetch origin main --quiet 2>/dev/null || true
+      BASE_REF="origin/main"
+      echo "=== FACTORY_RULES.md (from $BASE_REF) ==="
+      git show "$BASE_REF:FACTORY_RULES.md" 2>/dev/null || echo "(FACTORY_RULES.md not present on base branch)"
+      echo ""
+      echo "=== MISSION.md (from $BASE_REF) ==="
+      git show "$BASE_REF:MISSION.md" 2>/dev/null || echo "(MISSION.md not present on base branch)"
+      echo ""
+      echo "=== CLAUDE.md (from $BASE_REF) ==="
+      git show "$BASE_REF:CLAUDE.md" 2>/dev/null || echo "(CLAUDE.md not present on base branch)"
+    timeout: 15000
+
+  # Tripwire: fail loudly if fix-workflow artifacts ever leak into $ARTIFACTS_DIR.
+  # Should be impossible under normal Archon isolation.
+  - id: verify-holdout-clean
+    bash: |
+      set -euo pipefail
+      FORBIDDEN_ARTIFACTS=(plan.md investigation.md implementation.md validation.md fix-notes.md)
+      LEAKED=()
+      for f in "${FORBIDDEN_ARTIFACTS[@]}"; do
+        if [ -e "$ARTIFACTS_DIR/$f" ]; then LEAKED+=("$f"); fi
+      done
+      if [ ${#LEAKED[@]} -gt 0 ]; then
+        echo "HOLDOUT VIOLATION: \$ARTIFACTS_DIR contains leaked fix-workflow artifacts: ${LEAKED[*]}" >&2
+        echo "This should be impossible under normal Archon isolation. Aborting validation." >&2
+        exit 1
+      fi
+      echo "HOLDOUT_CLEAN: no fix-workflow artifacts in \$ARTIFACTS_DIR"
+    timeout: 5000
+
+  - id: checkout-pr
+    bash: |
+      set -euo pipefail
+      PR_NUMBER=$(cat "$ARTIFACTS_DIR/.pr-number")
+      gh pr checkout "$PR_NUMBER"
+      echo "Checked out PR #$PR_NUMBER on branch $(git branch --show-current)"
+    depends_on: [fetch-pr, verify-holdout-clean, fetch-base-governance]
+    timeout: 30000
+
+  # ═══════════════════════════════════════════════════════════════
+  # PHASE 2: INSTALL DEPS + START THE APP FOR E2E
+  # ═══════════════════════════════════════════════════════════════
+  # We need the app running before the E2E reviewer can drive it.
+  # Dynamic port allocation so parallel workflow runs don't collide.
+
+  - id: allocate-ports
+    bash: |
+      set -euo pipefail
+      # Find a free port in a given range by trying to bind it.
+      find_free_port() {
+        local start=$1
+        local end=$2
+        for port in $(seq $start $end); do
+          if ! (echo >/dev/tcp/127.0.0.1/$port) 2>/dev/null; then
+            echo $port
+            return 0
+          fi
+        done
+        echo "ERROR: no free port in range $start-$end" >&2
+        return 1
+      }
+      BACKEND_PORT=$(find_free_port 18000 18999)
+      FRONTEND_PORT=$(find_free_port 15100 15999)
+      echo "$BACKEND_PORT"  > "$ARTIFACTS_DIR/.backend-port"
+      echo "$FRONTEND_PORT" > "$ARTIFACTS_DIR/.frontend-port"
+      echo "Allocated backend=$BACKEND_PORT frontend=$FRONTEND_PORT"
+    depends_on: [checkout-pr]
+    timeout: 10000
+
+  - id: install-deps
+    bash: |
+      set -euo pipefail
+      echo "=== Backend deps (uv sync) ==="
+      (cd app/backend && uv sync --all-extras 2>&1 | tail -10)
+      echo ""
+      echo "=== Frontend deps (bun install) ==="
+      (cd app/frontend && bun install 2>&1 | tail -10)
+    depends_on: [checkout-pr]
+    idle_timeout: 300000
+
+  - id: start-app
+    bash: |
+      set -euo pipefail
+      # Normal path: ports come from the find-free-ports node via artifacts.
+      # Demo/manual path: if the port files are missing (e.g. someone ran this
+      # node in isolation), fall back to sensible defaults and write them so
+      # downstream nodes that read the files still work.
+      if [ -f "$ARTIFACTS_DIR/.backend-port" ]; then
+        BACKEND_PORT=$(cat "$ARTIFACTS_DIR/.backend-port")
+      else
+        BACKEND_PORT=18000
+        echo "$BACKEND_PORT" > "$ARTIFACTS_DIR/.backend-port"
+        echo "WARN: .backend-port missing, defaulting to $BACKEND_PORT" >&2
+      fi
+      if [ -f "$ARTIFACTS_DIR/.frontend-port" ]; then
+        FRONTEND_PORT=$(cat "$ARTIFACTS_DIR/.frontend-port")
+      else
+        FRONTEND_PORT=15100
+        echo "$FRONTEND_PORT" > "$ARTIFACTS_DIR/.frontend-port"
+        echo "WARN: .frontend-port missing, defaulting to $FRONTEND_PORT" >&2
+      fi
+
+      mkdir -p "$ARTIFACTS_DIR/app-logs"
+
+      # Backend: uvicorn on dynamic port, logs to artifacts
+      (
+        cd app
+        nohup uv --project backend run uvicorn backend.main:app \
+          --host 127.0.0.1 --port "$BACKEND_PORT" \
+          > "$ARTIFACTS_DIR/app-logs/backend.log" 2>&1 &
+        echo $! > "$ARTIFACTS_DIR/.backend-pid"
+      )
+
+      # Frontend: vite dev server on dynamic port.
+      # We use --port and --strictPort to force the assigned port.
+      # API_BASE env var is set so the frontend calls the right backend
+      # (bypassing the known-broken vite proxy — see CLAUDE.md footguns).
+      (
+        cd app/frontend
+        VITE_API_BASE="http://127.0.0.1:$BACKEND_PORT" \
+        nohup bun run dev -- --host 127.0.0.1 --port "$FRONTEND_PORT" --strictPort \
+          > "$ARTIFACTS_DIR/app-logs/frontend.log" 2>&1 &
+        echo $! > "$ARTIFACTS_DIR/.frontend-pid"
+      )
+
+      # Wait for both to be healthy
+      echo "Waiting for backend on :$BACKEND_PORT ..."
+      for i in $(seq 1 60); do
+        if curl -sf "http://127.0.0.1:$BACKEND_PORT/health" > /dev/null 2>&1; then
+          echo "backend up after ${i}s"; break
+        fi
+        if [ $i -eq 60 ]; then
+          echo "ERROR: backend failed to start in 60s" >&2
+          tail -50 "$ARTIFACTS_DIR/app-logs/backend.log" >&2
+          exit 1
+        fi
+        sleep 1
+      done
+
+      echo "Waiting for frontend on :$FRONTEND_PORT ..."
+      for i in $(seq 1 60); do
+        if curl -sf "http://127.0.0.1:$FRONTEND_PORT" > /dev/null 2>&1; then
+          echo "frontend up after ${i}s"; break
+        fi
+        if [ $i -eq 60 ]; then
+          echo "ERROR: frontend failed to start in 60s" >&2
+          tail -50 "$ARTIFACTS_DIR/app-logs/frontend.log" >&2
+          exit 1
+        fi
+        sleep 1
+      done
+
+      echo "APP_STARTED backend=$BACKEND_PORT frontend=$FRONTEND_PORT"
+    depends_on: [install-deps, allocate-ports]
+    idle_timeout: 180000
+
+  # ═══════════════════════════════════════════════════════════════
+  # PHASE 3: PASS-1 STATIC CHECKS + UNIT TESTS (deterministic, parallel)
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: static-checks-backend-p1
+    bash: |
+      set +e
+      cd app/backend
+      echo "=== ruff check ==="
+      uv run ruff check . 2>&1 | tail -30
+      RUFF_LINT=$?
+      echo ""
+      echo "=== ruff format --check ==="
+      uv run ruff format --check . 2>&1 | tail -30
+      RUFF_FMT=$?
+      echo ""
+      echo "=== mypy ==="
+      uv run mypy . 2>&1 | tail -30
+      MYPY=$?
+      echo ""
+      echo "RESULT: ruff-lint=$([ $RUFF_LINT -eq 0 ] && echo PASS || echo FAIL) ruff-fmt=$([ $RUFF_FMT -eq 0 ] && echo PASS || echo FAIL) mypy=$([ $MYPY -eq 0 ] && echo PASS || echo FAIL)"
+      [ $RUFF_LINT -eq 0 ] && [ $RUFF_FMT -eq 0 ] && [ $MYPY -eq 0 ]
+    depends_on: [install-deps]
+    idle_timeout: 180000
+
+  - id: static-checks-frontend-p1
+    bash: |
+      set +e
+      cd app/frontend
+      echo "=== tsc --noEmit ==="
+      bun run tsc --noEmit 2>&1 | tail -40
+      TSC=$?
+      echo ""
+      echo "=== biome check ==="
+      bun x biome check src 2>&1 | tail -30
+      BIOME=$?
+      echo ""
+      echo "RESULT: tsc=$([ $TSC -eq 0 ] && echo PASS || echo FAIL) biome=$([ $BIOME -eq 0 ] && echo PASS || echo FAIL)"
+      [ $TSC -eq 0 ] && [ $BIOME -eq 0 ]
+    depends_on: [install-deps]
+    idle_timeout: 180000
+
+  - id: run-tests-backend-p1
+    bash: |
+      set +e
+      cd app/backend
+      if [ ! -d "tests" ]; then
+        echo "TEST_RESULT_BACKEND=SKIPPED (no backend/tests directory)"
+        exit 0
+      fi
+      uv run pytest tests -xvs 2>&1 | tail -80
+      echo ""
+      echo "TEST_RESULT_BACKEND=$([ $? -eq 0 ] && echo PASS || echo FAIL)"
+    depends_on: [install-deps]
+    idle_timeout: 300000
+
+  - id: run-tests-frontend-p1
+    bash: |
+      set +e
+      cd app/frontend
+      if ! grep -q '"test"' package.json 2>/dev/null; then
+        echo "TEST_RESULT_FRONTEND=SKIPPED (no test script in package.json)"
+        exit 0
+      fi
+      bun run test 2>&1 | tail -60
+      echo ""
+      echo "TEST_RESULT_FRONTEND=$([ $? -eq 0 ] && echo PASS || echo FAIL)"
+    depends_on: [install-deps]
+    idle_timeout: 300000
+
+  # ═══════════════════════════════════════════════════════════════
+  # PHASE 4: PASS-1 HOLDOUT REVIEWERS (parallel, fresh context)
+  # ═══════════════════════════════════════════════════════════════
+
+  # Static behavioral: reads issue + PR metadata + diff. No filesystem, no tools.
+  - id: behavioral-validation-p1
+    command: dark-factory-behavioral-validation
+    depends_on: [fetch-pr, fetch-diff, fetch-linked-issue]
+    context: fresh
+    allowed_tools: []
+    output_format:
+      type: object
+      properties:
+        solves_issue: { type: string, enum: ["yes", "partially", "no"] }
+        asks_identified: { type: array, items: { type: string } }
+        asks_addressed:  { type: array, items: { type: string } }
+        asks_missed:     { type: array, items: { type: string } }
+        regressions_detected: { type: array, items: { type: string } }
+        scope_appropriate: { type: string, enum: ["yes", "too_narrow", "too_broad"] }
+        unrequested_changes: { type: array, items: { type: string } }
+        confidence: { type: string, enum: ["high", "medium", "low"] }
+        reasoning: { type: string }
+      required:
+        - solves_issue
+        - asks_identified
+        - asks_addressed
+        - asks_missed
+        - regressions_detected
+        - scope_appropriate
+        - unrequested_changes
+        - confidence
+        - reasoning
+
+  # E2E behavioral: drives the running app via agent-browser.
+  # This is the "real-world holdout" — observable behavior, not source inspection.
+  - id: behavioral-e2e-p1
+    command: dark-factory-behavioral-e2e
+    depends_on: [fetch-pr, fetch-linked-issue, start-app]
+    context: fresh
+    allowed_tools: [Bash]
+    skills: [agent-browser]
+    output_format:
+      type: object
+      properties:
+        solves_issue: { type: string, enum: ["yes", "partially", "no", "not_e2e_testable"] }
+        app_booted: { type: boolean }
+        flows_tested: { type: array, items: { type: string } }
+        criteria_results:
+          type: array
+          items:
+            type: object
+            properties:
+              criterion: { type: string }
+              result: { type: string, enum: ["pass", "fail", "skip"] }
+              evidence: { type: string }
+            required: [criterion, result, evidence]
+        regressions_observed: { type: array, items: { type: string } }
+        evidence_captured: { type: array, items: { type: string } }
+        confidence: { type: string, enum: ["high", "medium", "low"] }
+        reasoning: { type: string }
+      required:
+        - solves_issue
+        - app_booted
+        - flows_tested
+        - criteria_results
+        - regressions_observed
+        - evidence_captured
+        - confidence
+        - reasoning
+
+  - id: security-check-p1
+    command: dark-factory-security-check
+    depends_on: [fetch-diff, fetch-base-governance]
+    context: fresh
+    allowed_tools: []
+    output_format:
+      type: object
+      properties:
+        security_issues:
+          type: array
+          items:
+            type: object
+            properties:
+              severity: { type: string, enum: ["critical", "high", "medium", "low"] }
+              category: { type: string, enum: ["secret", "injection", "dependency", "permission", "governance", "data_exposure"] }
+              description: { type: string }
+              file: { type: string }
+              line: { type: string }
+            required: [severity, category, description, file]
+        governance_files_modified: { type: boolean }
+        protected_files_touched: { type: array, items: { type: string } }
+        new_dependencies: { type: array, items: { type: string } }
+        new_dependencies_justified: { type: boolean }
+        verdict: { type: string, enum: ["pass", "fail"] }
+        reasoning: { type: string }
+      required:
+        - security_issues
+        - governance_files_modified
+        - protected_files_touched
+        - new_dependencies
+        - new_dependencies_justified
+        - verdict
+        - reasoning
+
+  - id: code-review-p1
+    command: archon-code-review-agent
+    depends_on: [checkout-pr]
+    context: fresh
+
+  # ═══════════════════════════════════════════════════════════════
+  # PHASE 5: SYNTHESIZE PASS-1 VERDICT
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: synthesize-verdict-pass-1
+    command: dark-factory-synthesize-verdict
+    depends_on:
+      - static-checks-backend-p1
+      - static-checks-frontend-p1
+      - run-tests-backend-p1
+      - run-tests-frontend-p1
+      - behavioral-validation-p1
+      - behavioral-e2e-p1
+      - security-check-p1
+      - code-review-p1
+      - fetch-base-governance
+    trigger_rule: all_done
+    context: fresh
+    allowed_tools: []
+    output_format:
+      type: object
+      properties:
+        verdict: { type: string, enum: ["approve", "request_changes", "reject"] }
+        summary: { type: string }
+        static_checks_status: { type: string, enum: ["pass", "fail"] }
+        tests_status: { type: string, enum: ["pass", "fail", "skipped"] }
+        behavioral_status: { type: string, enum: ["yes", "partially", "no"] }
+        e2e_status: { type: string, enum: ["yes", "partially", "no", "not_e2e_testable"] }
+        security_status: { type: string, enum: ["pass", "fail"] }
+        issues_to_fix:
+          type: array
+          items:
+            type: object
+            properties:
+              category: { type: string, enum: ["behavioral", "test_failure", "static_check", "code_quality", "security", "scope", "e2e"] }
+              severity: { type: string, enum: ["critical", "high", "medium", "low"] }
+              description: { type: string }
+              file: { type: string }
+            required: [category, severity, description]
+        should_escalate: { type: boolean }
+        escalation_reason: { type: string }
+        reasoning: { type: string }
+      required:
+        - verdict
+        - summary
+        - static_checks_status
+        - tests_status
+        - behavioral_status
+        - e2e_status
+        - security_status
+        - issues_to_fix
+        - should_escalate
+        - reasoning
+
+  # ═══════════════════════════════════════════════════════════════
+  # PHASE 6: FIX (conditional — runs only when pass-1 says request_changes)
+  # ═══════════════════════════════════════════════════════════════
+  # Fresh context. The fixer sees synthesize-verdict-pass-1's issues_to_fix
+  # and nothing else from prior phases. It reads current source (it has to),
+  # applies minimal targeted fixes, runs local validation, commits, and pushes.
+  #
+  # The fixer's reasoning does NOT leak into Phase 7 reviewers because those
+  # nodes also run with context: fresh — they see only the updated diff and
+  # the running app, not the fixer's output beyond its commit message.
+
+  - id: fix-issues
+    command: dark-factory-fix-pr-issues
+    depends_on: [synthesize-verdict-pass-1]
+    when: "$synthesize-verdict-pass-1.output.verdict == 'request_changes'"
+    context: fresh
+    # The fixer needs full tool access — it's the implementer for this phase.
+
+  # ═══════════════════════════════════════════════════════════════
+  # PHASE 7: PASS-2 VALIDATION (conditional — runs only if fix-issues ran)
+  # ═══════════════════════════════════════════════════════════════
+  # Re-runs ALL reviewers on the updated diff. Each one with fresh context —
+  # they don't know a fix happened, they only see the code as it now stands
+  # and the app as it now runs (uvicorn --reload and vite HMR picked up the
+  # fixer's changes without us having to restart the app).
+
+  - id: fetch-diff-p2
+    bash: |
+      set -euo pipefail
+      PR_NUMBER=$(cat "$ARTIFACTS_DIR/.pr-number")
+      # Pull the latest — the fixer just pushed.
+      git fetch origin "refs/pull/$PR_NUMBER/head" --quiet 2>/dev/null || true
+      git pull --ff-only 2>/dev/null || true
+      gh pr diff "$PR_NUMBER" | head -3000
+    depends_on: [fix-issues]
+    timeout: 30000
+
+  - id: static-checks-backend-p2
+    bash: |
+      set +e
+      cd app/backend
+      echo "=== ruff check ==="
+      uv run ruff check . 2>&1 | tail -30; RUFF_LINT=$?
+      echo ""
+      echo "=== ruff format --check ==="
+      uv run ruff format --check . 2>&1 | tail -30; RUFF_FMT=$?
+      echo ""
+      echo "=== mypy ==="
+      uv run mypy . 2>&1 | tail -30; MYPY=$?
+      echo ""
+      echo "RESULT: ruff-lint=$([ $RUFF_LINT -eq 0 ] && echo PASS || echo FAIL) ruff-fmt=$([ $RUFF_FMT -eq 0 ] && echo PASS || echo FAIL) mypy=$([ $MYPY -eq 0 ] && echo PASS || echo FAIL)"
+      [ $RUFF_LINT -eq 0 ] && [ $RUFF_FMT -eq 0 ] && [ $MYPY -eq 0 ]
+    depends_on: [fix-issues]
+    idle_timeout: 180000
+
+  - id: static-checks-frontend-p2
+    bash: |
+      set +e
+      cd app/frontend
+      echo "=== tsc --noEmit ==="
+      bun run tsc --noEmit 2>&1 | tail -40; TSC=$?
+      echo ""
+      echo "=== biome check ==="
+      bun x biome check src 2>&1 | tail -30; BIOME=$?
+      echo ""
+      echo "RESULT: tsc=$([ $TSC -eq 0 ] && echo PASS || echo FAIL) biome=$([ $BIOME -eq 0 ] && echo PASS || echo FAIL)"
+      [ $TSC -eq 0 ] && [ $BIOME -eq 0 ]
+    depends_on: [fix-issues]
+    idle_timeout: 180000
+
+  - id: run-tests-backend-p2
+    bash: |
+      set +e
+      cd app/backend
+      if [ ! -d "tests" ]; then
+        echo "TEST_RESULT_BACKEND=SKIPPED"; exit 0
+      fi
+      uv run pytest tests -xvs 2>&1 | tail -80
+      echo ""
+      echo "TEST_RESULT_BACKEND=$([ $? -eq 0 ] && echo PASS || echo FAIL)"
+    depends_on: [fix-issues]
+    idle_timeout: 300000
+
+  - id: run-tests-frontend-p2
+    bash: |
+      set +e
+      cd app/frontend
+      if ! grep -q '"test"' package.json 2>/dev/null; then
+        echo "TEST_RESULT_FRONTEND=SKIPPED"; exit 0
+      fi
+      bun run test 2>&1 | tail -60
+      echo ""
+      echo "TEST_RESULT_FRONTEND=$([ $? -eq 0 ] && echo PASS || echo FAIL)"
+    depends_on: [fix-issues]
+    idle_timeout: 300000
+
+  - id: behavioral-validation-p2
+    command: dark-factory-behavioral-validation-p2
+    depends_on: [fix-issues, fetch-diff-p2, fetch-pr, fetch-linked-issue]
+    context: fresh
+    allowed_tools: []
+    output_format:
+      type: object
+      properties:
+        solves_issue: { type: string, enum: ["yes", "partially", "no"] }
+        asks_identified: { type: array, items: { type: string } }
+        asks_addressed:  { type: array, items: { type: string } }
+        asks_missed:     { type: array, items: { type: string } }
+        regressions_detected: { type: array, items: { type: string } }
+        scope_appropriate: { type: string, enum: ["yes", "too_narrow", "too_broad"] }
+        unrequested_changes: { type: array, items: { type: string } }
+        confidence: { type: string, enum: ["high", "medium", "low"] }
+        reasoning: { type: string }
+      required:
+        - solves_issue
+        - asks_identified
+        - asks_addressed
+        - asks_missed
+        - regressions_detected
+        - scope_appropriate
+        - unrequested_changes
+        - confidence
+        - reasoning
+
+  - id: behavioral-e2e-p2
+    command: dark-factory-behavioral-e2e
+    depends_on: [fix-issues, fetch-pr, fetch-linked-issue, start-app]
+    context: fresh
+    allowed_tools: [Bash]
+    skills: [agent-browser]
+    output_format:
+      type: object
+      properties:
+        solves_issue: { type: string, enum: ["yes", "partially", "no", "not_e2e_testable"] }
+        app_booted: { type: boolean }
+        flows_tested: { type: array, items: { type: string } }
+        criteria_results:
+          type: array
+          items:
+            type: object
+            properties:
+              criterion: { type: string }
+              result: { type: string, enum: ["pass", "fail", "skip"] }
+              evidence: { type: string }
+            required: [criterion, result, evidence]
+        regressions_observed: { type: array, items: { type: string } }
+        evidence_captured: { type: array, items: { type: string } }
+        confidence: { type: string, enum: ["high", "medium", "low"] }
+        reasoning: { type: string }
+      required:
+        - solves_issue
+        - app_booted
+        - flows_tested
+        - criteria_results
+        - regressions_observed
+        - evidence_captured
+        - confidence
+        - reasoning
+
+  - id: security-check-p2
+    command: dark-factory-security-check-p2
+    depends_on: [fix-issues, fetch-diff-p2, fetch-base-governance]
+    context: fresh
+    allowed_tools: []
+    output_format:
+      type: object
+      properties:
+        security_issues:
+          type: array
+          items:
+            type: object
+            properties:
+              severity: { type: string, enum: ["critical", "high", "medium", "low"] }
+              category: { type: string, enum: ["secret", "injection", "dependency", "permission", "governance", "data_exposure"] }
+              description: { type: string }
+              file: { type: string }
+              line: { type: string }
+            required: [severity, category, description, file]
+        governance_files_modified: { type: boolean }
+        protected_files_touched: { type: array, items: { type: string } }
+        new_dependencies: { type: array, items: { type: string } }
+        new_dependencies_justified: { type: boolean }
+        verdict: { type: string, enum: ["pass", "fail"] }
+        reasoning: { type: string }
+      required:
+        - security_issues
+        - governance_files_modified
+        - protected_files_touched
+        - new_dependencies
+        - new_dependencies_justified
+        - verdict
+        - reasoning
+
+  - id: code-review-p2
+    command: archon-code-review-agent
+    depends_on: [fix-issues]
+    context: fresh
+
+  - id: synthesize-verdict-pass-2
+    command: dark-factory-synthesize-verdict
+    depends_on:
+      - static-checks-backend-p2
+      - static-checks-frontend-p2
+      - run-tests-backend-p2
+      - run-tests-frontend-p2
+      - behavioral-validation-p2
+      - behavioral-e2e-p2
+      - security-check-p2
+      - code-review-p2
+      - fetch-base-governance
+    trigger_rule: all_done
+    context: fresh
+    allowed_tools: []
+    output_format:
+      type: object
+      properties:
+        verdict: { type: string, enum: ["approve", "request_changes", "reject"] }
+        summary: { type: string }
+        static_checks_status: { type: string, enum: ["pass", "fail"] }
+        tests_status: { type: string, enum: ["pass", "fail", "skipped"] }
+        behavioral_status: { type: string, enum: ["yes", "partially", "no"] }
+        e2e_status: { type: string, enum: ["yes", "partially", "no", "not_e2e_testable"] }
+        security_status: { type: string, enum: ["pass", "fail"] }
+        issues_to_fix:
+          type: array
+          items:
+            type: object
+            properties:
+              category: { type: string, enum: ["behavioral", "test_failure", "static_check", "code_quality", "security", "scope", "e2e"] }
+              severity: { type: string, enum: ["critical", "high", "medium", "low"] }
+              description: { type: string }
+              file: { type: string }
+            required: [category, severity, description]
+        should_escalate: { type: boolean }
+        escalation_reason: { type: string }
+        reasoning: { type: string }
+      required:
+        - verdict
+        - summary
+        - static_checks_status
+        - tests_status
+        - behavioral_status
+        - e2e_status
+        - security_status
+        - issues_to_fix
+        - should_escalate
+        - reasoning
+
+  # ═══════════════════════════════════════════════════════════════
+  # PHASE 8: TEARDOWN (always runs)
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: teardown-app
+    bash: |
+      set +e
+      if [ -f "$ARTIFACTS_DIR/.backend-pid" ]; then
+        BACKEND_PID=$(cat "$ARTIFACTS_DIR/.backend-pid")
+        kill "$BACKEND_PID" 2>/dev/null && echo "killed backend PID $BACKEND_PID" || echo "backend already dead"
+      fi
+      if [ -f "$ARTIFACTS_DIR/.frontend-pid" ]; then
+        FRONTEND_PID=$(cat "$ARTIFACTS_DIR/.frontend-pid")
+        kill "$FRONTEND_PID" 2>/dev/null && echo "killed frontend PID $FRONTEND_PID" || echo "frontend already dead"
+      fi
+      # Best-effort close any lingering agent-browser session
+      agent-browser close 2>/dev/null || true
+      echo "TEARDOWN_COMPLETE"
+    depends_on: [synthesize-verdict-pass-1, synthesize-verdict-pass-2]
+    trigger_rule: all_done
+    timeout: 30000
+
+  # ═══════════════════════════════════════════════════════════════
+  # PHASE 9: APPLY FINAL VERDICT (deterministic bash)
+  # ═══════════════════════════════════════════════════════════════
+  # Reads whichever synthesize node ran last: if pass-2 ran, use its verdict;
+  # otherwise use pass-1. All approve/reject/label operations are pure gh calls
+  # — no AI decisions here. Keeps the auto-merge audit trail reproducible.
+
+  - id: apply-verdict
+    bash: |
+      set -euo pipefail
+      PR_NUMBER=$(cat "$ARTIFACTS_DIR/.pr-number")
+
+      # Pick the authoritative verdict. If pass-2 ran (i.e., fix happened),
+      # it's authoritative. Otherwise use pass-1.
+      P2_VERDICT='$synthesize-verdict-pass-2.output'
+      P1_VERDICT='$synthesize-verdict-pass-1.output'
+
+      if [ -n "$P2_VERDICT" ] && [ "$P2_VERDICT" != "null" ] && echo "$P2_VERDICT" | jq -e '.verdict' > /dev/null 2>&1; then
+        VERDICT_JSON="$P2_VERDICT"
+        PASS_LABEL="pass-2"
+      else
+        VERDICT_JSON="$P1_VERDICT"
+        PASS_LABEL="pass-1"
+      fi
+
+      echo "$VERDICT_JSON" > "$ARTIFACTS_DIR/verdict.json"
+
+      DECISION=$(echo "$VERDICT_JSON" | jq -r '.verdict')
+      SUMMARY=$(echo "$VERDICT_JSON" | jq -r '.summary')
+      SHOULD_ESCALATE=$(echo "$VERDICT_JSON" | jq -r '.should_escalate')
+      ESCALATION_REASON=$(echo "$VERDICT_JSON" | jq -r '.escalation_reason // empty')
+      ISSUES=$(echo "$VERDICT_JSON" | jq -r '
+        .issues_to_fix
+        | map("- **\(.severity)** [\(.category)]\(if .file then " (`\(.file)`)" else "" end): \(.description)")
+        | join("\n")')
+
+      case "$DECISION" in
+        approve)
+          BODY="**Dark Factory Validation**: APPROVED (${PASS_LABEL})
+
+${SUMMARY}
+
+All quality gates passed:
+- Behavioral (static): solves_issue=yes
+- Behavioral (E2E via agent-browser): solves_issue=yes
+- Security: pass (no governance files modified)
+- Static checks: pass
+- Tests: pass or legitimately skipped
+- Code review: no critical/high findings
+
+Auto-merging via squash."
+          gh pr review "$PR_NUMBER" --approve --body "$BODY"
+          gh pr merge "$PR_NUMBER" --squash --auto --delete-branch
+          gh pr edit "$PR_NUMBER" --remove-label "factory:needs-review" --add-label "factory:approved" 2>/dev/null || true
+          echo "PR #$PR_NUMBER: APPROVED (${PASS_LABEL}) and queued for auto-merge"
+          ;;
+
+        request_changes)
+          # If pass-2 still says request_changes, we've exhausted autonomous fix attempts -> escalate.
+          if [ "$PASS_LABEL" = "pass-2" ] || [ "$SHOULD_ESCALATE" = "true" ]; then
+            BODY="**Dark Factory Validation**: ESCALATED TO HUMAN (${PASS_LABEL})
+
+${SUMMARY}
+
+### Escalation reason
+${ESCALATION_REASON:-Autonomous fix pass did not resolve all blocking issues. Human review required.}
+
+### Issues remaining
+${ISSUES}"
+            gh pr review "$PR_NUMBER" --request-changes --body "$BODY"
+            gh pr edit "$PR_NUMBER" --remove-label "factory:needs-review" --add-label "factory:needs-human" 2>/dev/null || true
+            echo "PR #$PR_NUMBER: ESCALATED to human after ${PASS_LABEL}"
+          else
+            # pass-1 said request_changes but somehow fix didn't run — shouldn't happen.
+            BODY="**Dark Factory Validation**: Changes Requested (${PASS_LABEL})
+
+${SUMMARY}
+
+### Issues to fix
+${ISSUES}"
+            gh pr review "$PR_NUMBER" --request-changes --body "$BODY"
+            gh pr edit "$PR_NUMBER" --remove-label "factory:needs-review" --add-label "factory:needs-fix" 2>/dev/null || true
+            echo "PR #$PR_NUMBER: CHANGES REQUESTED (${PASS_LABEL})"
+          fi
+          ;;
+
+        reject)
+          BODY="**Dark Factory Validation**: REJECTED (${PASS_LABEL})
+
+${SUMMARY}
+
+### Blocking issues
+${ISSUES}
+
+This PR cannot be fixed incrementally and has been closed."
+          gh pr review "$PR_NUMBER" --request-changes --body "$BODY"
+          gh pr close "$PR_NUMBER"
+
+          ISSUE_NUM=$(gh pr view "$PR_NUMBER" --json body -q '.body' \
+            | grep -oiE '(fixes|closes|resolves) #[0-9]+' \
+            | grep -oE '[0-9]+' | head -1)
+          if [ -n "$ISSUE_NUM" ]; then
+            if [ "$SHOULD_ESCALATE" = "true" ]; then
+              gh issue edit "$ISSUE_NUM" --add-label "factory:needs-human" 2>/dev/null || true
+              gh issue comment "$ISSUE_NUM" --body "**Dark Factory**: PR #$PR_NUMBER was rejected and escalated to human review (${PASS_LABEL}).
+
+Reason: ${SUMMARY}
+
+${ESCALATION_REASON}"
+            else
+              gh issue reopen "$ISSUE_NUM" 2>/dev/null || true
+              gh issue edit "$ISSUE_NUM" --add-label "factory:accepted" --remove-label "factory:in-progress" 2>/dev/null || true
+              gh issue comment "$ISSUE_NUM" --body "**Dark Factory**: PR #$PR_NUMBER was rejected during validation (${PASS_LABEL}). Issue re-queued for another implementation attempt.
+
+Reason: ${SUMMARY}"
+            fi
+          fi
+          echo "PR #$PR_NUMBER: REJECTED (${PASS_LABEL}) and closed"
+          ;;
+
+        *)
+          echo "ERROR: Unknown verdict '$DECISION' from ${PASS_LABEL}" >&2
+          exit 1
+          ;;
+      esac
+    depends_on: [teardown-app]
+    timeout: 30000
