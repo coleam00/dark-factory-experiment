@@ -16,6 +16,16 @@ from backend.db import repository
 
 logger = logging.getLogger(__name__)
 
+# Module-level embedding cache.  Set to None whenever new chunks are ingested.
+_cache: list[dict] | None = None
+
+
+def invalidate_cache() -> None:
+    """Discard the cached chunk list so the next retrieve() reloads from DB."""
+    global _cache
+    _cache = None
+    logger.info("Embedding cache invalidated.")
+
 
 async def retrieve(
     query_embedding: list[float],
@@ -37,8 +47,14 @@ async def retrieve(
           - score: float (cosine similarity, -1.0 to 1.0)
         Sorted by score descending. Returns [] if the DB has no chunks.
     """
-    # Load all chunks from the DB (includes deserialized embeddings)
-    all_chunks = await repository.list_chunks()
+    # Load all chunks from the DB (or reuse cache if already populated)
+    global _cache
+    if _cache is None:
+        logger.debug("Cache miss — loading embeddings from DB.")
+        _cache = await repository.list_chunks()
+    else:
+        logger.debug("Cache hit: %d chunks", len(_cache))
+    all_chunks = _cache
     if not all_chunks:
         return []
 

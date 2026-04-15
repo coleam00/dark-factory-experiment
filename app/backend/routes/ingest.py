@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import AnyUrl, BaseModel, Field, field_validator
 
 from backend.db import repository
+from backend.rag import retriever
 from backend.rag.chunker import chunk_video
 from backend.rag.embeddings import embed_batch
 
@@ -117,6 +118,7 @@ async def ingest_video(body: IngestRequest) -> IngestResponse:
         )
 
     logger.info("Ingestion complete for '%s': %d chunks stored", body.title, len(chunk_texts))
+    retriever.invalidate_cache()
 
     return IngestResponse(
         video_id=video_id,
