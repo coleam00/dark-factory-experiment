@@ -16,6 +16,21 @@ from backend.db import repository
 
 logger = logging.getLogger(__name__)
 
+_cached_chunks: list[dict] | None = None
+_cached_matrix: np.ndarray | None = None
+
+
+def invalidate_embedding_cache() -> None:
+    """Clear the in-memory embedding cache.
+
+    Call this after new chunks are written to the DB so the next
+    call to retrieve() reloads from the updated database.
+    """
+    global _cached_chunks, _cached_matrix
+    _cached_chunks = None
+    _cached_matrix = None
+    logger.info("Embedding cache invalidated.")
+
 
 async def retrieve(
     query_embedding: list[float],
@@ -37,15 +52,20 @@ async def retrieve(
           - score: float (cosine similarity, -1.0 to 1.0)
         Sorted by score descending. Returns [] if the DB has no chunks.
     """
-    # Load all chunks from the DB (includes deserialized embeddings)
-    all_chunks = await repository.list_chunks()
-    if not all_chunks:
-        return []
+    global _cached_chunks, _cached_matrix
 
-    # Build the matrix of stored embeddings
-    chunk_embeddings = np.array(
-        [chunk["embedding"] for chunk in all_chunks], dtype=np.float32
-    )  # shape: (N, D)
+    if _cached_chunks is None or _cached_matrix is None:
+        all_chunks = await repository.list_chunks()
+        if not all_chunks:
+            return []
+        _cached_chunks = all_chunks
+        _cached_matrix = np.array(
+            [chunk["embedding"] for chunk in _cached_chunks], dtype=np.float32
+        )  # shape: (N, D)
+        logger.info("Embedding cache populated: %d chunks", len(_cached_chunks))
+
+    all_chunks = _cached_chunks
+    chunk_embeddings = _cached_matrix
 
     query_vec = np.array(query_embedding, dtype=np.float32)  # shape: (D,)
 
