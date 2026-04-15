@@ -22,12 +22,13 @@ import backend.config as cfg
 @pytest.fixture(autouse=True)
 def clean_env():
     """Save and restore CORS_ORIGINS env var around each test."""
+    was_set = "CORS_ORIGINS" in os.environ
     original = os.environ.get("CORS_ORIGINS")
     yield
-    if original is None:
-        os.environ.pop("CORS_ORIGINS", None)
-    else:
+    if was_set:
         os.environ["CORS_ORIGINS"] = original
+    else:
+        os.environ.pop("CORS_ORIGINS", None)
 
 
 def test_cors_origins_default():
