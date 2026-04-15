@@ -153,21 +153,18 @@ nodes:
       PR_NUMBER=$(cat "$ARTIFACTS_DIR/.pr-number")
       gh pr checkout "$PR_NUMBER"
       echo "Checked out PR #$PR_NUMBER on branch $(git branch --show-current)"
-      # Merge latest main into the PR branch so the worktree has up-to-date
-      # workflow infra (.archon/commands, .claude/skills) regardless of how
-      # stale the PR is. Governance was already fetched from origin/main into
-      # the fetch-base-governance artifact BEFORE this checkout, so the
-      # holdout property is preserved (validators only read that snapshot).
-      # If the merge conflicts, abort and fail fast — a conflicted PR can't
-      # be validated cleanly anyway.
-      git config user.email "dark-factory@local"
-      git config user.name "dark-factory"
+      # Pull infra-only files from origin/main into the worktree so the
+      # validator always uses the latest workflow command files and skills,
+      # regardless of how stale the PR branch is. We deliberately do NOT
+      # merge main's app code — the validator must see the PR's diff
+      # exactly as the author wrote it. Governance was captured into the
+      # fetch-base-governance artifact BEFORE this checkout, so the
+      # holdout property is preserved either way.
       git fetch origin main --quiet
-      if ! git merge origin/main --no-edit -m "merge: bring in main for validation infra" 2>&1; then
-        echo "ERROR: merge of origin/main conflicted; aborting" >&2
-        git merge --abort 2>/dev/null || true
-        exit 1
-      fi
+      git checkout origin/main -- .archon/ .claude/ 2>/dev/null || true
+      # Reset any infra path that doesn't exist on main rather than failing.
+      echo "Synced .archon/ and .claude/ from origin/main:"
+      git status --short .archon/ .claude/ | head -20 || true
     depends_on: [fetch-pr, verify-holdout-clean, fetch-base-governance]
     timeout: 60000
 
