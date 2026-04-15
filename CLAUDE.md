@@ -67,7 +67,8 @@ rag-youtube-chat/
 │   │   └── routes/
 │   │       ├── conversations.py # GET/POST/DELETE /api/conversations*, GET /api/videos
 │   │       ├── messages.py      # POST /api/conversations/{id}/messages (streaming SSE)
-│   │       └── ingest.py        # POST /api/ingest
+│   │       ├── ingest.py        # POST /api/ingest
+│   │       └── version.py       # GET /api/version
 │   └── frontend/
 │       ├── package.json      # Bun dependencies + scripts
 │       ├── vite.config.ts    # Dev server port, API proxy to backend
