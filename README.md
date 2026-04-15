@@ -12,12 +12,22 @@ The application itself is a dark-mode AI chat app that lets you have grounded co
 
 The term "Dark Factory" comes from Dan Shapiro (Glowforge), inspired by FANUC's 1980s lights-out robotics plants where robots built robots 24/7 with no humans on the floor. Applied to software: **specs go in, software comes out.**
 
-This repo is a live attempt at that pattern. It runs on top of [Archon](https://github.com/coleam00/archon), an AI coding workflow engine, and uses GitHub itself as the shared state machine.
+This repo is a live attempt at that pattern, and it uses GitHub itself as the shared state machine.
+
+### The three layers
+
+There's a stack of three distinct things doing the work, and it's worth pulling them apart:
+
+1. **The harness: [Archon](https://github.com/coleam00/archon).** The workflow engine, and the thing that makes the whole experiment possible. Archon lets you stitch coding agent sessions together with deterministic steps (running scripts, calling `gh`, parsing output, branching on results) into a single end-to-end workflow you actually trust. The Dark Factory's logic, "triage these issues, then implement this one, then validate the PR, then merge it," is built in Archon as a handful of workflows under `.archon/workflows/`. Without something like Archon, you're either hand-prompting agents one step at a time or writing a giant brittle script around them. Archon is what turns "AI can sometimes do this" into "the factory does this every few hours, on its own."
+2. **The coding agent: Claude Code.** Inside each AI node, Archon spawns Claude Code as the agent. Claude Code is what actually holds the tools (file editing, bash, `gh`, web fetch), runs the loop, and executes the work the prompt asks for.
+3. **The model: MiniMax M2.7.** Claude Code is routed to MiniMax M2.7 instead of Anthropic's models. Claude Code is the wrapper around the model; MiniMax is the brain doing the reasoning and the writing.
+
+The reason for swapping the model out is purely economic. At the throughput a real Dark Factory needs (multiple multi-hour workflow runs per day, each burning a lot of tokens on planning, implementation, and review), running on an Anthropic subscription would hit rate limits quickly. MiniMax M2.7 is cheap and fast enough to let the experiment actually run continuously without throttling.
 
 ### How a change actually ships
 
 ```
-        GitHub Issues (filed by humans or community)
+        GitHub Issues (filed by humans or the regression testing workflow)
                        │
                        ▼
             ┌──────────────────────┐
