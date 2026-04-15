@@ -58,17 +58,10 @@ async def retrieve(
         all_chunks_loaded = await repository.list_chunks()
         if not all_chunks_loaded:
             return []
-        try:
-            candidate_matrix = np.array(
-                [chunk["embedding"] for chunk in all_chunks_loaded], dtype=np.float32
-            )  # shape: (N, D)
-        except Exception:
-            # Leave globals as None so next call retries cleanly
-            _cached_chunks = None
-            _cached_matrix = None
-            raise
+        _cached_matrix = np.array(
+            [chunk["embedding"] for chunk in all_chunks_loaded], dtype=np.float32
+        )  # shape: (N, D)
         _cached_chunks = all_chunks_loaded
-        _cached_matrix = candidate_matrix
         logger.info("Embedding cache populated: %d chunks", len(_cached_chunks))
 
     assert _cached_chunks is not None
