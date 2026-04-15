@@ -819,6 +819,11 @@ nodes:
       $synthesize-verdict-pass-2.output
       __P2_VERDICT_EOF__
 
+      # Archon wraps substituted node outputs in single quotes for shell
+      # safety, so the captured files start with ' and end with '. Strip
+      # the wrapping quotes so jq can parse the JSON cleanly.
+      sed -i "s/^'//; s/'$//" "$ARTIFACTS_DIR/p1-verdict.json" "$ARTIFACTS_DIR/p2-verdict.json"
+
       # Pick the authoritative verdict. If pass-2 ran (i.e., fix happened),
       # it's authoritative. Otherwise use pass-1.
       if [ -s "$ARTIFACTS_DIR/p2-verdict.json" ] && jq -e '.verdict' "$ARTIFACTS_DIR/p2-verdict.json" > /dev/null 2>&1; then
