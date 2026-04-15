@@ -1,40 +1,127 @@
-# RAG YouTube Chat
+# The Dark Factory Experiment (RAG YouTube Chat App)
 
-A dark-mode AI chat app that lets you have conversations grounded in YouTube video content. Ask questions about a creator's videos and get synthesized, cited answers pulled from transcript passages.
+**A public Dark Factory experiment.** This repository is a working web application that is built, reviewed, and merged almost entirely by AI coding agents. Humans only do two things: file issues and promote releases. Everything in between - triage, implementation, code review, testing, merging - is handled by Archon workflows running on a cron.
+
+The application itself is a dark-mode AI chat app that lets you have grounded conversations about a creator's YouTube videos, with cited answers pulled from transcript passages. But the *real* point of this repo is the factory that builds it.
 
 ![Main chat interface](app/screenshots/screenshot-main.png)
 
-## Architecture
+---
+
+## The Dark Factory
+
+The term "Dark Factory" comes from Dan Shapiro (Glowforge), inspired by FANUC's 1980s lights-out robotics plants where robots built robots 24/7 with no humans on the floor. Applied to software: **specs go in, software comes out.**
+
+This repo is a live attempt at that pattern. It runs on top of [Archon](https://github.com/coleam00/archon), an AI coding workflow engine, and uses GitHub itself as the shared state machine.
+
+### How a change actually ships
+
+```
+        GitHub Issues (filed by humans or community)
+                       │
+                       ▼
+            ┌──────────────────────┐
+            │  Orchestrator (cron) │   thin Claude Agent SDK loop
+            │  every 4-6 hours     │   reads GitHub state, dispatches
+            └──────────┬───────────┘   one Archon workflow at a time
+                       │
+       ┌───────────────┼────────────────┐
+       ▼               ▼                ▼
+  dark-factory     fix-github-     dark-factory
+  -triage          issue           -validate-pr
+  (classify        (10-phase       (independent
+   open issues,     implement +     holdout review
+   accept/reject)   draft PR)       + auto-merge)
+                       │
+                       ▼
+                ┌─────────────┐
+                │    main     │  AI-managed branch
+                │ auto-deploys│  → staging / preview
+                └──────┬──────┘
+                       │  human promotes periodically
+                       ▼
+                ┌─────────────┐
+                │  release/*  │  human-cut stable
+                │   deploys   │  → production
+                └─────────────┘
+```
+
+### Labels are the state machine
+
+The orchestrator does not hold state itself. It reads GitHub labels and decides what to do next:
+
+**Issues:** `factory:triaging` → `factory:accepted` → `factory:in-progress` → (PR opened) or `factory:rejected` (closed with reason).
+
+**PRs:** `factory:implementing` → `factory:needs-review` → `factory:approved` (auto-merged) or `factory:needs-fix` → back to review (max 2 fix attempts) → `factory:needs-human` (escalated).
+
+**Priority:** Triage tags every accepted issue `priority:critical|high|medium|low` so the orchestrator picks the highest-impact work first.
+
+### The non-negotiable rules
+
+These come from research on every prior Dark Factory attempt (StrongDM, Spotify Honk, Steve Yegge's Gas Town) and the failure modes they hit:
+
+1. **The validator never reads the implementation plan.** It checks the *outcome* against the *issue*, not the approach. This is StrongDM's "holdout" pattern - it's what stops an agent from gaming its own acceptance criteria.
+2. **Triage has only two verdicts: accept or reject.** No "needs human" inbox. If a human disagrees with a rejection, they reopen with more context and the next triage cycle picks it up fresh.
+3. **Governance files (`MISSION.md`, `FACTORY_RULES.md`) can never be modified by the factory.** The security review hard-fails any PR that touches them.
+4. **One workflow at a time.** The orchestrator checks `bun run cli workflow status` before dispatching. The 4-hour cadence caps throughput structurally.
+5. **Flood protection.** Non-owner accounts are capped at 3 issues per UTC day; excess get `factory:rate-limited` and re-evaluated after midnight.
+6. **Per-node budget caps.** Every workflow node has a `maxBudgetUsd`. Triage batches max 10 issues per run and truncates each body to ~2KB.
+
+### Workflows in this repo
+
+Defined in [`.archon/workflows/`](.archon/workflows):
+
+| Workflow | Job |
+|---|---|
+| `dark-factory-triage.yaml` | Batch-classify untriaged issues against `MISSION.md` + `FACTORY_RULES.md`. Outputs structured JSON, applies labels and comments deterministically via `gh`. |
+| `dark-factory-fix-github-issue.yaml` | The workhorse. A Dark-Factory-owned fork of Archon's bundled `fix-github-issue`, adapted for this repo's Python + Bun stack: classify → research → plan → implement → Python/TS validation (ruff/mypy/pytest + tsc/biome/vitest) → draft PR → smart review → self-fix → simplify. Every AI node references a `.md` command file (no inline prompts). |
+| `dark-factory-validate-pr.yaml` | Independent gate. Static checks + tests, then parallel AI review (behavioral validation, code review, error handling, security check), synthesized verdict, auto-merge or fix-and-retry. The fix step is folded in as a fresh-context node so the second-pass validator stays a true holdout. |
+
+---
+
+## The Application
+
+What the factory is actually building.
+
+### Architecture
 
 ```
 ┌─────────────────┐       /api proxy        ┌─────────────────────────┐
-│    Frontend      │ ─────────────────────── │        Backend          │
-│  React + Vite    │    localhost:5173 →      │       FastAPI           │
-│  TypeScript      │        :8000            │                         │
-│  Tailwind CSS    │                         │  Routes ── RAG Pipeline │
+│    Frontend     │ ─────────────────────── │        Backend          │
+│  React + Vite   │    localhost:5173 →     │       FastAPI           │
+│  TypeScript     │        :8000            │                         │
+│  Tailwind CSS   │                         │  Routes ── RAG Pipeline │
 └─────────────────┘                         │    │        │           │
                                             │    │     Chunker        │
                                             │    │     (Docling)      │
                                             │    │        │           │
                                             │    DB    Embeddings     │
                                             │  (SQLite) (OpenRouter)  │
-                                            │            │           │
-                                            │         Retriever      │
-                                            │       (NumPy cosine)   │
-                                            │            │           │
-                                            │          LLM           │
-                                            │    (Claude via         │
-                                            │     OpenRouter)        │
+                                            │            │            │
+                                            │         Retriever       │
+                                            │       (NumPy cosine)    │
+                                            │            │            │
+                                            │           LLM           │
+                                            │    (Claude via          │
+                                            │     OpenRouter)         │
                                             └─────────────────────────┘
 ```
 
-**Frontend:** React 18 + Vite + TypeScript + Tailwind CSS (Bun)
-**Backend:** Python FastAPI, single process handling API + RAG + LLM
-**Database:** SQLite via aiosqlite (Postgres-swappable via repository pattern)
-**LLM:** Claude Sonnet via OpenRouter with SSE streaming
-**Embeddings:** text-embedding-3-small via OpenRouter
-**Chunking:** Docling HybridChunker
-**Retrieval:** NumPy cosine similarity, top-5 chunks
+- **Frontend:** React 18 + Vite + TypeScript + Tailwind CSS (Bun)
+- **Backend:** Python FastAPI, single process handling API + RAG + LLM
+- **Database:** SQLite via aiosqlite (Postgres-swappable via repository pattern)
+- **LLM:** Claude Sonnet via OpenRouter with SSE streaming
+- **Embeddings:** `text-embedding-3-small` via OpenRouter
+- **Chunking:** Docling HybridChunker
+- **Retrieval:** NumPy cosine similarity, top-5 chunks
+
+### How it works
+
+1. **Ingest** - Video transcripts are chunked with Docling's HybridChunker and embedded via OpenRouter.
+2. **Retrieve** - User queries are embedded and matched against chunks using cosine similarity.
+3. **Generate** - Top-5 chunks are passed as context to Claude, which streams a cited response back via SSE.
+
+---
 
 ## Quick Start
 
@@ -62,13 +149,11 @@ cd app && ./start.sh
 cd app && start.bat
 ```
 
-This will set up the Python venv, install dependencies, seed the database with 10 sample videos, and start both servers.
+This sets up the Python venv, installs dependencies, seeds the database with 10 sample videos, and starts both servers.
 
 3. Open [http://localhost:5173](http://localhost:5173)
 
-### Manual Start
-
-If you prefer to run the servers separately:
+### Manual start
 
 ```bash
 # Backend
@@ -84,8 +169,10 @@ bun install
 bun run dev
 ```
 
-## How It Works
+---
 
-1. **Ingest** - Video transcripts are chunked with Docling's HybridChunker and embedded via OpenRouter
-2. **Retrieve** - User queries are embedded and matched against chunks using cosine similarity
-3. **Generate** - Top-5 chunks are passed as context to Claude, which streams a cited response back via SSE
+## Contributing
+
+You contribute to this repo the same way the factory does: **file an issue.** Don't open a PR - the factory will. If your issue is well-scoped and in line with `MISSION.md`, the next triage cycle will accept it, and a workflow run will open the implementing PR. If it gets rejected, read the comment, sharpen the issue, and reopen.
+
+That's the whole point of the experiment.
