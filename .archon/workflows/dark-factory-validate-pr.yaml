@@ -153,8 +153,23 @@ nodes:
       PR_NUMBER=$(cat "$ARTIFACTS_DIR/.pr-number")
       gh pr checkout "$PR_NUMBER"
       echo "Checked out PR #$PR_NUMBER on branch $(git branch --show-current)"
+      # Merge latest main into the PR branch so the worktree has up-to-date
+      # workflow infra (.archon/commands, .claude/skills) regardless of how
+      # stale the PR is. Governance was already fetched from origin/main into
+      # $fetch-base-governance.output BEFORE this checkout, so the holdout
+      # property is preserved (validators only read the captured snapshot).
+      # If the merge conflicts, abort and fail fast — a conflicted PR can't
+      # be validated cleanly anyway.
+      git config user.email "dark-factory@local"
+      git config user.name "dark-factory"
+      git fetch origin main --quiet
+      if ! git merge origin/main --no-edit -m "merge: bring in main for validation infra" 2>&1; then
+        echo "ERROR: merge of origin/main conflicted; aborting" >&2
+        git merge --abort 2>/dev/null || true
+        exit 1
+      fi
     depends_on: [fetch-pr, verify-holdout-clean, fetch-base-governance]
-    timeout: 30000
+    timeout: 60000
 
   # ═══════════════════════════════════════════════════════════════
   # PHASE 2: INSTALL DEPS + START THE APP FOR E2E
@@ -189,6 +204,7 @@ nodes:
   - id: install-deps
     bash: |
       set -euo pipefail
+      export PATH="$HOME/.local/bin:$PATH"
       echo "=== Backend deps (uv sync) ==="
       (cd app/backend && uv sync --all-extras 2>&1 | tail -10)
       echo ""
@@ -200,6 +216,7 @@ nodes:
   - id: start-app
     bash: |
       set -euo pipefail
+      export PATH="$HOME/.local/bin:$PATH"
       # Normal path: ports come from the find-free-ports node via artifacts.
       # Demo/manual path: if the port files are missing (e.g. someone ran this
       # node in isolation), fall back to sensible defaults and write them so
@@ -280,6 +297,7 @@ nodes:
   - id: static-checks-backend-p1
     bash: |
       set +e
+      export PATH="$HOME/.local/bin:$PATH"
       cd app/backend
       echo "=== ruff check ==="
       uv run ruff check . 2>&1 | tail -30
@@ -318,6 +336,7 @@ nodes:
   - id: run-tests-backend-p1
     bash: |
       set +e
+      export PATH="$HOME/.local/bin:$PATH"
       cd app/backend
       if [ ! -d "tests" ]; then
         echo "TEST_RESULT_BACKEND=SKIPPED (no backend/tests directory)"
@@ -546,6 +565,7 @@ nodes:
   - id: static-checks-backend-p2
     bash: |
       set +e
+      export PATH="$HOME/.local/bin:$PATH"
       cd app/backend
       echo "=== ruff check ==="
       uv run ruff check . 2>&1 | tail -30; RUFF_LINT=$?
@@ -579,6 +599,7 @@ nodes:
   - id: run-tests-backend-p2
     bash: |
       set +e
+      export PATH="$HOME/.local/bin:$PATH"
       cd app/backend
       if [ ! -d "tests" ]; then
         echo "TEST_RESULT_BACKEND=SKIPPED"; exit 0
