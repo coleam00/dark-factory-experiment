@@ -912,7 +912,13 @@ nodes:
             echo "PR #$PR_NUMBER is draft — marking ready for review before merge"
             gh pr ready "$PR_NUMBER"
           fi
-          gh pr merge "$PR_NUMBER" --squash --auto --delete-branch
+          # Don't pass --delete-branch: gh tries to delete the local branch
+          # after queueing the merge, which requires switching off it. In a
+          # worktree where main is checked out elsewhere, that switch fails
+          # and aborts apply-verdict (set -e) before the label swap runs.
+          # Repos with "Automatically delete head branches" enabled (the
+          # factory default) handle the remote deletion server-side anyway.
+          gh pr merge "$PR_NUMBER" --squash --auto || true
           gh pr edit "$PR_NUMBER" --remove-label "factory:needs-review" --add-label "factory:approved" 2>/dev/null || true
           echo "PR #$PR_NUMBER: APPROVED (${PASS_LABEL}) and queued for auto-merge"
           ;;
