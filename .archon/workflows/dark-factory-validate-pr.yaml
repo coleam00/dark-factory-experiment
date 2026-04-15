@@ -891,6 +891,14 @@ nodes:
             "" \
             "Auto-merging via squash.")
           post_review --approve "$BODY"
+          # gh pr merge --auto requires a non-draft PR. If the factory opened
+          # the PR as draft (the implementer workflow does this until validation
+          # passes), mark it ready first.
+          IS_DRAFT=$(gh pr view "$PR_NUMBER" --json isDraft -q '.isDraft' 2>/dev/null || echo "false")
+          if [ "$IS_DRAFT" = "true" ]; then
+            echo "PR #$PR_NUMBER is draft — marking ready for review before merge"
+            gh pr ready "$PR_NUMBER"
+          fi
           gh pr merge "$PR_NUMBER" --squash --auto --delete-branch
           gh pr edit "$PR_NUMBER" --remove-label "factory:needs-review" --add-label "factory:approved" 2>/dev/null || true
           echo "PR #$PR_NUMBER: APPROVED (${PASS_LABEL}) and queued for auto-merge"
