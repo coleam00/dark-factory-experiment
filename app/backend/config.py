@@ -64,3 +64,11 @@ HYBRID_CHUNKER_MAX_TOKENS: int = 512
 # Server ports
 BACKEND_PORT: int = 8000
 FRONTEND_PORT: int = 5173
+
+# CORS — comma-separated list of allowed origins
+# Default includes localhost variants at the configured frontend port
+_cors_raw: str = os.environ.get(
+    "CORS_ORIGINS",
+    f"http://localhost:{FRONTEND_PORT},http://127.0.0.1:{FRONTEND_PORT}",
+)
+CORS_ORIGINS: list[str] = [o.strip() for o in _cors_raw.split(",") if o.strip()]
