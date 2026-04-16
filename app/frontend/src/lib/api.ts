@@ -74,6 +74,7 @@ export interface IngestVideoResponse {
 export const ingestVideo = (body: IngestVideoBody) =>
   request<IngestVideoResponse>('/ingest', {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
 
