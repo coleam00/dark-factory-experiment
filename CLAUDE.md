@@ -8,7 +8,7 @@ This file covers **how the code is written**. For *what* to build, see `MISSION.
 
 ## Project Overview
 
-**DynaChat** is a RAG-powered chat interface that lets viewers query a single YouTube channel's content and get streaming answers with per-chunk citations that deep-link to the exact timestamp in the source video. FastAPI + Python backend, React + Vite + TypeScript frontend, SQLite (migrating to Postgres eventually).
+**DynaChat** is a RAG-powered chat interface that lets viewers query a single YouTube channel's content and get streaming answers with per-chunk citations that deep-link to the exact timestamp in the source video. FastAPI + Python backend, React + Vite + TypeScript frontend, SQLite for local dev (Postgres + pgvector already provisioned in production — see **Deployment** below).
 
 ---
 
@@ -241,6 +241,8 @@ bun run test
 
 ### Planned migration: Postgres
 
+**Production target already provisioned.** The factory VPS runs `pgvector/pgvector:pg16` (pgvector 0.8.2) via docker-compose, bound to `127.0.0.1:5433`, database `dynachat`, user `dynachat`. The password and full `DATABASE_URL` live in `/opt/dynachat/.env` on the prod host (root-owned, mode 600). The factory does **not** read that file — it only references `os.environ.get("DATABASE_URL")` from `config.py`, and docker-compose injects it at container start.
+
 The factory is **allowed** to work on the Postgres migration when an issue is filed for it (this is one of the few architectural changes explicitly permitted by MISSION.md). Until then, write all new code in a Postgres-portable way so the eventual migration is a drop-in swap, not a rewrite.
 
 **Rules for new database code today:**
@@ -274,6 +276,8 @@ All env var reads happen in `app/backend/config.py`. Add new variables there and
 | Variable | Required | Purpose |
 |---|---|---|
 | `OPENROUTER_API_KEY` | **yes** | Authenticates embeddings and chat completions to OpenRouter |
+| `SUPADATA_API_KEY` | prod (YouTube ingestion) | Fetches YouTube transcripts via Supadata. Required by the ingestion path; dev can skip if working off already-seeded data |
+| `DATABASE_URL` | prod (post-migration) | Postgres connection string. Shape: `postgresql://dynachat:<pw>@127.0.0.1:5433/dynachat`. Absent locally = fall back to SQLite |
 
 Everything else is currently hardcoded in `config.py` (model names, ports, chunk size, top-k). When adding configurability, add the constant to `config.py` with a sensible default:
 
@@ -282,6 +286,70 @@ NEW_CONSTANT: int = int(os.environ.get("NEW_CONSTANT", "42"))
 ```
 
 **Never commit `.env` files.** `.env`, `.env.*`, and `.archon/config.yaml` are in `.gitignore` and on the protected files list in `FACTORY_RULES.md`.
+
+---
+
+## Deployment
+
+**DynaChat ships via Docker Compose to a Digital Ocean VPS at `chat.dynamous.ai`.** Source of truth for the compose stack lives in this repo at `deploy/` (committed, readable to the factory). The real `.env` lives **only** on the prod host at `/opt/dynachat/.env` (root-owned, mode 600) and is never in git, never in an LLM context, and never readable by the factory's `archon` user without `sudo`.
+
+### Production host layout
+
+```
+/opt/dynachat/                     # root:root 700
+├── .env                           # root:root 600 — real secrets, never committed
+└── rag-youtube-chat/              # git clone of this repo
+    └── deploy/
+        ├── docker-compose.yml     # Caddy + Postgres (+ app service, TODO)
+        ├── Caddyfile              # TLS + subdomain routing
+        ├── .env.example           # placeholder template (committed)
+        └── README.md              # first-time-setup runbook
+```
+
+The factory runs as user `archon` on the same VPS but in a different directory (`/home/archon/...`). `archon` has passwordless sudo by design — accepted trust tradeoff. The factory should never need to touch `/opt/dynachat/.env` directly; if a new secret is required, the workflow tells Cole to add it to the prod `.env` out-of-band.
+
+### Services (via `deploy/docker-compose.yml`)
+
+| Service | Image | Port | Purpose |
+|---|---|---|---|
+| `dynachat-caddy` | `caddy:2.8-alpine` | `80`, `443` | TLS termination + reverse proxy. Auto-provisions Let's Encrypt cert on first request |
+| `dynachat-postgres` | `pgvector/pgvector:pg16` | `127.0.0.1:5433` | Primary database (loopback-only; no public exposure) |
+| **TODO:** `dynachat-app` | (app Dockerfile, not yet built) | internal | Will serve FastAPI on `:8000` and frontend static bundle. Caddy already routes to these ports via `host.docker.internal` — the app service just needs to bind them |
+
+### Caddy routing (`deploy/Caddyfile`)
+
+```
+chat.dynamous.ai {
+    handle /api/*  { reverse_proxy host.docker.internal:8000 }
+    handle         { reverse_proxy host.docker.internal:5173 }
+}
+```
+
+Backend on 8000, frontend on 5173 (Vite dev). Once the app has a Dockerfile and a production static build, the frontend route swaps to serving built assets — the Caddyfile updates accordingly, but the split remains `/api/*` → backend, everything else → frontend.
+
+### What the factory is authorized to do in `deploy/`
+
+The "Don't modify Dockerfiles, deployment configs" rule in the Don'ts list has one explicit exception: **when an issue asks for deployment work** (app Dockerfile, docker-compose additions, Caddy route changes), the factory may modify files inside `deploy/` and add a root-level `Dockerfile` for the app service. Anything touching `.env` or real secrets is still off-limits.
+
+### YouTube ingestion on the VPS
+
+Production transcript fetching uses **Supadata** (`SUPADATA_API_KEY`), not `youtube-transcript-api`. Digital Ocean IPs are blocked by YouTube's scraping defenses, which breaks `youtube-transcript-api` in prod. Supadata sits behind a managed residential proxy pool and is the only reliable option.
+
+**Supadata client rules:**
+1. Always pass the `lang` parameter (Supadata has a known bug where non-English-only videos 500 without it — pass `lang="en"` if you only need English, or iterate through available languages).
+2. Handle rate limits gracefully — Supadata's free tier is generous but not infinite. Back off on 429.
+3. The API key is read from `SUPADATA_API_KEY` in `config.py`; never inline the key anywhere.
+
+### Redeploy flow
+
+After a merge to `main` on prod, the deploy is (for now) manual:
+
+```bash
+ssh archon@<factory-vps>
+sudo -u root bash -c 'cd /opt/dynachat/rag-youtube-chat && git pull && cd deploy && docker compose --env-file /opt/dynachat/.env up -d'
+```
+
+A full CI/CD path (webhook → pull → compose up) is in the backlog. Until then, the factory's job ends at merging a green PR; actual rollout is a human step.
 
 ---
 
@@ -319,7 +387,9 @@ These are existing bugs / quirks in the repo. They are fair game for the factory
 
 **Don't:**
 - Modify `MISSION.md`, `FACTORY_RULES.md`, or `CLAUDE.md` (this file) — see FACTORY_RULES.md §5
-- Modify `.github/`, Dockerfiles, deployment configs, or `.env*` files
+- Modify `.github/` or any `.env*` file (real secrets live only on the prod host — see **Deployment**)
+- Touch `/opt/dynachat/` on the prod host, or try to read the production `.env` — that's the app's runtime concern, not the factory's
+- Modify `Dockerfile`s or files in `deploy/` **unless** the issue is explicitly about deployment work (app service, Caddy route, compose additions)
 - Introduce a new LLM provider, embedding model, or vector database
 - Add state management libraries to the frontend
 - Add an ORM to the backend
