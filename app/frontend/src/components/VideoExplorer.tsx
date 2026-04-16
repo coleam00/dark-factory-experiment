@@ -69,6 +69,23 @@ interface VideoExplorerProps {
   onClose: () => void;
 }
 
+const INGEST_FIELDS = [
+  { key: 'title', label: 'Title', placeholder: 'Video title', type: 'text' },
+  { key: 'description', label: 'Description', placeholder: 'Short description', type: 'text' },
+  {
+    key: 'url',
+    label: 'YouTube URL',
+    placeholder: 'https://www.youtube.com/watch?v=...',
+    type: 'url',
+  },
+  {
+    key: 'transcript',
+    label: 'Transcript',
+    placeholder: 'Full transcript text...',
+    type: 'textarea',
+  },
+] as const;
+
 export function VideoExplorer({ isOpen, onClose }: VideoExplorerProps) {
   const [videos, setVideos] = useState<Video[]>([]);
   const [loading, setLoading] = useState(false);
@@ -82,6 +99,11 @@ export function VideoExplorer({ isOpen, onClose }: VideoExplorerProps) {
   });
   const [ingesting, setIngesting] = useState(false);
   const [ingestError, setIngestError] = useState<string | null>(null);
+
+  const closeDialog = () => {
+    setIngestOpen(false);
+    setIngestError(null);
+  };
 
   const fetchVideos = useCallback(async () => {
     setLoading(true);
@@ -244,37 +266,14 @@ export function VideoExplorer({ isOpen, onClose }: VideoExplorerProps) {
               <div className="flex justify-between items-center mb-4">
                 <h3 className="text-slate-100 text-base font-semibold m-0">Add New Video</h3>
                 <button
-                  onClick={() => {
-                    setIngestOpen(false);
-                    setIngestError(null);
-                  }}
+                  onClick={closeDialog}
                   className="bg-none border-none text-slate-400 cursor-pointer text-lg"
                 >
                   ×
                 </button>
               </div>
               {ingestError && <p className="text-red-400 mb-3 text-sm">{ingestError}</p>}
-              {[
-                { key: 'title', label: 'Title', placeholder: 'Video title', type: 'text' },
-                {
-                  key: 'description',
-                  label: 'Description',
-                  placeholder: 'Short description',
-                  type: 'text',
-                },
-                {
-                  key: 'url',
-                  label: 'YouTube URL',
-                  placeholder: 'https://www.youtube.com/watch?v=...',
-                  type: 'url',
-                },
-                {
-                  key: 'transcript',
-                  label: 'Transcript',
-                  placeholder: 'Full transcript text...',
-                  type: 'textarea',
-                },
-              ].map(({ key, label, placeholder, type }) => (
+              {INGEST_FIELDS.map(({ key, label, placeholder, type }) => (
                 <div key={key} className="mb-3">
                   <label htmlFor={key} className="block text-slate-400 text-xs mb-1">
                     {label}
@@ -302,10 +301,7 @@ export function VideoExplorer({ isOpen, onClose }: VideoExplorerProps) {
               ))}
               <div className="flex gap-2 justify-end mt-4">
                 <button
-                  onClick={() => {
-                    setIngestOpen(false);
-                    setIngestError(null);
-                  }}
+                  onClick={closeDialog}
                   className="px-4 py-2 bg-transparent border border-white/20 rounded-md text-slate-400 text-sm cursor-pointer"
                 >
                   Cancel
