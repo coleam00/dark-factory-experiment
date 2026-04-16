@@ -228,21 +228,30 @@ nodes:
   - id: allocate-ports
     bash: |
       set -euo pipefail
-      # Find a free port in a given range by trying to bind it.
+      # Backend MUST use port 8000. The Vite dev server proxy in
+      # vite.config.ts is hardcoded to forward /api/* to localhost:8000.
+      # The frontend code (api.ts) uses relative `/api/...` paths that
+      # go through this proxy. Using a dynamic backend port breaks all
+      # browser-based validation because the proxy target doesn't match.
+      BACKEND_PORT=8000
+      if (echo >/dev/tcp/127.0.0.1/$BACKEND_PORT) 2>/dev/null; then
+        echo "ERROR: port $BACKEND_PORT already in use - cannot start backend" >&2
+        exit 1
+      fi
+
+      # Frontend port can be dynamic - agent-browser reads it from the
+      # artifact file and connects directly.
       find_free_port() {
-        local start=$1
-        local end=$2
+        local start=$1 end=$2
         for port in $(seq $start $end); do
           if ! (echo >/dev/tcp/127.0.0.1/$port) 2>/dev/null; then
-            echo $port
-            return 0
+            echo $port; return 0
           fi
         done
-        echo "ERROR: no free port in range $start-$end" >&2
-        return 1
+        echo "ERROR: no free port in range $start-$end" >&2; return 1
       }
-      BACKEND_PORT=$(find_free_port 18000 18999)
       FRONTEND_PORT=$(find_free_port 15100 15999)
+
       echo "$BACKEND_PORT"  > "$ARTIFACTS_DIR/.backend-port"
       echo "$FRONTEND_PORT" > "$ARTIFACTS_DIR/.frontend-port"
       echo "Allocated backend=$BACKEND_PORT frontend=$FRONTEND_PORT"
@@ -272,7 +281,7 @@ nodes:
       if [ -f "$ARTIFACTS_DIR/.backend-port" ]; then
         BACKEND_PORT=$(cat "$ARTIFACTS_DIR/.backend-port")
       else
-        BACKEND_PORT=18000
+        BACKEND_PORT=8000
         echo "$BACKEND_PORT" > "$ARTIFACTS_DIR/.backend-port"
         echo "WARN: .backend-port missing, defaulting to $BACKEND_PORT" >&2
       fi

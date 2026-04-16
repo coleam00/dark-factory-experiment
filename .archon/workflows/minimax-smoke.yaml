@@ -1,0 +1,14 @@
+name: minimax-smoke
+description: Smoke test to verify MiniMax M2.7 is being used instead of Anthropic API
+
+provider: claude
+model: sonnet
+
+nodes:
+  - id: ping
+    prompt: |
+      Answer these two questions, each on its own line, with no extra text:
+      1. What is your model name or identifier?
+      2. What API endpoint or provider are you being served through?
+    allowed_tools: []
+    maxBudgetUsd: 0.10

@@ -2,7 +2,7 @@ name: dark-factory-comprehensive-test
 description: |
   Use when: Weekly cron fires a full end-to-end regression against `main` of
             the dark-factory-experiment repo. NOT triggered by the 4-hour
-            orchestrator — runs on its own separate schedule.
+            orchestrator - runs on its own separate schedule.
   Triggers: Weekly cron (0 6 * * 1 UTC), or manual "run comprehensive test".
   Does: Checks out main -> starts backend+frontend on dynamic free ports ->
         runs 4 agent-browser scenarios sequentially against the real UI
@@ -14,9 +14,9 @@ description: |
            (dark-factory-triage), issue implementation
            (dark-factory-fix-github-issue).
 
-  ═══════════════════════════════════════════════════════════════════════════
-  WHY THIS EXISTS — the self-healing loop
-  ═══════════════════════════════════════════════════════════════════════════
+  =====================================================================
+  WHY THIS EXISTS - the self-healing loop
+  =====================================================================
 
   This workflow closes the feedback loop that makes the Dark Factory actually
   self-evolving: comprehensive test finds a regression in running code -> files
@@ -24,7 +24,7 @@ description: |
   a PR -> validate-pr holds it out -> merge. No human in the loop unless all
   of that fails.
 
-  Unlike validate-pr, this workflow is NOT bound by the holdout principle —
+  Unlike validate-pr, this workflow is NOT bound by the holdout principle -
   it runs against main (which is already merged code), so there's nothing to
   hold out from. It can read anything, run anything, and its only output is
   "did this feature still work when I exercised it through the browser?".
@@ -34,25 +34,25 @@ description: |
   Testing). Locally, `npm i -g agent-browser && agent-browser install`.
   See the `.claude/skills/agent-browser/SKILL.md` skill for CLI reference.
 
-  ═══════════════════════════════════════════════════════════════════════════
+  =====================================================================
   TEST FIXTURES (locked)
-  ═══════════════════════════════════════════════════════════════════════════
+  =====================================================================
 
   Canonical test YouTube video for ingestion + RAG scenarios:
     https://www.youtube.com/watch?v=pjF-0dliYhg
 
-  This URL is referenced by test-video-ingestion AND test-rag-response —
+  This URL is referenced by test-video-ingestion AND test-rag-response -
   ingestion adds it to the library, then the RAG test asks a question
   grounded in its transcript and asserts the response cites it. Do NOT
-  change this URL without updating both scenario prompts together.
+  change this URL without updating both scenario command files together.
 
 provider: claude
 model: sonnet
 
 nodes:
-  # ═══════════════════════════════════════════════════════════════
-  # PHASE 1: SETUP — checkout main, install deps, start the app
-  # ═══════════════════════════════════════════════════════════════
+  # =====================================================================
+  # PHASE 1: SETUP - checkout main, install deps, start the app
+  # =====================================================================
 
   - id: pull-latest
     bash: |
@@ -61,7 +61,7 @@ nodes:
       #
       # We deliberately do NOT `git checkout main` here. Archon spawns this
       # workflow in a *linked* worktree, and the user's main working tree
-      # already holds branch `main` — git refuses to have the same branch
+      # already holds branch `main` - git refuses to have the same branch
       # checked out in two worktrees at once, so the checkout fails with:
       #   fatal: 'main' is already used by worktree at '...'
       # The validate-pr workflow's stale-worktree-prune pattern doesn't
@@ -71,7 +71,7 @@ nodes:
       #
       # Fetch + hard-reset gives us main's exact file content without ever
       # needing to flip HEAD onto the `main` branch. We intentionally do
-      # not `git clean -fd .archon/` — that line was wiping the in-flight
+      # not `git clean -fd .archon/` - that line was wiping the in-flight
       # workflow YAML from the Archon worktree itself. `git reset --hard`
       # already restores tracked files to origin/main, which is all we
       # need.
@@ -83,25 +83,34 @@ nodes:
   - id: allocate-ports
     bash: |
       set -euo pipefail
-      # Find a free port in a given range by trying to bind it.
-      # Mirror of dark-factory-validate-pr:allocate-ports. We use a
-      # DIFFERENT port range (19xxx / 16xxx) so a weekly comprehensive-test
-      # run cannot collide with a parallel validate-pr run — concurrency
-      # check at the orchestrator should prevent this, but defense-in-depth.
+      # Backend MUST use port 8000. The Vite dev server proxy in
+      # vite.config.ts is hardcoded to forward /api/* to localhost:8000.
+      # The frontend code (api.ts) uses relative `/api/...` paths that
+      # go through this proxy. Using a dynamic backend port breaks
+      # every browser-based test because the proxy target doesn't match.
+      #
+      # If port 8000 is occupied (e.g. another workflow is running),
+      # fail fast rather than silently starting on a port the frontend
+      # can't reach.
+      BACKEND_PORT=8000
+      if (echo >/dev/tcp/127.0.0.1/$BACKEND_PORT) 2>/dev/null; then
+        echo "ERROR: port $BACKEND_PORT already in use - cannot start backend" >&2
+        exit 1
+      fi
+
+      # Frontend port can be dynamic - agent-browser reads it from the
+      # artifact file and connects directly.
       find_free_port() {
-        local start=$1
-        local end=$2
+        local start=$1 end=$2
         for port in $(seq $start $end); do
           if ! (echo >/dev/tcp/127.0.0.1/$port) 2>/dev/null; then
-            echo $port
-            return 0
+            echo $port; return 0
           fi
         done
-        echo "ERROR: no free port in range $start-$end" >&2
-        return 1
+        echo "ERROR: no free port in range $start-$end" >&2; return 1
       }
-      BACKEND_PORT=$(find_free_port 19000 19999)
       FRONTEND_PORT=$(find_free_port 16100 16999)
+
       echo "$BACKEND_PORT"  > "$ARTIFACTS_DIR/.backend-port"
       echo "$FRONTEND_PORT" > "$ARTIFACTS_DIR/.frontend-port"
       echo "Allocated backend=$BACKEND_PORT frontend=$FRONTEND_PORT"
@@ -140,7 +149,7 @@ nodes:
 
       # Frontend: vite dev server on dynamic port, with VITE_API_BASE set so
       # the frontend hits the right backend port (the vite proxy is known
-      # broken — see CLAUDE.md footguns).
+      # broken - see CLAUDE.md footguns).
       (
         cd app/frontend
         VITE_API_BASE="http://127.0.0.1:$BACKEND_PORT" \
@@ -149,9 +158,7 @@ nodes:
         echo $! > "$ARTIFACTS_DIR/.frontend-pid"
       )
 
-      # Wait for backend health. DynaChat exposes /api/health (NOT /health —
-      # the template in the plan doc §12.4 has the wrong path, that's the
-      # same bug Fix #7 patched in validate-pr).
+      # Wait for backend health. DynaChat exposes /api/health (NOT /health).
       echo "Waiting for backend on :$BACKEND_PORT ..."
       for i in $(seq 1 60); do
         if curl -sf "http://127.0.0.1:$BACKEND_PORT/api/health" > /dev/null 2>&1; then
@@ -186,12 +193,12 @@ nodes:
     depends_on: [install-deps, allocate-ports]
     idle_timeout: 180000
 
-  # ═══════════════════════════════════════════════════════════════
+  # =====================================================================
   # PHASE 2: SCENARIO TESTS (sequential, agent-browser state is global)
-  # ═══════════════════════════════════════════════════════════════
+  # =====================================================================
   # agent-browser maintains a single shared browser session on the VPS.
   # Parallel scenario nodes would race each other opening/closing the same
-  # session. Run them sequentially in a chain. Latency is irrelevant — this
+  # session. Run them sequentially in a chain. Latency is irrelevant - this
   # is a weekly run.
   #
   # Each scenario node:
@@ -202,47 +209,11 @@ nodes:
   #   - takes at least one screenshot for proof
 
   - id: test-chat-ui
+    command: dark-factory-test-chat-ui
     depends_on: [start-app]
     context: fresh
-    allowed_tools: [Bash]
     skills: [agent-browser]
     idle_timeout: 300000
-    prompt: |
-      You are running scenario 1 of the Dark Factory comprehensive weekly test
-      for the DynaChat app (dark-factory-experiment). Your only job is to verify
-      that the chat UI loads, accepts input, and renders a response.
-
-      You have access to the Bash tool and the agent-browser skill. Do NOT read
-      any source code — you are a black-box UI tester.
-
-      The running app URLs (read these from artifact files):
-        - Frontend: http://127.0.0.1:$(cat $ARTIFACTS_DIR/.frontend-port)
-        - Backend:  http://127.0.0.1:$(cat $ARTIFACTS_DIR/.backend-port)
-
-      Steps:
-      1. `agent-browser open <frontend URL>`
-      2. `agent-browser snapshot -i` to see interactive elements
-      3. Find the chat message input field and a send/submit button/icon.
-         If you cannot find a chat input, that is a FAIL.
-      4. Fill the input with: "What is this app for?"
-      5. Click the send button (or press Enter if there's no explicit button).
-      6. Wait up to 60s for a response to render. Snapshot again if needed.
-      7. Verify that a response message appears in the conversation area
-         AND that it contains readable text (not just a spinner stuck forever
-         and not an error toast).
-      8. Take a screenshot to $ARTIFACTS_DIR/test-chat-ui.png
-      9. `agent-browser close`
-      10. Write a markdown summary to $ARTIFACTS_DIR/test-chat-ui.md with:
-          - Pass/fail verdict
-          - What you observed
-          - Screenshot path
-          - Any console errors or visible UI errors
-
-      Then return the structured output:
-        status:      "pass" | "fail"
-        summary:     one-sentence human description
-        evidence:    list of artifact paths (screenshot, markdown, logs)
-        failure_reason: null if passing, else concrete problem description
     output_format:
       type: object
       properties:
@@ -253,59 +224,11 @@ nodes:
       required: [status, summary, evidence, failure_reason]
 
   - id: test-video-ingestion
+    command: dark-factory-test-video-ingestion
     depends_on: [test-chat-ui]
     context: fresh
-    allowed_tools: [Bash]
     skills: [agent-browser]
     idle_timeout: 600000
-    prompt: |
-      You are running scenario 2 of the Dark Factory comprehensive weekly test
-      for DynaChat. Verify that adding a YouTube video to the library works
-      end-to-end: ingestion completes and the backend's chunk count grows.
-
-      You have Bash + agent-browser. Do NOT read source code.
-
-      Fixed test video (locked fixture, do NOT change):
-        https://www.youtube.com/watch?v=pjF-0dliYhg
-
-      URLs:
-        - Frontend: http://127.0.0.1:$(cat $ARTIFACTS_DIR/.frontend-port)
-        - Backend:  http://127.0.0.1:$(cat $ARTIFACTS_DIR/.backend-port)
-
-      Baseline snapshot already captured at $ARTIFACTS_DIR/health-before.json
-      (contains video_count + chunk_count from before any scenario ran).
-
-      Steps:
-      1. `agent-browser open <frontend URL>`
-      2. `agent-browser snapshot -i` — find the library / add-video surface.
-         If the app has a sidebar, navigation, or dedicated library page, go
-         there. If the video-add control is on the chat page, use it in place.
-         If you cannot find any way to add a video, that is a FAIL.
-      3. Enter the test video URL into the add-video input and submit.
-      4. Wait for ingestion to complete. This may take 30-90s for transcript
-         fetch + chunking + embedding. Poll the UI and also poll
-         `curl -sf http://127.0.0.1:<backend_port>/api/health` for up to 180s
-         until `chunk_count` increases above the baseline from
-         health-before.json.
-      5. Screenshot the library/list view showing the ingested video to
-         $ARTIFACTS_DIR/test-video-ingestion.png
-      6. Save the post-ingestion `/api/health` response to
-         $ARTIFACTS_DIR/health-after-ingestion.json
-      7. `agent-browser close`
-      8. Write a markdown summary to $ARTIFACTS_DIR/test-video-ingestion.md
-         including before/after chunk counts and screenshot path.
-
-      Return structured output:
-        status:      "pass" | "fail"
-        summary:     one-sentence description
-        evidence:    artifact paths
-        failure_reason: null if passing, else concrete problem
-
-      FAIL if any of:
-        - No add-video control found
-        - Ingestion UI shows an error
-        - chunk_count did not increase within 180s
-        - Test video does not appear in the library list
     output_format:
       type: object
       properties:
@@ -316,56 +239,11 @@ nodes:
       required: [status, summary, evidence, failure_reason]
 
   - id: test-rag-response
+    command: dark-factory-test-rag-response
     depends_on: [test-video-ingestion]
     context: fresh
-    allowed_tools: [Bash]
     skills: [agent-browser]
     idle_timeout: 300000
-    prompt: |
-      You are running scenario 3 of the Dark Factory comprehensive weekly test
-      for DynaChat. Verify that the RAG pipeline actually grounds its answers
-      in the ingested video and surfaces a citation back to it.
-
-      Context: scenario 2 (test-video-ingestion) has already added this video:
-        https://www.youtube.com/watch?v=pjF-0dliYhg
-
-      You have Bash + agent-browser. Do NOT read source code.
-
-      URLs:
-        - Frontend: http://127.0.0.1:$(cat $ARTIFACTS_DIR/.frontend-port)
-        - Backend:  http://127.0.0.1:$(cat $ARTIFACTS_DIR/.backend-port)
-
-      Steps:
-      1. `agent-browser open <frontend URL>`
-      2. Start a new conversation (or open the chat surface).
-      3. Ask a question that any RAG implementation should be able to ground
-         in the ingested video's transcript. Use this exact question:
-           "Based on the video I just added, summarize its main topic and
-            cite the source."
-      4. Wait for the response to render fully (up to 60s).
-      5. Verify TWO things:
-         (a) The answer includes substantive content describing the video
-             (not "I don't know" / "no videos found" / an empty reply).
-         (b) The UI renders at least one citation / source chip / link that
-             references the ingested video (by title, URL, or video ID
-             "pjF-0dliYhg"). If the app exposes citations via a click-to-
-             expand, expand them and verify the reference.
-      6. Screenshot the rendered response with citations visible to
-         $ARTIFACTS_DIR/test-rag-response.png
-      7. `agent-browser close`
-      8. Write a markdown summary to $ARTIFACTS_DIR/test-rag-response.md
-         including the answer text and citation evidence.
-
-      Return structured output:
-        status:      "pass" | "fail"
-        summary:     one-sentence description
-        evidence:    artifact paths
-        failure_reason: null if passing, else concrete problem
-
-      FAIL if any of:
-        - Response is empty or an error
-        - Response does not mention the ingested video's topic
-        - No citation to the ingested video is surfaced in the UI
     output_format:
       type: object
       properties:
@@ -376,49 +254,11 @@ nodes:
       required: [status, summary, evidence, failure_reason]
 
   - id: test-conversation-history
+    command: dark-factory-test-conversation-history
     depends_on: [test-rag-response]
     context: fresh
-    allowed_tools: [Bash]
     skills: [agent-browser]
     idle_timeout: 300000
-    prompt: |
-      You are running scenario 4 of the Dark Factory comprehensive weekly test
-      for DynaChat. Verify that multi-turn conversation context is retained
-      within a single thread.
-
-      You have Bash + agent-browser. Do NOT read source code.
-
-      URLs:
-        - Frontend: http://127.0.0.1:$(cat $ARTIFACTS_DIR/.frontend-port)
-        - Backend:  http://127.0.0.1:$(cat $ARTIFACTS_DIR/.backend-port)
-
-      Steps:
-      1. `agent-browser open <frontend URL>`
-      2. Start a NEW conversation (not a continuation of any previous
-         scenario's thread). If there's a "new chat" button, click it.
-      3. Send message 1 (exactly): "My favorite color is cerulean."
-         Wait for the assistant to reply.
-      4. Send message 2 (exactly): "I also have a cat named Basil."
-         Wait for the assistant to reply.
-      5. Send message 3 (exactly): "What was the first thing I told you
-         about myself?"
-         Wait for the assistant to reply.
-      6. Verify that the assistant's reply to message 3 explicitly mentions
-         "cerulean" (or clearly references the favorite-color statement).
-         If it talks about the cat, or says "I don't know", or gives a
-         generic answer that doesn't reference the favorite color, that
-         is a FAIL — the app lost conversation context.
-      7. Screenshot the full conversation thread (all 3 turns visible if
-         possible) to $ARTIFACTS_DIR/test-conversation-history.png
-      8. `agent-browser close`
-      9. Write a markdown summary to $ARTIFACTS_DIR/test-conversation-history.md
-         including the verbatim answer to message 3.
-
-      Return structured output:
-        status:      "pass" | "fail"
-        summary:     one-sentence description
-        evidence:    artifact paths
-        failure_reason: null if passing, else concrete problem
     output_format:
       type: object
       properties:
@@ -428,9 +268,9 @@ nodes:
         failure_reason: { type: ["string", "null"] }
       required: [status, summary, evidence, failure_reason]
 
-  # ═══════════════════════════════════════════════════════════════
-  # PHASE 3: TEARDOWN — must always run (trigger_rule: all_done)
-  # ═══════════════════════════════════════════════════════════════
+  # =====================================================================
+  # PHASE 3: TEARDOWN - must always run (trigger_rule: all_done)
+  # =====================================================================
 
   - id: teardown
     bash: |
@@ -454,67 +294,15 @@ nodes:
     trigger_rule: all_done
     timeout: 30000
 
-  # ═══════════════════════════════════════════════════════════════
+  # =====================================================================
   # PHASE 4: REPORT + FILE ISSUES
-  # ═══════════════════════════════════════════════════════════════
+  # =====================================================================
 
   - id: report
+    command: dark-factory-comprehensive-report
     depends_on: [teardown]
     context: fresh
-    allowed_tools: [Read, Glob, Bash, Write]
     idle_timeout: 180000
-    prompt: |
-      You are the report synthesizer for the Dark Factory comprehensive
-      weekly test. Four scenario nodes have run against a real running
-      DynaChat instance. Your job: read their outputs and produce a single
-      aggregate report.
-
-      Read all files matching $ARTIFACTS_DIR/test-*.md (there should be 4:
-      test-chat-ui.md, test-video-ingestion.md, test-rag-response.md,
-      test-conversation-history.md).
-
-      **CRITICAL — infrastructure vs product failures.** If *fewer than 4*
-      test-*.md files exist, that means one or more scenario nodes never
-      ran (an upstream infra node like pull-latest/install-deps/start-app
-      failed, and dependent scenarios were skipped). This is an
-      INFRASTRUCTURE FAILURE, not a product regression. In that case:
-        - Mark the missing scenarios as "MISSING (infra skipped)"
-        - Write "INFRA_FAILURE" at the top of the summary section
-        - Emit an **empty** JSON array `[]` in the failure block below —
-          do NOT fabricate product bugs from missing evidence. The next
-          node will see the empty array and file zero issues.
-      Only when all 4 test-*.md files exist should you synthesize real
-      failure objects from scenarios whose own status was "fail".
-
-      Produce $ARTIFACTS_DIR/comprehensive-test-report.md with:
-
-      ## Comprehensive Test Report — <ISO date>
-
-      ### Summary
-      - Total scenarios: 4
-      - Passed: N
-      - Failed: N
-
-      ### Per-scenario results
-      For each of the 4 scenarios, one subsection:
-
-      #### <scenario-name>
-      - **Status:** PASS | FAIL | MISSING
-      - **Summary:** <one line from the scenario's own summary>
-      - **Evidence:** <list of artifact paths>
-      - **Failure reason:** <if FAIL, the concrete reason>
-
-      ### Failures to file as issues
-      A JSON array of failure objects, one per FAIL or MISSING scenario,
-      in a fenced ```json block. Each object:
-        {
-          "scenario": "<scenario-name>",
-          "title": "Bug: <short failure title, < 70 chars>",
-          "body":  "<markdown issue body with failure_reason, evidence paths, and reproduction hint>"
-        }
-
-      If zero failures, write an empty array `[]` inside the json block.
-      The next bash node parses that JSON block to decide what to file.
 
   - id: file-issues
     depends_on: [report]
@@ -529,7 +317,7 @@ nodes:
       # Infra-failure guard (belt-and-suspenders with the report prompt).
       # If fewer than 4 test-*.md files exist, the scenario nodes were
       # skipped (an upstream node failed) and any "failures" the report
-      # enumerates are fabricated — the synthesizer saw missing files and
+      # enumerates are fabricated - the synthesizer saw missing files and
       # called them FAIL. Do NOT file issues in that case; the factory
       # must never spam GitHub with bogus product bugs when it cannot
       # prove its own test harness ran. This is the comprehensive-test
@@ -553,7 +341,7 @@ nodes:
       ' "$REPORT")
 
       if [ -z "$FAILURES_JSON" ]; then
-        echo "WARN: no JSON failure block found in report — treating as 0 failures"
+        echo "WARN: no JSON failure block found in report - treating as 0 failures"
         FAILURES_JSON="[]"
       fi
 
@@ -577,7 +365,7 @@ nodes:
 
         # Dedup: search open issues with the same title already labeled
         # factory:from-comprehensive-test. If one exists, skip creating a
-        # duplicate — the existing issue will continue through the triage
+        # duplicate - the existing issue will continue through the triage
         # pipeline on its own.
         EXISTING=$(gh issue list \
           --state open \
