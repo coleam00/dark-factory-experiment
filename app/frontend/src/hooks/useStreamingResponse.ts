@@ -117,12 +117,12 @@ export function useStreamingResponse() {
         // Stream completed successfully
         onComplete({ fullText, sources });
       } catch (e) {
-        // Handle AbortError (mid-stream cancellation via cancel())
+        // The AbortError comes from fetch() when cancelStream() aborts the in-flight request.
+        // Silently clean up rather than surfacing a user-facing error.
         if (e instanceof Error && e.name === 'AbortError') {
-          // Stream was cancelled — clean up state silently
           return;
         }
-        // Re-throw other errors so ChatArea catch block can handle them
+        // Server errors (e.g., {"error": ...} mid-stream) are re-thrown to ChatArea's catch block.
         throw e;
       } finally {
         // Always reset streaming state — React 18 batches this with the onComplete
