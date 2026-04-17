@@ -8,6 +8,12 @@ Conventions (see CLAUDE.md §Testing):
   database per-test via the `tmp_path` fixture.
 """
 
+import os
+
+# Set auth-related env vars BEFORE any backend import so config.py picks them up.
+os.environ.setdefault("JWT_SECRET", "test-secret-please-do-not-use-in-prod")
+os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost:5432/test")
+
 import pytest
 
 import backend.rag.retriever as retriever_module

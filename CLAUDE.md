@@ -461,3 +461,19 @@ These are existing bugs / quirks in the repo. They are fair game for the factory
 - Write SQL outside `db/repository.py` or fetch calls outside `src/lib/api.ts`
 - Use SQLite-specific SQL functions — anything written today must work on Postgres tomorrow
 - "Improve" code that wasn't part of the issue you're fixing — scope discipline is enforced by the validator
+
+---
+
+## Protected paths (factory auto-rejects PRs touching these)
+
+The following files implement or gate security invariants from `MISSION.md` §10.
+Any PR touching them must be human-authored:
+
+- `app/backend/auth/` (entire directory)
+- `app/backend/routes/auth.py`
+- `app/backend/db/users_repo.py`
+- `app/backend/main.py` — auth router registration and `Depends(get_current_user)` wiring
+- `app/backend/config.py` — `JWT_SECRET` / `DATABASE_URL` handling
+- CORS middleware configuration anywhere in the backend
+
+(The 25 msg/user/24h rate-limit issue will extend this list with its own paths.)

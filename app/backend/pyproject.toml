@@ -22,6 +22,7 @@ dependencies = [
     "fastapi",
     "uvicorn[standard]",
     "aiosqlite",
+    "asyncpg",
     "httpx",
     "python-dotenv",
     "openai",
@@ -31,6 +32,9 @@ dependencies = [
     # matching our text-embedding-3-small pipeline without any HF round-trip.
     "docling-core[chunking,chunking-openai]",
     "numpy",
+    "bcrypt",
+    "pyjwt",
+    "email-validator",
 ]
 
 [project.optional-dependencies]

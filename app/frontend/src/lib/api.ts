@@ -36,9 +36,18 @@ export interface ConversationWithMessages extends Conversation {
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     ...options,
   });
+  if (res.status === 401) {
+    // Session missing/expired — bounce to login, preserving return path.
+    if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+      const returnTo = window.location.pathname + window.location.search;
+      window.location.assign(`/login?from=${encodeURIComponent(returnTo)}`);
+    }
+    throw new Error('Not authenticated');
+  }
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`API error ${res.status}: ${text}`);
@@ -53,7 +62,7 @@ export const createConversation = () =>
 export const getConversation = (id: string) =>
   request<ConversationWithMessages>(`/conversations/${id}`);
 export const deleteConversation = (id: string) =>
-  fetch(`${BASE}/conversations/${id}`, { method: 'DELETE' });
+  fetch(`${BASE}/conversations/${id}`, { method: 'DELETE', credentials: 'include' });
 
 // Videos
 export const getVideos = () => request<Video[]>('/videos');

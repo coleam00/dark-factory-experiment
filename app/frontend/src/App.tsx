@@ -1,8 +1,33 @@
-import { useState } from 'react';
-import { BrowserRouter, Route, Routes, useParams } from 'react-router-dom';
+import { ReactNode, useState } from 'react';
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { ChatArea } from './components/ChatArea';
 import { Sidebar } from './components/Sidebar';
 import { ToastProvider } from './components/ToastProvider';
+import { useAuth } from './hooks/useAuth';
+import { Login } from './pages/Login';
+import { Signup } from './pages/Signup';
+
+// ── Auth guard ───────────────────────────────────────────────────
+interface RequireAuthProps {
+  children: ReactNode;
+}
+
+function RequireAuth({ children }: RequireAuthProps) {
+  const { status } = useAuth();
+  const location = useLocation();
+
+  if (status === 'loading') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[var(--bg)] text-[var(--text-secondary)]">
+        Loading…
+      </div>
+    );
+  }
+  if (status === 'anon') {
+    return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
+  }
+  return <>{children}</>;
+}
 
 // ── Layout wrapper used by all routes ────────────────────────────
 interface AppLayoutProps {
@@ -67,8 +92,24 @@ function App() {
     <BrowserRouter>
       <ToastProvider>
         <Routes>
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/c/:conversationId" element={<ConversationPage />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/signup" element={<Signup />} />
+          <Route
+            path="/"
+            element={
+              <RequireAuth>
+                <LandingPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/c/:conversationId"
+            element={
+              <RequireAuth>
+                <ConversationPage />
+              </RequireAuth>
+            }
+          />
         </Routes>
       </ToastProvider>
     </BrowserRouter>

@@ -53,6 +53,13 @@ services:
       SUPADATA_API_KEY: ${SUPADATA_API_KEY:-}
       DB_PATH: /app/data/chat.db
       FRONTEND_DIST: /app/frontend/dist
+      # Postgres for auth / users (issue #51). DATABASE_URL must reach the
+      # in-compose postgres service; JWT_SECRET signs session cookies.
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      JWT_SECRET: ${JWT_SECRET}
+    depends_on:
+      postgres:
+        condition: service_healthy
     volumes:
       - app_data:/app/data
     healthcheck:
@@ -78,6 +85,13 @@ services:
       SUPADATA_API_KEY: ${SUPADATA_API_KEY:-}
       DB_PATH: /app/data/chat.db
       FRONTEND_DIST: /app/frontend/dist
+      # Postgres for auth / users (issue #51). DATABASE_URL must reach the
+      # in-compose postgres service; JWT_SECRET signs session cookies.
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      JWT_SECRET: ${JWT_SECRET}
+    depends_on:
+      postgres:
+        condition: service_healthy
     volumes:
       - app_data:/app/data
     healthcheck:

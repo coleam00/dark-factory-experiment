@@ -57,6 +57,23 @@ _default_db_path = Path(__file__).resolve().parent / "data" / "chat.db"
 DB_PATH: Path = Path(os.environ.get("DB_PATH", str(_default_db_path)))
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
+# Postgres — required in prod for auth/users. Absent locally means auth endpoints
+# will fail on first DB call; pick one of the existing chat routes for local dev.
+DATABASE_URL: str = os.environ.get("DATABASE_URL", "")
+
+# JWT signing secret. Required whenever auth is active. 32+ random bytes in prod.
+# A local dev value is used only when JWT_SECRET is unset AND DATABASE_URL is unset
+# (i.e. auth-off local mode). In any environment with DATABASE_URL set, the real
+# secret must come from the environment.
+JWT_SECRET: str = os.environ.get("JWT_SECRET", "")
+if not JWT_SECRET and DATABASE_URL:
+    print(
+        "WARNING: DATABASE_URL is set but JWT_SECRET is not. Authentication will fail.",
+        file=sys.stderr,
+    )
+JWT_ALGORITHM: str = "HS256"
+JWT_EXPIRY_SECONDS: int = 7 * 24 * 60 * 60  # 7 days
+
 # RAG settings
 RETRIEVAL_TOP_K: int = 5
 HYBRID_CHUNKER_MAX_TOKENS: int = 512

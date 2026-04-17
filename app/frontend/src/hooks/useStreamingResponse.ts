@@ -26,10 +26,18 @@ export function useStreamingResponse() {
       try {
         const res = await fetch(`/api/conversations/${conversationId}/messages`, {
           method: 'POST',
+          credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ content: userMessage }),
         });
 
+        if (res.status === 401) {
+          if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+            const returnTo = window.location.pathname + window.location.search;
+            window.location.assign(`/login?from=${encodeURIComponent(returnTo)}`);
+          }
+          throw new Error('Not authenticated');
+        }
         if (!res.ok) {
           const errorText = await res.text().catch(() => '');
           throw new Error(`HTTP ${res.status}${errorText ? `: ${errorText}` : ''}`);

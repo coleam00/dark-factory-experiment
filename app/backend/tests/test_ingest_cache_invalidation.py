@@ -8,9 +8,19 @@ Verifies:
 
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from httpx import ASGITransport, AsyncClient
 
+from backend.auth.dependencies import get_current_user
 from backend.main import app
+
+
+@pytest.fixture(autouse=True)
+def bypass_auth():
+    """Ingest tests focus on cache behavior; satisfy the auth gate with a stub user."""
+    app.dependency_overrides[get_current_user] = lambda: {"id": "test-user", "email": "t@t"}
+    yield
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 async def test_ingest_calls_invalidate_cache_after_chunks_stored():

@@ -10,13 +10,15 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as get_version
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from backend.config import DB_PATH
+from backend.auth.dependencies import get_current_user
+from backend.config import DATABASE_URL, DB_PATH
 from backend.data.seed import seed_if_empty
+from backend.db.postgres import close_pg_pool, init_users_schema
 from backend.db.schema import init_db
 
 logging.basicConfig(level=logging.INFO)
@@ -25,15 +27,21 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup: initialise DB tables, then seed if empty."""
+    """Startup: initialise DB tables (SQLite + Postgres), then seed if empty."""
     logger.info("Starting up — initialising database…")
     await init_db()
+    if DATABASE_URL:
+        logger.info("DATABASE_URL set — initialising Postgres users schema…")
+        await init_users_schema()
+    else:
+        logger.warning("DATABASE_URL not set; auth endpoints will fail until configured.")
     logger.info("Database ready. Checking seed data…")
     await seed_if_empty()
     logger.info("Startup complete.")
     yield
-    # Shutdown (nothing to clean up for SQLite)
     logger.info("Shutting down.")
+    if DATABASE_URL:
+        await close_pg_pool()
 
 
 app = FastAPI(title="RAG YouTube Chat API", lifespan=lifespan)
@@ -50,11 +58,18 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 # Routes (imported here to keep main.py clean)
 # ---------------------------------------------------------------------------
-from backend.routes import conversations, ingest, messages  # noqa: E402
+from backend.routes import auth, conversations, ingest, messages  # noqa: E402
 
-app.include_router(conversations.router, prefix="/api")
-app.include_router(messages.router, prefix="/api")
-app.include_router(ingest.router, prefix="/api")
+# Auth routes are public (signup/login don't require a session; /me and /logout
+# rely on their own dependency/cookie behaviour).
+app.include_router(auth.router, prefix="/api")
+
+# All other API routes require authentication — MISSION.md §10 invariant:
+# "All chat access requires authentication — there is no anonymous mode."
+_auth_required = [Depends(get_current_user)]
+app.include_router(conversations.router, prefix="/api", dependencies=_auth_required)
+app.include_router(messages.router, prefix="/api", dependencies=_auth_required)
+app.include_router(ingest.router, prefix="/api", dependencies=_auth_required)
 
 
 # ---------------------------------------------------------------------------
