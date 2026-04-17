@@ -73,9 +73,7 @@ def patch_rate_limit(monkeypatch, message_store):
         resets_at: datetime | None = None
         if in_window:
             resets_at = min(in_window) + timedelta(hours=rate_limit.WINDOW_HOURS)
-        return rate_limit.RateLimitStatus(
-            used=used, remaining=remaining, resets_at=resets_at
-        )
+        return rate_limit.RateLimitStatus(used=used, remaining=remaining, resets_at=resets_at)
 
     monkeypatch.setattr(rate_limit, "check_and_record", fake_check_and_record)
     monkeypatch.setattr(rate_limit, "get_status", fake_get_status)

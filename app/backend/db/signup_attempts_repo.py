@@ -34,9 +34,7 @@ async def insert_attempt(
     )
 
 
-async def count_for_ip_in_window(
-    conn: asyncpg.Connection, ip: str, window_seconds: int
-) -> int:
+async def count_for_ip_in_window(conn: asyncpg.Connection, ip: str, window_seconds: int) -> int:
     """Count `accepted` signups from `ip` in the last `window_seconds` seconds.
 
     Per-IP limit counts only successful signups — a typo'd password shouldn't
@@ -54,9 +52,7 @@ async def count_for_ip_in_window(
     return int(count or 0)
 
 
-async def count_global_in_window(
-    conn: asyncpg.Connection, window_seconds: int
-) -> int:
+async def count_global_in_window(conn: asyncpg.Connection, window_seconds: int) -> int:
     """Count all signup attempts globally in the last `window_seconds`.
 
     Excludes `invalid` (Pydantic 400s — never written today, reserved). Counts

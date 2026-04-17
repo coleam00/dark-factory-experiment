@@ -10,7 +10,6 @@ import asyncio
 import logging
 from typing import TypedDict
 
-import supadata
 from supadata import Supadata, SupadataError
 
 from backend.config import SUPADATA_API_KEY
@@ -95,6 +94,11 @@ async def get_channel_video_ids(
             logger.error("Unexpected error in get_channel_video_ids: %s", exc)
             raise SupadataError(str(exc)) from exc
 
+    # Exhausted retries without returning — this should never be reached
+    # since the loop returns or raises on every attempt. Exit with a
+    # clear RuntimeError so mypy sees a guaranteed return path.
+    raise RuntimeError("get_channel_video_ids: retries exhausted without return")
+
 
 async def get_transcript(video_id: str, lang: str = "en") -> str | None:
     """
@@ -118,23 +122,22 @@ async def get_transcript(video_id: str, lang: str = "en") -> str | None:
         try:
             result = client.youtube.transcript(video_id=video_id, lang=lang)
             if result and result.text:
-                return result.text
+                return str(result.text)
             return None
         except SupadataError as exc:
             if exc.status == 429 and attempt < max_retries - 1:
                 delay = base_delay * (2**attempt)
-                logger.warning(
-                    "Supadata transcript rate limit (429), retrying in %ds", delay
-                )
+                logger.warning("Supadata transcript rate limit (429), retrying in %ds", delay)
                 await asyncio.sleep(delay)
                 continue
             if exc.status in (404, 400):
                 logger.warning("Transcript unavailable for video %s: %s", video_id, exc)
                 return None
-            logger.error(
-                "Supadata transcript failed for video %s: %s", video_id, exc
-            )
+            logger.error("Supadata transcript failed for video %s: %s", video_id, exc)
             raise
         except Exception as exc:
             logger.error("Unexpected error in get_transcript for %s: %s", video_id, exc)
             raise SupadataError(str(exc)) from exc
+
+    # Exhausted retries — return None for unreachable code paths.
+    return None

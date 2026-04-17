@@ -141,9 +141,7 @@ async def _signup(
     email: str,
     password: str = "password123",
 ) -> Any:
-    return await client.post(
-        "/api/auth/signup", json={"email": email, "password": password}
-    )
+    return await client.post("/api/auth/signup", json={"email": email, "password": password})
 
 
 def _with_ip(monkeypatch, ip: str) -> None:
@@ -159,9 +157,7 @@ def _with_ip(monkeypatch, ip: str) -> None:
 async def _count(db: asyncpg.Connection, outcome: str | None = None) -> int:
     if outcome:
         return int(
-            await db.fetchval(
-                "SELECT count(*) FROM signup_attempts WHERE outcome = $1", outcome
-            )
+            await db.fetchval("SELECT count(*) FROM signup_attempts WHERE outcome = $1", outcome)
         )
     return int(await db.fetchval("SELECT count(*) FROM signup_attempts"))
 
@@ -171,9 +167,7 @@ async def _count(db: asyncpg.Connection, outcome: str | None = None) -> int:
 # ---------------------------------------------------------------------------
 
 
-async def test_first_signup_records_accepted_and_returns_201(
-    db, client, monkeypatch
-):
+async def test_first_signup_records_accepted_and_returns_201(db, client, monkeypatch):
     _with_ip(monkeypatch, "10.0.0.1")
     r = await _signup(client, "alice@example.com")
     assert r.status_code == 201, r.text
@@ -181,9 +175,7 @@ async def test_first_signup_records_accepted_and_returns_201(
     assert await _count(db) == 1
 
 
-async def test_second_signup_same_ip_within_hour_returns_429_ip_scope(
-    db, client, monkeypatch
-):
+async def test_second_signup_same_ip_within_hour_returns_429_ip_scope(db, client, monkeypatch):
     _with_ip(monkeypatch, "10.0.0.2")
     r1 = await _signup(client, "first@example.com")
     assert r1.status_code == 201
@@ -197,9 +189,7 @@ async def test_second_signup_same_ip_within_hour_returns_429_ip_scope(
     assert await _count(db, "ip_limited") == 1
 
 
-async def test_different_ip_not_blocked_by_other_ips_cap(
-    db, client, monkeypatch
-):
+async def test_different_ip_not_blocked_by_other_ips_cap(db, client, monkeypatch):
     _with_ip(monkeypatch, "10.0.0.10")
     assert (await _signup(client, "a@example.com")).status_code == 201
 
@@ -209,9 +199,7 @@ async def test_different_ip_not_blocked_by_other_ips_cap(
     assert await _count(db, "accepted") == 2
 
 
-async def test_duplicate_email_records_duplicate_and_returns_409(
-    db, client, monkeypatch
-):
+async def test_duplicate_email_records_duplicate_and_returns_409(db, client, monkeypatch):
     _with_ip(monkeypatch, "10.0.0.20")
     assert (await _signup(client, "dup@example.com")).status_code == 201
     # Different IP so the per-IP check passes and we reach the uniqueness check.
@@ -227,9 +215,7 @@ async def test_duplicate_email_records_duplicate_and_returns_409(
 # ---------------------------------------------------------------------------
 
 
-async def test_global_cap_25_per_10min_returns_429_global_scope(
-    db, client, monkeypatch
-):
+async def test_global_cap_25_per_10min_returns_429_global_scope(db, client, monkeypatch):
     for i in range(signup_rate_limit.GLOBAL_LIMIT):
         await db.execute(
             """

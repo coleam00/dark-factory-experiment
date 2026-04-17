@@ -1,4 +1,4 @@
-import { ReactNode, useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { ChatArea } from './components/ChatArea';
 import { Sidebar } from './components/Sidebar';
@@ -93,24 +93,24 @@ function App() {
       <AuthProvider>
         <ToastProvider>
           <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/signup" element={<Signup />} />
-          <Route
-            path="/"
-            element={
-              <RequireAuth>
-                <LandingPage />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/c/:conversationId"
-            element={
-              <RequireAuth>
-                <ConversationPage />
-              </RequireAuth>
-            }
-          />
+            <Route path="/login" element={<Login />} />
+            <Route path="/signup" element={<Signup />} />
+            <Route
+              path="/"
+              element={
+                <RequireAuth>
+                  <LandingPage />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/c/:conversationId"
+              element={
+                <RequireAuth>
+                  <ConversationPage />
+                </RequireAuth>
+              }
+            />
           </Routes>
         </ToastProvider>
       </AuthProvider>

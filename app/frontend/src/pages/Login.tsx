@@ -1,5 +1,5 @@
-import { FormEvent, useState } from 'react';
-import { useLocation, useNavigate, Link, Location } from 'react-router-dom';
+import { type FormEvent, useState } from 'react';
+import { Link, type Location, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 
 interface LocationStateWithFrom {

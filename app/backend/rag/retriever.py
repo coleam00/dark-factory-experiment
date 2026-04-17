@@ -130,4 +130,5 @@ def _cosine_similarity_batch(
     matrix_normalized = matrix / matrix_norms
 
     # Dot product of normalized vectors = cosine similarity
-    return (matrix_normalized @ query_normalized).astype(np.float32)  # shape: (N,)
+    result: np.ndarray = (matrix_normalized @ query_normalized).astype(np.float32)  # shape: (N,)
+    return result

@@ -121,9 +121,7 @@ async def sync_channel() -> SyncResponse:
         ) from exc
 
     all_video_ids = (
-        channel_videos["video_ids"]
-        + channel_videos["short_ids"]
-        + channel_videos["live_ids"]
+        channel_videos["video_ids"] + channel_videos["short_ids"] + channel_videos["live_ids"]
     )
     videos_total = len(all_video_ids)
     videos_new = 0
@@ -197,9 +195,7 @@ async def sync_channel() -> SyncResponse:
         video_id = video_record["id"]
 
         # Chunk the transcript
-        chunk_texts: list[str] = chunk_video(
-            {"title": title, "transcript": transcript}
-        )
+        chunk_texts: list[str] = chunk_video({"title": title, "transcript": transcript})
 
         if not chunk_texts:
             logger.warning(
@@ -223,9 +219,7 @@ async def sync_channel() -> SyncResponse:
 
         # Store chunks
         try:
-            for idx, (text, embedding) in enumerate(
-                zip(chunk_texts, embeddings, strict=False)
-            ):
+            for idx, (text, embedding) in enumerate(zip(chunk_texts, embeddings, strict=False)):
                 await repo.create_chunk(
                     video_id=video_id,
                     content=text,

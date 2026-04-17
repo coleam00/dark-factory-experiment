@@ -109,9 +109,7 @@ async def signup(
             await signup_rate_limit.check(ip, conn)
         except signup_rate_limit.SignupRateLimited as exc:
             outcome = "ip_limited" if exc.scope == "ip" else "global_limited"
-            await signup_rate_limit.record(
-                conn, ip=ip, email_attempted=body.email, outcome=outcome
-            )
+            await signup_rate_limit.record(conn, ip=ip, email_attempted=body.email, outcome=outcome)
             return JSONResponse(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 content={
@@ -140,9 +138,7 @@ async def signup(
                 status_code=status.HTTP_409_CONFLICT, detail="Email already registered"
             ) from exc
 
-        await signup_rate_limit.record(
-            conn, ip=ip, email_attempted=body.email, outcome="accepted"
-        )
+        await signup_rate_limit.record(conn, ip=ip, email_attempted=body.email, outcome="accepted")
 
     _set_session_cookie(response, str(user["id"]))
     return _user_to_response(user)

@@ -58,10 +58,7 @@ _IP_MESSAGE = (
     "Only one signup per hour from this network. "
     "Please try again later or log in if you already have an account."
 )
-_GLOBAL_MESSAGE = (
-    "We're receiving a lot of signups right now. "
-    "Please try again in a few minutes."
-)
+_GLOBAL_MESSAGE = "We're receiving a lot of signups right now. Please try again in a few minutes."
 
 
 def _now() -> datetime:

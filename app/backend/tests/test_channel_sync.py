@@ -24,8 +24,8 @@ os.environ.setdefault("YOUTUBE_CHANNEL_ID", "UC_testchannel")
 os.environ.setdefault("CHANNEL_SYNC_TYPE", "video")
 
 from backend.auth.dependencies import get_current_user
-from backend.main import app
 from backend.db import repository
+from backend.main import app
 
 
 @pytest.fixture(autouse=True)
@@ -37,16 +37,40 @@ def bypass_auth():
 
 
 @pytest.fixture(autouse=True)
-def temp_db_path(tmp_path, monkeypatch):
-    """Point DB_PATH at a temp file so tests never touch data/chat.db."""
+def temp_db_schema(tmp_path, monkeypatch):
+    """Point DB_PATH at a temp file AND initialise the schema before each test."""
     db_path = tmp_path / "test_chat.db"
     monkeypatch.setenv("DB_PATH", str(db_path))
+
+    import asyncio
+
+    async def _init():
+        from backend.db.schema import init_db
+
+        await init_db()
+
+    asyncio.run(_init())
     return db_path
+
+
+@pytest.fixture(autouse=True)
+def mock_get_video_by_youtube_id():
+    """Stub get_video_by_youtube_id so pre-existing videos aren't required."""
+    from backend.db import repository
+
+    async def stub(*args, **kwargs):
+        return None
+
+    original = repository.get_video_by_youtube_id
+    repository.get_video_by_youtube_id = stub
+    yield
+    repository.get_video_by_youtube_id = original
 
 
 # ---------------------------------------------------------------------------
 # Mock Supadata responses
 # ---------------------------------------------------------------------------
+
 
 class MockChannelVideosResult:
     """Plain sync object returned by client.youtube.channel.videos()."""
@@ -73,25 +97,30 @@ class NoTranscriptResult:
 
 async def make_mock_channel_videos(video_ids, short_ids=None, live_ids=None):
     """Return an async function that resolves to MockChannelVideosResult."""
+
     async def fn(*args, **kwargs):
         return MockChannelVideosResult(
             video_ids=video_ids,
             short_ids=short_ids or [],
             live_ids=live_ids or [],
         )
+
     return fn
 
 
 async def make_mock_transcript(text):
     """Return an async function that resolves to MockTranscriptResult."""
+
     async def fn(*args, **kwargs):
         return MockTranscriptResult(text=text)
+
     return fn
 
 
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 async def test_sync_channel_idempotent_skips_existing_videos():
     """
@@ -116,9 +145,7 @@ async def test_sync_channel_idempotent_skips_existing_videos():
         )
         mock_get_client.return_value = mock_client
 
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post("/api/channels/sync")
 
     assert response.status_code == 200
@@ -133,17 +160,13 @@ async def test_sync_channel_returns_sync_run_id():
     """POST /api/channels/sync returns a sync_run_id immediately."""
     with patch("backend.services.supadata._get_client") as mock_get_client:
         mock_client = AsyncMock()
-        mock_client.youtube.channel.videos = await make_mock_channel_videos(
-            ["dQw4w9WgXcQ"]
-        )
+        mock_client.youtube.channel.videos = await make_mock_channel_videos(["dQw4w9WgXcQ"])
         mock_client.youtube.transcript = await make_mock_transcript(
             "This is a sample transcript for the video."
         )
         mock_get_client.return_value = mock_client
 
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post("/api/channels/sync")
 
     assert response.status_code == 200
@@ -159,9 +182,7 @@ async def test_sync_channel_empty_channel():
         mock_client.youtube.channel.videos = await make_mock_channel_videos([])
         mock_get_client.return_value = mock_client
 
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post("/api/channels/sync")
 
     assert response.status_code == 200
@@ -172,20 +193,17 @@ async def test_sync_channel_empty_channel():
 
 async def test_sync_channel_no_transcript_creates_error_row():
     """Video with unavailable transcript increments videos_error count."""
+
     async def no_transcript_fn(*args, **kwargs):
         return NoTranscriptResult()
 
     with patch("backend.services.supadata._get_client") as mock_get_client:
         mock_client = AsyncMock()
-        mock_client.youtube.channel.videos = await make_mock_channel_videos(
-            ["noTranscriptVideo"]
-        )
+        mock_client.youtube.channel.videos = await make_mock_channel_videos(["noTranscriptVideo"])
         mock_client.youtube.transcript = no_transcript_fn
         mock_get_client.return_value = mock_client
 
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post("/api/channels/sync")
 
     assert response.status_code == 200
@@ -218,9 +236,7 @@ async def test_sync_channel_429_triggers_backoff():
         )
         mock_get_client.return_value = mock_client
 
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post("/api/channels/sync")
 
     # Retry should have happened (call_count = 2)
@@ -230,9 +246,7 @@ async def test_sync_channel_429_triggers_backoff():
 
 async def test_list_sync_runs_empty():
     """GET /api/channels/sync-runs on empty table returns [{}]."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get("/api/channels/sync-runs")
 
     assert response.status_code == 200
@@ -262,9 +276,7 @@ async def test_list_sync_runs_returns_recent_runs():
         videos_error=10,
     )
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get("/api/channels/sync-runs")
 
     assert response.status_code == 200

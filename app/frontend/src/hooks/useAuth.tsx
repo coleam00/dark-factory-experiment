@@ -11,14 +11,22 @@
  * state lives in context, Sidebar and ChatArea see the same snapshot.
  */
 
-import { ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import {
+  type ReactNode,
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import {
   AuthError,
-  AuthMeResponse,
+  type AuthMeResponse,
   login as apiLogin,
   logout as apiLogout,
-  me,
   signup as apiSignup,
+  me,
 } from '../lib/authApi';
 
 export type AuthStatus = 'loading' | 'authed' | 'anon';
