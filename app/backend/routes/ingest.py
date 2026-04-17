@@ -15,6 +15,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import AnyUrl, BaseModel, Field, field_validator
 
 from backend.db import repository
+from backend.ingest.supadata_client import SupadataClient, SupadataError
+from backend.ingest.youtube_url import parse_youtube_url
 from backend.rag import retriever
 from backend.rag.chunker import chunk_video
 from backend.rag.embeddings import embed_batch
@@ -44,6 +46,16 @@ class IngestRequest(BaseModel):
 
 
 class IngestResponse(BaseModel):
+    video_id: str
+    chunks_created: int
+    status: str
+
+
+class IngestFromUrlRequest(BaseModel):
+    url: AnyUrl = Field(..., description="YouTube video URL")
+
+
+class IngestFromUrlResponse(BaseModel):
     video_id: str
     chunks_created: int
     status: str
@@ -123,6 +135,108 @@ async def ingest_video(body: IngestRequest) -> IngestResponse:
     logger.info("Ingestion complete for '%s': %d chunks stored", body.title, len(chunk_texts))
 
     return IngestResponse(
+        video_id=video_id,
+        chunks_created=len(chunk_texts),
+        status="ok",
+    )
+
+
+@router.post("/ingest/from-url", response_model=IngestFromUrlResponse)
+async def ingest_from_url(body: IngestFromUrlRequest) -> IngestFromUrlResponse:
+    """
+    Ingest a YouTube video by URL alone — fetches transcript via Supadata.
+
+    Returns:
+        { video_id, chunks_created, status }
+
+    Raises:
+        HTTP 400 if the URL is not a valid YouTube URL.
+        HTTP 503 if Supadata is rate-limited.
+        HTTP 502 if Supadata or the embeddings API is unavailable.
+        HTTP 422 for validation errors.
+        HTTP 401 for unauthenticated callers.
+    """
+    url_str = str(body.url)
+
+    # 1. Parse and validate the YouTube URL
+    try:
+        parsed = parse_youtube_url(url_str)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    video_id_from_url = parsed.video_id
+    logger.info("Ingesting from URL: '%s' (video_id=%s)", url_str, video_id_from_url)
+
+    # 2. Fetch transcript + metadata from Supadata
+    client = SupadataClient()
+    try:
+        supadata_data = await client.fetch_transcript(url_str, lang="en")
+    except SupadataError as exc:
+        logger.error("Supadata fetch failed for '%s': %s", url_str, exc)
+        raise HTTPException(
+            status_code=503,
+            detail=f"Transcript fetch failed: {exc}",
+        ) from exc
+    finally:
+        await client.close()
+
+    title = supadata_data["title"]
+    description = supadata_data["description"]
+    transcript = supadata_data["transcript"]
+
+    # 3. Create the video record in the DB
+    video_record = await repository.create_video(
+        title=title,
+        description=description,
+        url=url_str,
+        transcript=transcript,
+    )
+    video_id = video_record["id"]
+
+    # 4. Chunk the transcript using Docling HybridChunker
+    video_dict = {
+        "title": title,
+        "transcript": transcript,
+    }
+    chunk_texts: list[str] = chunk_video(video_dict)
+
+    if not chunk_texts:
+        logger.warning("Chunker returned 0 chunks for video '%s'", title)
+        return IngestFromUrlResponse(video_id=video_id, chunks_created=0, status="stored_no_chunks")
+
+    logger.info("Generated %d chunks for '%s'", len(chunk_texts), title)
+
+    # 5. Embed all chunks in a single batched API call
+    try:
+        embeddings = embed_batch(chunk_texts)
+    except Exception as exc:
+        logger.error("Embedding batch failed for video '%s': %s", title, exc)
+        raise HTTPException(
+            status_code=502,
+            detail=f"Embeddings API request failed: {exc}",
+        ) from exc
+
+    if len(embeddings) != len(chunk_texts):
+        raise HTTPException(
+            status_code=500,
+            detail="Mismatch between chunk count and embedding count.",
+        )
+
+    # 6. Store each chunk with its embedding
+    try:
+        for idx, (text, embedding) in enumerate(zip(chunk_texts, embeddings, strict=False)):
+            await repository.create_chunk(
+                video_id=video_id,
+                content=text,
+                embedding=embedding,
+                chunk_index=idx,
+            )
+    finally:
+        retriever.invalidate_cache()
+
+    logger.info("Ingestion complete for '%s': %d chunks stored", title, len(chunk_texts))
+
+    return IngestFromUrlResponse(
         video_id=video_id,
         chunks_created=len(chunk_texts),
         status="ok",

@@ -1,0 +1,20 @@
+{
+  "video": {
+    "title": "My Awesome YouTube Video",
+    "description": "A description of the video content.",
+    "transcript": [
+      {
+        "text": "Welcome to this video.",
+        "start_seconds": 0.0
+      },
+      {
+        "text": "Today we're going to talk about something interesting.",
+        "start_seconds": 5.5
+      },
+      {
+        "text": "Thanks for watching.",
+        "start_seconds": 12.3
+      }
+    ]
+  }
+}

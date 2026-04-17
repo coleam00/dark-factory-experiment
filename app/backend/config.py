@@ -47,6 +47,14 @@ if not OPENROUTER_API_KEY:
         file=sys.stderr,
     )
 
+SUPADATA_API_KEY: str = os.environ.get("SUPADATA_API_KEY", "")
+if not SUPADATA_API_KEY:
+    print(
+        "WARNING: SUPADATA_API_KEY is not set or empty. "
+        "Ingest-by-URL will not work in production.",
+        file=sys.stderr,
+    )
+
 OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
 EMBEDDING_MODEL: str = "openai/text-embedding-3-small"
 CHAT_MODEL: str = "anthropic/claude-sonnet-4.6"
