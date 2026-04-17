@@ -8,10 +8,11 @@ services:
       - "443:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./upstream.conf:/etc/caddy/upstream.conf:ro
       - caddy_data:/data
       - caddy_config:/config
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    # No extra_hosts — the app now lives in-network and is reachable by
+    # service name (app-blue / app-green). upstream.conf switches between them.
 
   postgres:
     image: pgvector/pgvector:pg16
@@ -31,7 +32,67 @@ services:
       timeout: 5s
       retries: 5
 
+  # ---- Blue/green app services --------------------------------------------
+  # Identical except for name. /opt/dynachat/deploy.sh rebuilds the inactive
+  # color, waits for its healthcheck, then rewrites upstream.conf and does a
+  # graceful `caddy reload` to swap. Neither publishes a host port — Caddy
+  # reaches them via the internal docker network by service name.
+  #
+  # Both mount the same named volume (app_data) for the SQLite DB so the
+  # swap preserves state. Brief overlap during swap is fine — SQLite WAL
+  # handles low-volume concurrent access.
+  app-blue:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: dynachat-app:latest
+    container_name: dynachat-app-blue
+    restart: unless-stopped
+    environment:
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      SUPADATA_API_KEY: ${SUPADATA_API_KEY:-}
+      DB_PATH: /app/data/chat.db
+      FRONTEND_DIST: /app/frontend/dist
+    volumes:
+      - app_data:/app/data
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3).status == 200 else 1)"
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+
+  app-green:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: dynachat-app:latest
+    container_name: dynachat-app-green
+    restart: unless-stopped
+    environment:
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      SUPADATA_API_KEY: ${SUPADATA_API_KEY:-}
+      DB_PATH: /app/data/chat.db
+      FRONTEND_DIST: /app/frontend/dist
+    volumes:
+      - app_data:/app/data
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3).status == 200 else 1)"
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+
 volumes:
   caddy_data:
   caddy_config:
   postgres_data:
+  app_data:

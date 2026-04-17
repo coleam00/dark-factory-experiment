@@ -20,7 +20,11 @@ logger = logging.getLogger(__name__)
 
 
 def _find_and_load_env() -> None:
-    """Search parent directories for .env and load it."""
+    """Search parent directories for .env and load it.
+
+    In containerized deploys there is no .env file on disk — env vars are
+    injected by docker-compose. Missing .env is therefore not an error.
+    """
     current = Path(__file__).resolve()
     # Try each parent directory up to the filesystem root
     for parent in current.parents:
@@ -29,13 +33,7 @@ def _find_and_load_env() -> None:
             load_dotenv(dotenv_path=candidate, override=False)
             logger.info(f"Loaded .env from {candidate}")
             return
-    # Fallback: try the standard absolute path mentioned in the spec
-    fallback = Path(__file__).resolve().parents[4] / ".env"
-    if fallback.exists():
-        load_dotenv(dotenv_path=fallback, override=False)
-        logger.info(f"Loaded .env from fallback {fallback}")
-    else:
-        print("WARNING: No .env file found in parent directories.", file=sys.stderr)
+    logger.info("No .env file found on disk; assuming env vars are injected (container deploy).")
 
 
 _find_and_load_env()
@@ -53,8 +51,10 @@ OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
 EMBEDDING_MODEL: str = "openai/text-embedding-3-small"
 CHAT_MODEL: str = "anthropic/claude-sonnet-4.6"
 
-# Database
-DB_PATH: Path = Path(__file__).resolve().parent / "data" / "chat.db"
+# Database — env-overridable so containerized deploys can point at a mounted volume.
+# Default preserves the existing local dev behaviour (app/backend/data/chat.db).
+_default_db_path = Path(__file__).resolve().parent / "data" / "chat.db"
+DB_PATH: Path = Path(os.environ.get("DB_PATH", str(_default_db_path)))
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 # RAG settings

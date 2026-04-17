@@ -4,13 +4,16 @@ Handles lifespan startup (DB init + seeding) and route registration.
 """
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as get_version
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from backend.config import DB_PATH
 from backend.data.seed import seed_if_empty
@@ -100,3 +103,15 @@ async def stream_test():
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# ---------------------------------------------------------------------------
+# Frontend static assets (production only — Vite serves them in dev)
+#
+# When FRONTEND_DIST env var points at a built `dist/`, mount it at `/` so
+# FastAPI serves index.html + hashed JS/CSS from the same origin as `/api/*`.
+# This mount is registered LAST so the `/api/*` routes above take precedence.
+# ---------------------------------------------------------------------------
+_frontend_dist = os.environ.get("FRONTEND_DIST", "")
+if _frontend_dist and Path(_frontend_dist).is_dir():
+    app.mount("/", StaticFiles(directory=_frontend_dist, html=True), name="frontend")

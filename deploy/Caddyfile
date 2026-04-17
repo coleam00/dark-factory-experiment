@@ -5,13 +5,9 @@
 chat.dynamous.ai {
     encode zstd gzip
 
-    # Backend API
-    handle /api/* {
-        reverse_proxy host.docker.internal:8000
-    }
-
-    # Frontend (Vite dev for now; swap to static build once app has Dockerfile)
-    handle {
-        reverse_proxy host.docker.internal:5173
-    }
+    # Which app container is live is decided by upstream.conf, which the
+    # deploy script (/opt/dynachat/deploy.sh) rewrites on each blue/green
+    # swap and then triggers a graceful `caddy reload`. FastAPI serves
+    # both /api/* and the built frontend static assets from the same origin.
+    import /etc/caddy/upstream.conf
 }

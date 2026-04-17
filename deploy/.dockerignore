@@ -1,0 +1,52 @@
+# Stop build context from ballooning + shipping anything we shouldn't.
+# Paths are relative to the build context (the repo root).
+
+# Git / editor
+.git
+.gitignore
+.github
+.vscode
+.idea
+
+# Docs + governance (not needed in the image)
+*.md
+!app/backend/README.md
+FACTORY_RULES.md
+MISSION.md
+CLAUDE.md
+spec.md
+
+# Python
+**/__pycache__
+**/*.pyc
+**/.venv
+**/venv
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+
+# Node / frontend
+**/node_modules
+**/.vite
+app/frontend/dist
+
+# Local data + secrets — never leak these into an image layer
+**/.env
+**/.env.*
+app/backend/data/*.db
+app/backend/data/*.db-*
+
+# Archon / factory scaffolding (not needed at runtime)
+.archon
+.claude
+
+# Test output
+**/coverage
+**/.coverage
+**/htmlcov
+
+# Dev tooling
+.pre-commit-config.yaml
+
+# Deploy artefacts (we don't ship the deploy files inside the image)
+deploy
