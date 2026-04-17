@@ -83,7 +83,7 @@ function ConversationPage() {
 }
 
 function LandingPage() {
-  return <AppLayout conversationId={undefined} />;
+  return <AppLayout />;
 }
 
 // ── Root app ─────────────────────────────────────────────────────

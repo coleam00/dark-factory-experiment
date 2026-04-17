@@ -97,8 +97,6 @@ async def get_channel_video_ids(
                 exc,
             )
             raise
-        except SupadataError:
-            raise  # already handled above, just re-raise
         except (asyncio.TimeoutError, OSError) as exc:
             logger.error("Network error in get_channel_video_ids: %s", exc)
             raise SupadataError(error="network_error", message=str(exc), details="") from exc
@@ -143,8 +141,6 @@ async def get_transcript(video_id: str, lang: str = "en") -> str | None:
                 return None
             logger.error("Supadata transcript failed for video %s: %s", video_id, exc)
             raise
-        except SupadataError:
-            raise  # already handled above, just re-raise
         except (asyncio.TimeoutError, OSError) as exc:
             logger.error("Network error in get_transcript for %s: %s", video_id, exc)
             raise SupadataError(error="network_error", message=str(exc), details="") from exc
