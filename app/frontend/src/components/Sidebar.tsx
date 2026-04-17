@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../hooks/useAuth';
 import { useConversations } from '../hooks/useConversations';
 import { type Conversation, createConversation, deleteConversation } from '../lib/api';
 import { VideoExplorer } from './VideoExplorer';
@@ -234,6 +235,49 @@ function ConfirmDialog({ onConfirm, onCancel, deleting, error }: ConfirmDialogPr
   );
 }
 
+// ── Daily quota counter ──────────────────────────────────────────
+interface DailyQuotaCounterProps {
+  used: number;
+  remaining: number;
+  resetsAt: string | null;
+}
+
+function DailyQuotaCounter({ used, remaining, resetsAt }: DailyQuotaCounterProps) {
+  const cap = used + remaining;
+  const atLimit = remaining === 0;
+  const resetLabel = resetsAt
+    ? new Date(resetsAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    : null;
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      data-testid="quota-counter"
+      style={{
+        padding: '8px 12px',
+        borderTop: '1px solid rgba(255,255,255,0.06)',
+        fontSize: 12,
+        color: atLimit ? '#ef4444' : '#94a3b8',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        gap: 8,
+      }}
+    >
+      <span>
+        <strong style={{ color: atLimit ? '#ef4444' : '#f1f5f9', fontWeight: 600 }}>
+          {used}/{cap}
+        </strong>{' '}
+        messages today
+      </span>
+      {atLimit && resetLabel && (
+        <span style={{ fontSize: 11, opacity: 0.85 }}>resets at {resetLabel}</span>
+      )}
+    </div>
+  );
+}
+
 // ── Main Sidebar component ───────────────────────────────────────
 interface SidebarProps {
   activeConversationId?: string;
@@ -244,6 +288,7 @@ interface SidebarProps {
 export function Sidebar({ activeConversationId, isOpen, onClose }: SidebarProps) {
   const navigate = useNavigate();
   const { conversations, loading, refetch } = useConversations();
+  const { user } = useAuth();
   const [creatingNew, setCreatingNew] = useState(false);
   const [newChatError, setNewChatError] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
@@ -416,6 +461,15 @@ export function Sidebar({ activeConversationId, isOpen, onClose }: SidebarProps)
             ))
           )}
         </div>
+
+        {/* ── Daily message quota counter (MISSION §10 #1: hardcoded 25/24h) ── */}
+        {user && (
+          <DailyQuotaCounter
+            used={user.messages_used_today}
+            remaining={user.messages_remaining_today}
+            resetsAt={user.rate_window_resets_at}
+          />
+        )}
 
         {/* ── Sidebar footer: branding + library button ── */}
         <div

@@ -20,9 +20,10 @@ from collections.abc import AsyncGenerator
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
+from backend import rate_limit
 from backend.auth.dependencies import get_current_user
 from backend.db import repository
 from backend.llm.openrouter import stream_chat
@@ -72,10 +73,28 @@ async def create_message(
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
+    # 2. Enforce the 25 msg / user / 24h cap (MISSION §10 invariant #1).
+    #    Must run BEFORE any LLM or DB write so a rate-limited user cannot
+    #    consume OpenRouter budget or leave an orphan user-message row. The
+    #    audit row is inserted inside `check_and_record` on pass — partial
+    #    streams still count, users can't game the counter by aborting.
+    try:
+        await rate_limit.check_and_record(user_id)
+    except rate_limit.RateLimitExceeded as exc:
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": "rate_limit_exceeded",
+                "limit": rate_limit.DAILY_MESSAGE_CAP,
+                "window_hours": rate_limit.WINDOW_HOURS,
+                "reset_at": exc.reset_at.isoformat(),
+            },
+        )
+
     # Content is already validated non-empty by Pydantic; strip for storage
     user_content = body.content.strip()
 
-    # 2. Persist the user message. create_message re-checks ownership atomically
+    # 3. Persist the user message. create_message re-checks ownership atomically
     # so a race between the check above and insert can't leak cross-user.
     inserted = await repository.create_message(
         conversation_id=conv_id,
@@ -86,11 +105,11 @@ async def create_message(
     if inserted is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    # 3. Retrieve conversation history for LLM context
+    # 4. Retrieve conversation history for LLM context
     all_messages = await repository.list_messages(conv_id, user_id=user_id)
     llm_messages = [{"role": m["role"], "content": m["content"]} for m in all_messages]
 
-    # 4. Embed the user query and retrieve relevant chunks
+    # 5. Embed the user query and retrieve relevant chunks
     context = ""
     chunks: list[dict] = []
     try:
@@ -106,7 +125,7 @@ async def create_message(
         dict.fromkeys(c.get("video_title", "") for c in chunks if c.get("video_title"))
     )
 
-    # 5. Stream the response
+    # 6. Stream the response
     async def event_generator() -> AsyncGenerator[str, None]:
         full_response = []
         try:
@@ -118,7 +137,7 @@ async def create_message(
                 full_response.append(sse_chunk)
                 yield sse_chunk
         finally:
-            # 6. Persist the complete assistant message
+            # 7. Persist the complete assistant message
             assistant_text = _extract_text_from_sse(full_response)
             if assistant_text:
                 try:

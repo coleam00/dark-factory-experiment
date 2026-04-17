@@ -1,10 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useAuth } from '../hooks/useAuth';
 import { useMessages } from '../hooks/useMessages';
 import { useStreamingResponse } from '../hooks/useStreamingResponse';
 import { useToast } from '../hooks/useToast';
 import type { Message as MessageType } from '../lib/api';
+import { RateLimitError } from '../lib/api';
 import { ChatInput, type ChatInputHandle } from './ChatInput';
 import { Message } from './Message';
+
+function formatResetTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  } catch {
+    return iso;
+  }
+}
 
 // ── Skeleton message rows ─────────────────────────────────────────
 function SkeletonMessages() {
@@ -231,6 +241,7 @@ export function ChatArea({ conversationId }: ChatAreaProps) {
   const { messages, setMessages, loading, error } = useMessages(conversationId || null);
   const { streamingContent, streamingSources, isStreaming, startStream } = useStreamingResponse();
   const { addToast } = useToast();
+  const { refresh: refreshAuth } = useAuth();
 
   const chatInputRef = useRef<ChatInputHandle>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -308,9 +319,9 @@ export function ChatArea({ conversationId }: ChatAreaProps) {
           setMessages((prev) => [...prev, assistantMsg]);
         });
         pendingUserMsgIdRef.current = null;
+        // Pull fresh quota counter so the sidebar updates after each send.
+        refreshAuth();
       } catch (e) {
-        const errMsg = e instanceof Error ? e.message : 'Failed to send message';
-
         // Remove the optimistic user message
         if (pendingUserMsgIdRef.current) {
           const removedId = pendingUserMsgIdRef.current;
@@ -318,20 +329,28 @@ export function ChatArea({ conversationId }: ChatAreaProps) {
           pendingUserMsgIdRef.current = null;
         }
 
-        // Show inline error with retry
+        if (e instanceof RateLimitError) {
+          // MISSION §10 #1 — daily cap hit. No retry; the user literally
+          // can't send another message until the window slides forward.
+          const friendly = `You've hit your daily message limit (${e.limit}/day). Resets at ${formatResetTime(e.resetAt)}.`;
+          setInlineError(friendly);
+          setFailedMessageText(null);
+          addToast(friendly, 'error');
+          // Sync counter so the sidebar flips to 25/25 with a reset time.
+          refreshAuth();
+          // Restore message text so the user can resend after the window resets.
+          setTimeout(() => chatInputRef.current?.setInputText(content), 50);
+          return;
+        }
+
+        const errMsg = e instanceof Error ? e.message : 'Failed to send message';
         setInlineError('Failed to get a response. Please try again.');
         setFailedMessageText(content);
-
-        // Show error toast
         addToast(errMsg || 'Network error — message not sent', 'error');
-
-        // Restore message text to input
-        setTimeout(() => {
-          chatInputRef.current?.setInputText(content);
-        }, 50);
+        setTimeout(() => chatInputRef.current?.setInputText(content), 50);
       }
     },
-    [conversationId, isStreaming, setMessages, startStream, scrollToBottom, addToast],
+    [conversationId, isStreaming, setMessages, startStream, scrollToBottom, addToast, refreshAuth],
   );
 
   // ── Retry failed message — re-attempt the API call with same content ──

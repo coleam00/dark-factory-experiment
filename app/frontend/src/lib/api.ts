@@ -4,6 +4,25 @@
 
 const BASE = '/api';
 
+/**
+ * Thrown when POST /api/conversations/{id}/messages returns 429.
+ * Carries the shape of the rate_limit_exceeded JSON body so the chat UI
+ * can render a friendly "daily limit hit, resets at HH:MM" message.
+ * MISSION §10 invariant #1 is the governing cap (25/24h, hardcoded).
+ */
+export class RateLimitError extends Error {
+  limit: number;
+  windowHours: number;
+  resetAt: string; // ISO timestamp of oldest_in_window + 24h
+
+  constructor(body: { limit: number; window_hours: number; reset_at: string }) {
+    super('rate_limit_exceeded');
+    this.limit = body.limit;
+    this.windowHours = body.window_hours;
+    this.resetAt = body.reset_at;
+  }
+}
+
 export interface Video {
   id: string;
   title: string;

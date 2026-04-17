@@ -478,5 +478,7 @@ Any PR touching them must be human-authored:
 - `app/backend/main.py` — auth router registration and `Depends(get_current_user)` wiring
 - `app/backend/config.py` — `JWT_SECRET` / `DATABASE_URL` handling
 - CORS middleware configuration anywhere in the backend
-
-(The 25 msg/user/24h rate-limit issue will extend this list with its own paths.)
+- `app/backend/rate_limit.py` — implements MISSION §10 invariant #1 (25 msg/user/24h cap, hardcoded)
+- `app/backend/db/user_messages_repo.py` — audit-table access for the rate-limit counter
+- `app/backend/routes/messages.py` — the rate-limit enforcement call site (also listed above for owner-only conversations)
+- `MISSION.md` §10 invariant #1 (the cap value itself — 25 is not configurable)

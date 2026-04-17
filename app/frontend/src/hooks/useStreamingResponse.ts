@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react';
+import { RateLimitError } from '../lib/api';
 
 export interface StreamResult {
   fullText: string;
@@ -37,6 +38,14 @@ export function useStreamingResponse() {
             window.location.assign(`/login?from=${encodeURIComponent(returnTo)}`);
           }
           throw new Error('Not authenticated');
+        }
+        if (res.status === 429) {
+          // MISSION §10 #1 — daily cap hit. Body: {error, limit, window_hours, reset_at}.
+          const body = await res.json().catch(() => null);
+          if (body && typeof body === 'object' && 'limit' in body) {
+            throw new RateLimitError(body);
+          }
+          throw new Error('Daily message limit reached');
         }
         if (!res.ok) {
           const errorText = await res.text().catch(() => '');

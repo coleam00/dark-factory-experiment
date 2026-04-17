@@ -3,7 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from '
 import { ChatArea } from './components/ChatArea';
 import { Sidebar } from './components/Sidebar';
 import { ToastProvider } from './components/ToastProvider';
-import { useAuth } from './hooks/useAuth';
+import { AuthProvider, useAuth } from './hooks/useAuth';
 import { Login } from './pages/Login';
 import { Signup } from './pages/Signup';
 
@@ -90,8 +90,9 @@ function LandingPage() {
 function App() {
   return (
     <BrowserRouter>
-      <ToastProvider>
-        <Routes>
+      <AuthProvider>
+        <ToastProvider>
+          <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
           <Route
@@ -110,8 +111,9 @@ function App() {
               </RequireAuth>
             }
           />
-        </Routes>
-      </ToastProvider>
+          </Routes>
+        </ToastProvider>
+      </AuthProvider>
     </BrowserRouter>
   );
 }

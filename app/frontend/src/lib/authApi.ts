@@ -13,6 +13,22 @@ export interface AuthUser {
   email: string;
 }
 
+/**
+ * Extended /me response — includes the sliding-window rate-limit counter so
+ * the frontend can render the daily quota without a second request.
+ *
+ * - `messages_used_today`: rows in `user_messages` for this user within the
+ *   last 24h (sliding window, not calendar day).
+ * - `messages_remaining_today`: DAILY_MESSAGE_CAP - used, clamped to ≥0.
+ * - `rate_window_resets_at`: ISO string = oldest_in_window + 24h, or null
+ *   when the user has zero messages in the window (nothing to reset).
+ */
+export interface AuthMeResponse extends AuthUser {
+  messages_used_today: number;
+  messages_remaining_today: number;
+  rate_window_resets_at: string | null;
+}
+
 export class AuthError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -55,4 +71,4 @@ export const login = (email: string, password: string) =>
 
 export const logout = () => authRequest<void>('/logout', { method: 'POST' });
 
-export const me = () => authRequest<AuthUser>('/me', { method: 'GET' });
+export const me = () => authRequest<AuthMeResponse>('/me', { method: 'GET' });

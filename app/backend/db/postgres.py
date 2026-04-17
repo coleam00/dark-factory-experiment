@@ -30,12 +30,26 @@ CREATE TABLE IF NOT EXISTS users (
     email CITEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    last_login_at TIMESTAMPTZ,
-    daily_message_count INTEGER NOT NULL DEFAULT 0,
-    rate_window_start TIMESTAMPTZ
+    last_login_at TIMESTAMPTZ
 );
 
 CREATE INDEX IF NOT EXISTS users_email_idx ON users (email);
+
+-- Drop the placeholder counter columns from #51. The sliding-window audit
+-- table below supersedes them; see issue #52.
+ALTER TABLE users DROP COLUMN IF EXISTS daily_message_count;
+ALTER TABLE users DROP COLUMN IF EXISTS rate_window_start;
+
+-- Sliding-window audit trail for the 25 msg/user/24h cap (MISSION §10 #1).
+-- One row per streamed message. Retained for audit; never pruned actively.
+CREATE TABLE IF NOT EXISTS user_messages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS user_messages_user_id_created_at_idx
+    ON user_messages (user_id, created_at DESC);
 """
 
 

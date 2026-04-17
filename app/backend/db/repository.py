@@ -211,8 +211,7 @@ async def update_conversation_title(conv_id: str, user_id: str, title: str) -> b
     """Rename a conversation. Returns False if it does not belong to the user."""
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
-            "UPDATE conversations SET title = ?, updated_at = ? "
-            "WHERE id = ? AND user_id = ?",
+            "UPDATE conversations SET title = ?, updated_at = ? WHERE id = ? AND user_id = ?",
             (title, _now(), conv_id, user_id),
         )
         await db.commit()

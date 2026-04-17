@@ -15,6 +15,7 @@ import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, EmailStr, Field
 
+from backend import rate_limit
 from backend.auth.dependencies import COOKIE_NAME, get_current_user
 from backend.auth.password import hash_password, verify_password
 from backend.auth.tokens import encode_token
@@ -39,6 +40,20 @@ class LoginRequest(BaseModel):
 class UserResponse(BaseModel):
     id: str
     email: str
+
+
+class MeResponse(BaseModel):
+    """/me payload — user identity plus the current rate-limit counter.
+
+    The counter is included on /me so the frontend can render the daily quota
+    without a second round-trip on page load.
+    """
+
+    id: str
+    email: str
+    messages_used_today: int
+    messages_remaining_today: int
+    rate_window_resets_at: str | None
 
 
 def _set_session_cookie(response: Response, user_id: str) -> None:
@@ -93,7 +108,14 @@ async def logout(response: Response) -> Response:
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.get("/me", response_model=UserResponse)
-async def me(user: dict[str, Any] = Depends(get_current_user)) -> UserResponse:
-    """Return the currently-authenticated user, or 401."""
-    return _user_to_response(user)
+@router.get("/me", response_model=MeResponse)
+async def me(user: dict[str, Any] = Depends(get_current_user)) -> MeResponse:
+    """Return the currently-authenticated user plus their daily quota counter."""
+    status = await rate_limit.get_status(user["id"])
+    return MeResponse(
+        id=str(user["id"]),
+        email=str(user["email"]),
+        messages_used_today=status.used,
+        messages_remaining_today=status.remaining,
+        rate_window_resets_at=status.resets_at.isoformat() if status.resets_at else None,
+    )
