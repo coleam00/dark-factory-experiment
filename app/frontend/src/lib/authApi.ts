@@ -52,23 +52,21 @@ async function authRequest<T>(path: string, init: RequestInit): Promise<T> {
     headers: { 'Content-Type': 'application/json' },
     ...init,
   });
+  if (res.status === 204) return undefined as unknown as T;
   if (!res.ok) {
     let detail = res.statusText;
     let scope: SignupRateLimitScope | undefined;
-    try {
-      const body = await res.json();
+    const body = await res.json().catch(() => null);
+    if (body) {
       if (body?.error === 'signup_rate_limited' && typeof body?.message === 'string') {
         detail = body.message;
         if (body.scope === 'ip' || body.scope === 'global') scope = body.scope;
       } else if (body?.detail) {
         detail = body.detail;
       }
-    } catch {
-      // fall through with statusText
     }
     throw new AuthError(res.status, detail, scope);
   }
-  if (res.status === 204) return undefined as unknown as T;
   return res.json() as Promise<T>;
 }
 

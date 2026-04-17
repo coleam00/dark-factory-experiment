@@ -167,11 +167,11 @@ async def logout(response: Response) -> Response:
 @router.get("/me", response_model=MeResponse)
 async def me(user: dict[str, Any] = Depends(get_current_user)) -> MeResponse:
     """Return the currently-authenticated user plus their daily quota counter."""
-    status = await rate_limit.get_status(user["id"])
+    rate_status = await rate_limit.get_status(user["id"])
     return MeResponse(
         id=str(user["id"]),
         email=str(user["email"]),
-        messages_used_today=status.used,
-        messages_remaining_today=status.remaining,
-        rate_window_resets_at=status.resets_at.isoformat() if status.resets_at else None,
+        messages_used_today=rate_status.used,
+        messages_remaining_today=rate_status.remaining,
+        rate_window_resets_at=rate_status.resets_at.isoformat() if rate_status.resets_at else None,
     )

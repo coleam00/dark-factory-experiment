@@ -32,19 +32,9 @@ export function useStreamingResponse() {
           body: JSON.stringify({ content: userMessage }),
         });
 
-        if (res.status === 401) {
-          if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
-            const returnTo = window.location.pathname + window.location.search;
-            window.location.assign(`/login?from=${encodeURIComponent(returnTo)}`);
-          }
-          throw new Error('Not authenticated');
-        }
         if (res.status === 429) {
           // MISSION §10 #1 — daily cap hit. Body: {error, limit, window_hours, reset_at}.
-          const body = await res.json().catch(() => {
-            console.warn('useStreamingResponse: failed to parse 429 body, using generic message');
-            return null;
-          });
+          const body = await res.json().catch(() => null);
           if (body && typeof body === 'object' && 'limit' in body) {
             throw new RateLimitError(body);
           }
