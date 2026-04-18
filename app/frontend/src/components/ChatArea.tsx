@@ -5,6 +5,7 @@ import { useStreamingResponse } from '../hooks/useStreamingResponse';
 import { useToast } from '../hooks/useToast';
 import type { Citation, Message as MessageType } from '../lib/api';
 import { RateLimitError } from '../lib/api';
+import { exportConversationAsMarkdown } from '../lib/exportMarkdown';
 import { ChatInput, type ChatInputHandle } from './ChatInput';
 import { CitationModal } from './CitationModal';
 import { Message } from './Message';
@@ -239,7 +240,7 @@ interface ChatAreaProps {
 }
 
 export function ChatArea({ conversationId }: ChatAreaProps) {
-  const { messages, setMessages, loading, error } = useMessages(conversationId || null);
+  const { messages, setMessages, loading, error, conversation } = useMessages(conversationId || null);
   const { streamingContent, streamingSources, isStreaming, startStream } = useStreamingResponse();
   const { addToast } = useToast();
   const { refresh: refreshAuth } = useAuth();
@@ -384,6 +385,12 @@ export function ChatArea({ conversationId }: ChatAreaProps) {
 
   const showStreamingBubble = isStreaming;
 
+  const handleExport = useCallback(() => {
+    if (conversation) {
+      exportConversationAsMarkdown(conversation, messages);
+    }
+  }, [conversation, messages]);
+
   return (
     <div
       style={{
@@ -405,8 +412,58 @@ export function ChatArea({ conversationId }: ChatAreaProps) {
           flexDirection: 'column',
           padding: '24px 0 0',
           paddingBottom: 140,
+          position: 'relative',
         }}
       >
+        {/* ── Export button (visible when conversation is active) ── */}
+        {conversation && messages.length > 0 && (
+          <button
+            onClick={handleExport}
+            title="Export conversation as Markdown"
+            style={{
+              position: 'absolute',
+              top: 8,
+              right: 24,
+              background: 'transparent',
+              border: '1px solid rgba(255,255,255,0.08)',
+              borderRadius: 7,
+              color: '#94a3b8',
+              cursor: 'pointer',
+              padding: '5px 8px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              fontSize: 12,
+              zIndex: 5,
+              transition: 'background 0.15s, color 0.15s',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = '#1e293b';
+              e.currentTarget.style.color = '#f1f5f9';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent';
+              e.currentTarget.style.color = '#94a3b8';
+            }}
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 13 13"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M2,9 L2,11.5 A0.5,0.5 0 0,0 2.5,12 L10.5,12 A0.5,0.5 0 0,0 11,11.5 L11,9" />
+              <polyline points="6.5,1 6.5,8.5" />
+              <polyline points="3.5,5.5 6.5,8.5 9.5,5.5" />
+            </svg>
+            Export
+          </button>
+        )}
+
         {showEmpty && <EmptyState onStarterClick={handleStarterClick} />}
 
         {showSkeleton && <SkeletonMessages />}

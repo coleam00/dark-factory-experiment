@@ -390,6 +390,7 @@ dependencies = [
     { name = "openai" },
     { name = "pyjwt" },
     { name = "python-dotenv" },
+    { name = "supadata" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -420,6 +421,7 @@ requires-dist = [
     { name = "python-dotenv" },
     { name = "respx", marker = "extra == 'dev'", specifier = "==0.22.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = "==0.9.2" },
+    { name = "supadata" },
     { name = "uvicorn", extras = ["standard"] },
 ]
 provides-extras = ["dev"]
@@ -1733,6 +1735,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/81/69/17425771797c36cded50b7fe44e850315d039f28b15901ab44839e70b593/starlette-1.0.0.tar.gz", hash = "sha256:6a4beaf1f81bb472fd19ea9b918b50dc3a77a6f2e190a12954b25e6ed5eea149", size = 2655289, upload-time = "2026-03-22T18:29:46.779Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/0b/c9/584bc9651441b4ba60cc4d557d8a547b5aff901af35bda3a4ee30c819b82/starlette-1.0.0-py3-none-any.whl", hash = "sha256:d3ec55e0bb321692d275455ddfd3df75fff145d009685eb40dc91fc66b03d38b", size = 72651, upload-time = "2026-03-22T18:29:45.111Z" },
+]
+
+[[package]]
+name = "supadata"
+version = "1.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a6/5d/778568128fe2fe951ad498143e22e4e3d094a981880201f9136c12d06ef9/supadata-1.6.0.tar.gz", hash = "sha256:9fe3dbaf0d995ad36178f8be1b1ee59e79f46abb9fcf4d10cba5f6b16685b8cd", size = 22628, upload-time = "2026-02-23T14:55:32.781Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0a/29/d7efc290b91477e1a25e5d9e9bd366e6cdb862d04c13b22e432f7e080b7c/supadata-1.6.0-py3-none-any.whl", hash = "sha256:f4029160fc31fa7a30e9b91b3a3f963cc7544febc5d2ae2fdaccd44167da1f7f", size = 17926, upload-time = "2026-02-23T14:55:31.813Z" },
 ]
 
 [[package]]

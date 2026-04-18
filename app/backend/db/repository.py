@@ -315,6 +315,20 @@ async def delete_conversation(conv_id: str, user_id: str) -> bool:
         return cursor.rowcount > 0
 
 
+async def search_conversations_by_title(user_id: str, query: str, limit: int = 20) -> list[dict]:
+    """Return conversations owned by user where title contains substring (case-insensitive)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        pattern = f"%{query}%"
+        async with db.execute(
+            "SELECT id, title, created_at, updated_at FROM conversations "
+            "WHERE user_id = ? AND title LIKE ? ORDER BY updated_at DESC LIMIT ?",
+            (user_id, pattern, limit),
+        ) as cursor:
+            rows = await cursor.fetchall()
+    return [dict(row) for row in rows]
+
+
 # ---------------------------------------------------------------------------
 # Messages
 # ---------------------------------------------------------------------------
