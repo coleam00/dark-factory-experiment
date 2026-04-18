@@ -443,9 +443,9 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
             title="Export conversation as Markdown"
             style={{
               position: 'absolute',
-              top: 8,
+              top: 12,
               right: 24,
-              background: 'transparent',
+              background: '#1e293b',
               border: '1px solid rgba(255,255,255,0.08)',
               borderRadius: 7,
               color: '#94a3b8',
@@ -463,7 +463,7 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
               e.currentTarget.style.color = '#f1f5f9';
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'transparent';
+              e.currentTarget.style.background = '#1e293b';
               e.currentTarget.style.color = '#94a3b8';
             }}
           >
@@ -497,7 +497,7 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
         )}
 
         {showMessages && (
-          <div style={{ padding: '0 24px', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ padding: '24px 24px 0', display: 'flex', flexDirection: 'column' }}>
             {messages.length === 0 && !inlineError ? (
               <EmptyState onStarterClick={handleStarterClick} />
             ) : (
