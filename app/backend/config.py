@@ -96,6 +96,11 @@ JWT_EXPIRY_SECONDS: int = 7 * 24 * 60 * 60  # 7 days
 RETRIEVAL_TOP_K: int = 5
 HYBRID_CHUNKER_MAX_TOKENS: int = 512
 
+# Hybrid retrieval (RRF) constants
+HYBRID_K_CONSTANT: int = 60
+HYBRID_OVERFETCH_FACTOR: int = 2
+KEYWORD_LANGUAGE: str = "english"
+
 # YouTube channel to sync from (used by POST /api/channels/sync)
 YOUTUBE_CHANNEL_ID: str = os.environ.get("YOUTUBE_CHANNEL_ID", "")
 

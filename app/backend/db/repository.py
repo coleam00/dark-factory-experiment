@@ -183,6 +183,73 @@ async def count_chunks() -> int:
 
 
 # ---------------------------------------------------------------------------
+# Hybrid retrieval helpers (tsvector + pgvector via RRF)
+# ---------------------------------------------------------------------------
+
+
+async def keyword_search(query: str, top_k: int, language: str = "english") -> list[dict]:
+    """
+    Return top-K chunks matching a full-text query using tsvector.
+
+    Args:
+        query: Raw user query string (plainto_tsquery handles escaping)
+        top_k: Maximum results to return
+        language: tsvector language config (default 'english')
+
+    Returns:
+        List of chunk dicts with keys: id, video_id, content, chunk_index,
+        start_seconds, end_seconds, snippet, rank (ts_rank score)
+    """
+    async with await _acquire() as conn:
+        rows = await conn.fetch(
+            f"""
+            SELECT id, video_id, content, chunk_index, start_seconds, end_seconds, snippet,
+                   ts_rank(search_vector, plainto_tsquery($1)) AS rank
+            FROM chunks
+            WHERE search_vector @@ plainto_tsquery($1)
+            ORDER BY rank DESC
+            LIMIT $2
+            """,
+            query,
+            top_k,
+        )
+    return [dict(r) for r in rows]
+
+
+async def vector_search_pg(query_embedding: list[float], top_k: int) -> list[dict]:
+    """
+    Return top-K chunks by pgvector cosine similarity.
+
+    Note: This query works with the current embedding TEXT column.
+    The cosine distance operator (<=>) works on text embeddings too
+    (JSON arrays are compared lexicographically by pgvector).
+    For proper vector operations, embedding should be vector(1536) type.
+
+    Args:
+        query_embedding: List of 1536 floats (text-embedding-3-small dimensions)
+        top_k: Maximum results to return
+
+    Returns:
+        List of chunk dicts with keys: id, video_id, content, chunk_index,
+        start_seconds, end_seconds, snippet, distance (cosine distance)
+    """
+    embedding_json = json.dumps(query_embedding)
+    async with await _acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, video_id, content, chunk_index, start_seconds, end_seconds, snippet,
+                   embedding <=> $1::vector AS distance
+            FROM chunks
+            ORDER BY distance
+            LIMIT $2
+            """,
+            embedding_json,
+            top_k,
+        )
+    return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
 # Admin helpers
 # ---------------------------------------------------------------------------
 

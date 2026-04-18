@@ -30,6 +30,7 @@ from backend.db import repository
 from backend.llm.openrouter import stream_chat
 from backend.rag.embeddings import embed_text
 from backend.rag.retriever import retrieve
+from backend.rag.retriever_hybrid import retrieve_hybrid
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +116,7 @@ async def create_message(
     chunks: list[dict] = []
     try:
         query_embedding = await asyncio.to_thread(embed_text, user_content)
-        chunks = await retrieve(query_embedding, k=5)
+        chunks = await retrieve_hybrid(user_content, query_embedding, top_k=5)
         if chunks:
             context = _format_context(chunks)
     except Exception as exc:
