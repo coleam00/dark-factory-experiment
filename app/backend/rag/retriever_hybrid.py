@@ -166,5 +166,5 @@ def _rrf_merge(
         if chunk_id not in rows:
             rows[chunk_id] = row
 
-    ranked = sorted(scores, key=scores.__getitem__, reverse=True)[:top_k]
+    ranked = sorted(scores, key=scores.get, reverse=True)[:top_k]
     return [{**rows[cid], "rrf_score": scores[cid]} for cid in ranked]

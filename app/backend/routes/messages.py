@@ -191,9 +191,7 @@ def _format_context(chunks: list[dict]) -> str:
         video_title = chunk.get("video_title", "Unknown Video")
         content = chunk.get("content", "")
         start_s = chunk.get("start_seconds", 0.0)
-        # Format as mm:ss for readability in context
-        mins = int(start_s) // 60
-        secs = int(start_s) % 60
+        mins, secs = divmod(int(start_s), 60)
         timestamp = f"{mins:02d}:{secs:02d}"
         parts.append(f"[Source: {video_title} at {timestamp}]\n{content}")
     return "\n\n---\n\n".join(parts)
