@@ -68,8 +68,6 @@ def parse_youtube_url(url: str) -> ParsedYouTubeUrl:
         )
 
     if not video_id.strip():
-        raise ValueError(
-            f"Could not extract a non-empty video ID from: '{url}'"
-        )
+        raise ValueError(f"Could not extract a non-empty video ID from: '{url}'")
 
     return ParsedYouTubeUrl(video_id=video_id.strip(), url=url)

@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Conversation, Message } from './api';
 
-const mockSaveAs = vi.fn();
-vi.mock('file-saver', () => ({ saveAs: mockSaveAs }));
+vi.mock('file-saver', () => ({ saveAs: vi.fn() }));
 
+import { saveAs } from 'file-saver';
 import { exportConversationAsMarkdown } from './exportMarkdown';
 
 describe('exportConversationAsMarkdown', () => {
   beforeEach(() => {
-    mockSaveAs.mockClear();
+    vi.mocked(saveAs).mockClear();
   });
 
   it('should format header with title and ISO timestamp', () => {
@@ -17,7 +17,7 @@ describe('exportConversationAsMarkdown', () => {
 
     exportConversationAsMarkdown(conv, messages);
 
-    const blob = mockSaveAs.mock.calls[0][0] as Blob;
+    const blob = vi.mocked(saveAs).mock.calls[0][0] as Blob;
     const text = blob.text();
     expect(text).toMatch(/^# Test Chat\n\n\d{4}-\d{2}-\d{2}T/);
   });
@@ -31,7 +31,7 @@ describe('exportConversationAsMarkdown', () => {
 
     exportConversationAsMarkdown(conv, messages);
 
-    const blob = mockSaveAs.mock.calls[0][0] as Blob;
+    const blob = vi.mocked(saveAs).mock.calls[0][0] as Blob;
     const text = blob.text();
     expect(text).toContain('**You:** Hello');
     expect(text).toContain('**Assistant:** Hi there');
@@ -48,7 +48,7 @@ describe('exportConversationAsMarkdown', () => {
 
     exportConversationAsMarkdown(conv, messages);
 
-    const filename = mockSaveAs.mock.calls[0][1];
+    const filename = vi.mocked(saveAs).mock.calls[0][1];
     expect(filename).toMatch(/^conversation-my-video-episode-1-\d{4}-\d{2}-\d{2}\.md$/);
   });
 
@@ -57,7 +57,7 @@ describe('exportConversationAsMarkdown', () => {
 
     exportConversationAsMarkdown(conv, []);
 
-    const blob = mockSaveAs.mock.calls[0][0] as Blob;
+    const blob = vi.mocked(saveAs).mock.calls[0][0] as Blob;
     const text = blob.text();
     expect(text).toContain('# Empty Chat');
     expect(text).toContain('---');
@@ -71,7 +71,7 @@ describe('exportConversationAsMarkdown', () => {
 
     exportConversationAsMarkdown(conv, messages);
 
-    const blob = mockSaveAs.mock.calls[0][0] as Blob;
+    const blob = vi.mocked(saveAs).mock.calls[0][0] as Blob;
     const text = blob.text();
     expect(text).toContain('**You:** # Warning');
   });

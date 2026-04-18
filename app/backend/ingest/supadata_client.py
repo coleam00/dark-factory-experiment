@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-import time
 from typing import Any
 
 import httpx
@@ -104,13 +103,9 @@ class SupadataClient:
 
                 if response.status_code == 429:
                     retry_after = response.headers.get("retry-after")
-                    if retry_after:
-                        wait_seconds = float(retry_after)
-                    else:
-                        wait_seconds = 2 ** attempt  # exponential backoff
+                    wait_seconds = float(retry_after) if retry_after else 2**attempt
                     logger.warning(
-                        "Supadata 429 for '%s', attempt %d/%d. "
-                        "Retrying in %.1fs.",
+                        "Supadata 429 for '%s', attempt %d/%d. Retrying in %.1fs.",
                         url,
                         attempt + 1,
                         MAX_RETRIES + 1,
@@ -130,8 +125,7 @@ class SupadataClient:
                     # If this is the first attempt without explicit lang, retry with lang="en".
                     if lang != "en":
                         logger.warning(
-                            "Supadata 500 for '%s' with lang='%s'. "
-                            "Retrying with lang='en'.",
+                            "Supadata 500 for '%s' with lang='%s'. Retrying with lang='en'.",
                             url,
                             lang,
                         )
@@ -143,7 +137,7 @@ class SupadataClient:
                     )
 
                 if 500 <= response.status_code < 600:
-                    wait_seconds = (2 ** attempt) + random.uniform(0, 1)
+                    wait_seconds = (2**attempt) + random.uniform(0, 1)
                     logger.warning(
                         "Supadata %d for '%s', attempt %d/%d. Retrying in %.1fs.",
                         response.status_code,
@@ -162,17 +156,14 @@ class SupadataClient:
                         )
 
                 # 4xx non-429 — not retryable
-                raise SupadataError(
-                    f"Supadata returned {response.status_code}: {response.text}"
-                )
+                raise SupadataError(f"Supadata returned {response.status_code}: {response.text}")
 
             except httpx.HTTPError as exc:
                 last_exc = exc
                 if attempt < MAX_RETRIES:
-                    wait_seconds = (2 ** attempt) + random.uniform(0, 1)
+                    wait_seconds = (2**attempt) + random.uniform(0, 1)
                     logger.warning(
-                        "Supadata HTTP error '%s' for '%s', attempt %d/%d. "
-                        "Retrying in %.1fs.",
+                        "Supadata HTTP error '%s' for '%s', attempt %d/%d. Retrying in %.1fs.",
                         exc,
                         url,
                         attempt + 1,
@@ -186,9 +177,7 @@ class SupadataClient:
                     ) from exc
 
         # Should not reach here, but satisfy mypy/pytest
-        raise SupadataError(
-            f"Supadata request exhausted all retries for '{url}'"
-        ) from last_exc
+        raise SupadataError(f"Supadata request exhausted all retries for '{url}'") from last_exc
 
     def _normalize(self, data: dict[str, Any]) -> dict[str, Any]:
         """
@@ -206,10 +195,7 @@ class SupadataClient:
 
         # Transcript segments: may be under "transcript", "segments", or "caption"
         raw_segments: list[dict[str, Any]] = (
-            video.get("transcript")
-            or video.get("segments")
-            or video.get("caption")
-            or []
+            video.get("transcript") or video.get("segments") or video.get("caption") or []
         )
 
         # Build concatenated full-text transcript

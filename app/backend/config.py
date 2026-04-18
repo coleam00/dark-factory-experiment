@@ -50,8 +50,7 @@ if not OPENROUTER_API_KEY:
 SUPADATA_API_KEY: str = os.environ.get("SUPADATA_API_KEY", "")
 if not SUPADATA_API_KEY:
     print(
-        "WARNING: SUPADATA_API_KEY is not set or empty. "
-        "Ingest-by-URL will not work in production.",
+        "WARNING: SUPADATA_API_KEY is not set or empty. Ingest-by-URL will not work in production.",
         file=sys.stderr,
     )
 

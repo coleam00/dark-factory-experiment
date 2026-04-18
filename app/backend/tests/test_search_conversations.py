@@ -17,8 +17,8 @@ os.environ["DB_PATH"] = str(Path(_tmp_dir) / "chat.db")
 os.environ.setdefault("JWT_SECRET", "test-secret-please-do-not-use-in-prod")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost:5432/test")
 
-from backend.db.schema import init_db
 from backend.db.repository import create_conversation, search_conversations_by_title  # noqa: E402
+from backend.db.schema import init_db
 
 
 @pytest.fixture(autouse=True)
@@ -30,7 +30,7 @@ async def fresh_sqlite_schema():
             os.remove(db_path)
         except OSError:
             pass
-        for suffix in ('-wal', '-shm', '.journal'):
+        for suffix in ("-wal", "-shm", ".journal"):
             wal_path = Path(str(db_path) + suffix)
             if wal_path.exists():
                 try:

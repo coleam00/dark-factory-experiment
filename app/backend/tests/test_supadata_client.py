@@ -8,7 +8,6 @@ Verifies:
   - Proper HTTP status codes for error cases (400, 429 → 503, 500, 502)
 """
 
-import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -20,10 +19,10 @@ from backend.ingest.supadata_client import SupadataClient, SupadataError
 from backend.ingest.youtube_url import parse_youtube_url
 from backend.main import app
 
-
 # ---------------------------------------------------------------------------
 # Auth + cache fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(autouse=True)
 def bypass_auth():
@@ -36,6 +35,7 @@ def bypass_auth():
 # ---------------------------------------------------------------------------
 # URL parsing unit tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize(
     "url,expected_id",
@@ -75,6 +75,7 @@ def test_parse_youtube_url_invalid(url):
 # ---------------------------------------------------------------------------
 # SupadataClient unit tests (via respx mocking)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_client_fetch_transcript_happy_path():
@@ -171,6 +172,7 @@ async def test_client_fetch_transcript_500_without_lang_retries():
 # /ingest/from-url endpoint integration tests
 # ---------------------------------------------------------------------------
 
+
 async def test_ingest_from_url_happy_path():
     """Full pipeline: URL parsed → Supadata called → video+chunks created."""
     mock_video = {
@@ -212,9 +214,7 @@ async def test_ingest_from_url_happy_path():
             "backend.routes.ingest.repository.create_chunk",
             new_callable=AsyncMock,
         ) as mock_create_chunk,
-        patch(
-            "backend.routes.ingest.retriever.invalidate_cache"
-        ) as mock_invalidate,
+        patch("backend.routes.ingest.retriever.invalidate_cache") as mock_invalidate,
     ):
         respx.get("https://api.supadata.io/v1/youtube/transcript").mock(
             return_value=Response(200, json=supadata_response),
