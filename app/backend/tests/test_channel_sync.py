@@ -78,10 +78,31 @@ class MockChannelVideosResult:
 
 
 class MockTranscriptResult:
-    """Plain sync object returned by client.transcript()."""
+    """Plain sync object returned by client.transcript().
+
+    The `text` parameter feeds `.content` (matching the real SDK's field name)
+    — the name is a legacy holdover from the pre-migration API.
+    """
 
     def __init__(self, text="This is a sample transcript for the video."):
         self.content = text
+
+
+class MockTranscriptChunk:
+    """Mimics a TranscriptChunk segment returned by the Supadata SDK."""
+
+    def __init__(self, text: str, offset: float = 0.0, duration: float = 1.0, lang: str = "en"):
+        self.text = text
+        self.offset = offset
+        self.duration = duration
+        self.lang = lang
+
+
+class MockTranscriptResultList:
+    """Plain sync object whose .content is a list of TranscriptChunk segments."""
+
+    def __init__(self, chunks: list[MockTranscriptChunk] | None = None):
+        self.content = chunks or []
 
 
 class NoTranscriptResult:
