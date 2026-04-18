@@ -197,4 +197,48 @@ describe('ChatArea refreshConversationsRef', () => {
     // Should not throw even though refreshConversationsRef is undefined
     expect(() => fireEvent.click(sendButton)).not.toThrow();
   });
+
+  it('should defer scrollToBottom inside requestAnimationFrame when autoScrollRef is true', async () => {
+    const mockRefetch = vi.fn().mockResolvedValue(undefined);
+    const refreshConversationsRef = { current: mockRefetch };
+
+    vi.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: createSSEStream('Test response'),
+    } as unknown as Response);
+
+    // Spy on requestAnimationFrame
+    let rafCallback: ((time: number) => void) | null = null;
+    const mockRaf = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
+      rafCallback = cb as (time: number) => void;
+      return 1;
+    });
+
+    const scrollSpy = vi.spyOn(Element.prototype, 'scrollIntoView');
+
+    render(
+      <ChatArea
+        conversationId="conv-1"
+        refreshConversationsRef={
+          refreshConversationsRef as React.MutableRefObject<(() => Promise<void>) | null>
+        }
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('textbox')).toBeInTheDocument();
+    });
+
+    // Verify requestAnimationFrame was called
+    expect(mockRaf).toHaveBeenCalled();
+
+    // Call the RAF callback to simulate the next paint cycle
+    if (rafCallback) {
+      (rafCallback as (time: number) => void)(0);
+    }
+
+    // Verify scrollIntoView was called AFTER RAF
+    expect(scrollSpy).toHaveBeenCalled();
+  });
 });

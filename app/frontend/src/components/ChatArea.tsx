@@ -263,6 +263,8 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
   const [selectedCitation, setSelectedCitation] = useState<Citation | null>(null);
 
   // ── Auto-scroll logic ──
+  // Defer scroll to the next paint cycle so streaming DOM updates are applied first.
+  // Without rAF, scroll fires before React's DOM reconciliation completes (issue #76).
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
     bottomRef.current?.scrollIntoView({ behavior, block: 'end' });
   }, []);
