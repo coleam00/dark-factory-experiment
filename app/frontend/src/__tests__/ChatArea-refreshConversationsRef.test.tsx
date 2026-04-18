@@ -107,7 +107,9 @@ describe('ChatArea refreshConversationsRef', () => {
     render(
       <ChatArea
         conversationId="conv-1"
-        refreshConversationsRef={refreshConversationsRef as React.MutableRefObject<(() => Promise<void>) | null>}
+        refreshConversationsRef={
+          refreshConversationsRef as React.MutableRefObject<(() => Promise<void>) | null>
+        }
       />,
     );
 
@@ -147,7 +149,9 @@ describe('ChatArea refreshConversationsRef', () => {
     render(
       <ChatArea
         conversationId="conv-1"
-        refreshConversationsRef={refreshConversationsRef as React.MutableRefObject<(() => Promise<void>) | null>}
+        refreshConversationsRef={
+          refreshConversationsRef as React.MutableRefObject<(() => Promise<void>) | null>
+        }
       />,
     );
 
@@ -179,12 +183,7 @@ describe('ChatArea refreshConversationsRef', () => {
     } as unknown as Response);
 
     // No error should be thrown when refreshConversationsRef is undefined
-    render(
-      <ChatArea
-        conversationId="conv-1"
-        refreshConversationsRef={undefined}
-      />,
-    );
+    render(<ChatArea conversationId="conv-1" refreshConversationsRef={undefined} />);
 
     await waitFor(() => {
       expect(screen.getByRole('textbox')).toBeInTheDocument();
