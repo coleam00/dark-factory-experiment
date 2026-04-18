@@ -20,7 +20,9 @@ describe('useConversations', () => {
       const { ok } = await result.current.rename('1', 'New Title');
 
       expect(ok).toBe(true);
-      expect(result.current.conversations.find((c) => c.id === '1')?.title).toBe('New Title');
+      await waitFor(() =>
+        expect(result.current.conversations.find((c) => c.id === '1')?.title).toBe('New Title'),
+      );
     });
 
     it('should revert on API failure and return error', async () => {
