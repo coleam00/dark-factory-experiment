@@ -40,16 +40,28 @@ def bypass_auth():
 
 @pytest.fixture(autouse=True)
 def temp_db_schema(tmp_path, monkeypatch):
-    """Point DB_PATH at a temp file AND initialise the schema before each test."""
-    db_path = tmp_path / "test_chat.db"
-    monkeypatch.setenv("DB_PATH", str(db_path))
+    """Point DB_PATH at a temp file AND initialise the schema before each test.
+
+    backend/config.py reads DB_PATH at import time, and db/schema.py + db/repository.py
+    bind it locally via `from backend.config import DB_PATH`. Setting the env var after
+    import has no effect — we must monkeypatch the bound names on each consumer module.
+    """
+    db_path = str(tmp_path / "test_chat.db")
+    monkeypatch.setenv("DB_PATH", db_path)
+
+    # Patch the frozen module-level bindings so every connect() call sees the temp path.
+    from backend import config as _config
+    from backend.db import repository as _repository
+    from backend.db import schema as _schema
+
+    monkeypatch.setattr(_config, "DB_PATH", db_path)
+    monkeypatch.setattr(_schema, "DB_PATH", db_path)
+    monkeypatch.setattr(_repository, "DB_PATH", db_path)
 
     import asyncio
 
     async def _init():
-        from backend.db.schema import init_db
-
-        await init_db()
+        await _schema.init_db()
 
     asyncio.run(_init())
     return db_path
@@ -296,9 +308,11 @@ async def test_list_sync_runs_returns_recent_runs():
 
 async def test_sync_channel_missing_youtube_channel_id_400(temp_db_schema, bypass_auth, monkeypatch):
     """POST /api/channels/sync with empty YOUTUBE_CHANNEL_ID returns 400."""
-    from backend import config
+    # routes/channels.py binds YOUTUBE_CHANNEL_ID at import via `from backend.config import ...`
+    # so we must patch the binding on the channels module, not on config.
+    from backend.routes import channels
 
-    monkeypatch.setattr(config, "YOUTUBE_CHANNEL_ID", "")
+    monkeypatch.setattr(channels, "YOUTUBE_CHANNEL_ID", "")
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post("/api/channels/sync")
@@ -309,9 +323,9 @@ async def test_sync_channel_missing_youtube_channel_id_400(temp_db_schema, bypas
 
 async def test_sync_channel_missing_api_key_400(temp_db_schema, bypass_auth, monkeypatch):
     """POST /api/channels/sync with empty SUPADATA_API_KEY returns 400."""
-    from backend import config
+    from backend.routes import channels
 
-    monkeypatch.setattr(config, "SUPADATA_API_KEY", "")
+    monkeypatch.setattr(channels, "SUPADATA_API_KEY", "")
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post("/api/channels/sync")
