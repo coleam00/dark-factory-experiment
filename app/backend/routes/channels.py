@@ -21,7 +21,7 @@ from backend.db import repository as repo
 from backend.rag import retriever
 from backend.rag.chunker import chunk_video
 from backend.rag.embeddings import embed_batch
-from backend.services import supadata
+from backend.services import supadata, youtube_meta
 
 logger = logging.getLogger(__name__)
 
@@ -197,9 +197,12 @@ async def sync_channel(limit: int | None = None) -> SyncResponse:
             )
             continue
 
-        # Build video metadata
+        # Build video metadata. oEmbed gives us the real title (and falls back
+        # silently to the placeholder on failure, so one flaky lookup doesn't
+        # block ingest).
         youtube_url = f"https://www.youtube.com/watch?v={youtube_video_id}"
-        title = f"Video {youtube_video_id}"
+        real_title = await youtube_meta.get_video_title(youtube_video_id)
+        title = real_title or f"Video {youtube_video_id}"
         description = f"Synced from channel {YOUTUBE_CHANNEL_ID}"
 
         # Ingest through chunk → embed → store pipeline
