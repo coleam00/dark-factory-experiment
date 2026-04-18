@@ -76,9 +76,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
           border: '1px solid rgba(255,255,255,0.1)',
           borderRadius: 12,
           display: 'flex',
-          alignItems: 'flex-end',
+          alignItems: 'center',
           gap: 8,
-          padding: '10px 12px',
+          padding: '6px 12px',
           opacity: isDisabled ? 0.7 : 1,
           transition: 'opacity 0.2s',
           boxShadow: focused && !isDisabled ? '0 0 0 2px #3b82f6' : 'none',
@@ -137,7 +137,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
             if (!isDisabled) e.currentTarget.style.background = '#1d4ed8';
           }}
           onMouseLeave={(e) => {
-            if (!isDisabled) e.currentTarget.style.background = isDisabled ? '#1e293b' : '#3b82f6';
+            if (!isDisabled) e.currentTarget.style.background = '#3b82f6';
           }}
         >
           {isStreaming ? (
