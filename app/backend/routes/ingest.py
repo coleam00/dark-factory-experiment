@@ -18,7 +18,7 @@ from backend.db import repository
 from backend.ingest.supadata_client import SupadataClient, SupadataError
 from backend.ingest.youtube_url import parse_youtube_url
 from backend.rag import retriever
-from backend.rag.chunker import chunk_video_fallback, chunk_video_timestamped
+from backend.rag.chunker import chunk_video, chunk_video_fallback, chunk_video_timestamped
 from backend.rag.embeddings import embed_batch
 
 logger = logging.getLogger(__name__)

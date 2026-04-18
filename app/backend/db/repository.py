@@ -97,9 +97,9 @@ async def create_chunk(
     content: str,
     embedding: list[float],
     chunk_index: int,
-    start_seconds: float,
-    end_seconds: float,
-    snippet: str,
+    start_seconds: float = 0.0,
+    end_seconds: float = 0.0,
+    snippet: str = "",
 ) -> dict:
     chunk_id = _new_id()
     embedding_json = json.dumps(embedding)
@@ -209,14 +209,17 @@ async def replace_chunks_for_video(
         await db.execute("DELETE FROM chunks WHERE video_id = ?", (video_id,))
         for c in chunks:
             await db.execute(
-                "INSERT INTO chunks (id, video_id, content, embedding, chunk_index) "
-                "VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO chunks (id, video_id, content, embedding, chunk_index, start_seconds, end_seconds, snippet) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     _new_id(),
                     video_id,
                     c["content"],
                     json.dumps(c["embedding"]),
                     c["chunk_index"],
+                    c.get("start_seconds", 0.0),
+                    c.get("end_seconds", 0.0),
+                    c.get("snippet", ""),
                 ),
             )
         await db.commit()
