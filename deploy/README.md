@@ -32,6 +32,7 @@ The app container reads these from `/opt/dynachat/.env` via docker-compose:
 | `SUPADATA_API_KEY` | prod only | YouTube transcript fetch |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | **yes** | Postgres credentials used by both the `postgres` service and the app's `DATABASE_URL` |
 | `JWT_SECRET` | **yes** (auth) | 32+ random bytes used to sign session-cookie JWTs. Generate with `openssl rand -hex 32`. Rotating this value invalidates all live sessions |
+| `ADMIN_USER_EMAIL` | optional | Email of the single admin user (case-insensitive match). When unset, every `/api/admin/*` endpoint returns 403. Match MUST equal the email the admin registered with |
 
 The app's `DATABASE_URL` is assembled from the `POSTGRES_*` values inside
 `docker-compose.yml` — you do **not** set it directly in `.env`. It points at
@@ -46,6 +47,7 @@ POSTGRES_USER=dynachat
 POSTGRES_PASSWORD=<random>
 POSTGRES_DB=dynachat
 JWT_SECRET=<openssl rand -hex 32>
+ADMIN_USER_EMAIL=admin@yourdomain.com
 ```
 
 ## Secret hygiene

@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from backend.auth.dependencies import get_current_user
+from backend.auth.dependencies import get_current_admin, get_current_user
 from backend.config import DATABASE_URL, DB_PATH
 from backend.data.seed import seed_if_empty
 from backend.db.postgres import close_pg_pool, init_signup_attempts_schema, init_users_schema
@@ -59,7 +59,7 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 # Routes (imported here to keep main.py clean)
 # ---------------------------------------------------------------------------
-from backend.routes import auth, channels, conversations, ingest, messages  # noqa: E402
+from backend.routes import admin, auth, channels, conversations, ingest, messages  # noqa: E402
 
 # Auth routes are public (signup/login don't require a session; /me and /logout
 # rely on their own dependency/cookie behaviour).
@@ -72,6 +72,10 @@ app.include_router(conversations.router, prefix="/api", dependencies=_auth_requi
 app.include_router(messages.router, prefix="/api", dependencies=_auth_required)
 app.include_router(ingest.router, prefix="/api", dependencies=_auth_required)
 app.include_router(channels.router, prefix="/api", dependencies=_auth_required)
+
+# Admin routes — gated on get_current_admin, which chains through
+# get_current_user, so an unauthenticated caller still gets 401 (not 403).
+app.include_router(admin.router, prefix="/api", dependencies=[Depends(get_current_admin)])
 
 
 # ---------------------------------------------------------------------------

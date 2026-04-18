@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useConversations } from '../hooks/useConversations';
 import { type Conversation, createConversation, deleteConversation } from '../lib/api';
@@ -479,9 +479,40 @@ export function Sidebar({ activeConversationId, isOpen, onClose }: SidebarProps)
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
+            gap: 8,
           }}
         >
           <span style={{ fontSize: 12, color: '#475569' }}>RAG YouTube Chat</span>
+
+          {/* Library admin link — admin-only. is_admin is a server-computed
+              hint only; the /api/admin/* endpoints re-verify on every call. */}
+          {user?.is_admin && (
+            <Link
+              to="/admin"
+              title="Manage video library"
+              style={{
+                fontSize: 12,
+                color: '#94a3b8',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: 7,
+                padding: '5px 7px',
+                textDecoration: 'none',
+                transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = '#1e293b';
+                e.currentTarget.style.color = '#f1f5f9';
+                e.currentTarget.style.borderColor = 'rgba(59,130,246,0.4)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'transparent';
+                e.currentTarget.style.color = '#94a3b8';
+                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)';
+              }}
+            >
+              Admin
+            </Link>
+          )}
 
           {/* Library / VideoExplorer button */}
           <button

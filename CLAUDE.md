@@ -476,6 +476,7 @@ Any PR touching them must be human-authored:
 
 - `app/backend/auth/` (entire directory)
 - `app/backend/routes/auth.py`
+- `app/backend/routes/admin.py` — sole consumer of `get_current_admin`; auth-adjacent per FACTORY_RULES §5
 - `app/backend/routes/conversations.py` — implements MISSION §10 #3 (owner-only conversations)
 - `app/backend/routes/messages.py` — implements MISSION §10 #3 (owner-only conversations)
 - `app/backend/db/users_repo.py`

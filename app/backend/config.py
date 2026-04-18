@@ -55,6 +55,17 @@ if not SUPADATA_API_KEY:
         file=sys.stderr,
     )
 
+# MISSION §Administrative surface: "A logged-in admin view … identified by a
+# hardcoded user identifier, not by a role system." Empty = no admin configured,
+# every /api/admin/* endpoint returns 403 fail-safe.
+ADMIN_USER_EMAIL: str = os.environ.get("ADMIN_USER_EMAIL", "")
+if not ADMIN_USER_EMAIL:
+    print(
+        "WARNING: ADMIN_USER_EMAIL is not set. All /api/admin/* endpoints "
+        "will return 403 until it is configured.",
+        file=sys.stderr,
+    )
+
 OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
 EMBEDDING_MODEL: str = "openai/text-embedding-3-small"
 CHAT_MODEL: str = "anthropic/claude-sonnet-4.6"

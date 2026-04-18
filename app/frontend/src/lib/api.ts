@@ -108,3 +108,55 @@ export const ingestVideo = (body: IngestVideoBody) =>
 // Health
 export const getHealth = () =>
   request<{ status: string; video_count: number; chunk_count: number; db_path: string }>('/health');
+
+// ─── Admin ────────────────────────────────────────────────────────────────
+// All /api/admin/* endpoints require the configured ADMIN_USER_EMAIL; the
+// backend returns 403 for any other authenticated user. Callers should gate
+// UI with `useAuth().user?.is_admin` first, but never rely on it for security.
+
+export interface AdminVideo extends Video {
+  chunk_count: number;
+}
+
+export interface AdminVideosResponse {
+  videos: AdminVideo[];
+}
+
+export interface AddVideoResponse {
+  video_id: string;
+  chunks_created: number;
+  status: string;
+}
+
+export interface SyncChannelResponse {
+  sync_run_id: string;
+  status: string;
+  videos_total: number;
+  videos_new: number;
+  videos_error: number;
+}
+
+export const listAdminVideos = () => request<AdminVideosResponse>('/admin/videos');
+
+export const addVideoByUrl = (url: string) =>
+  request<AddVideoResponse>('/admin/videos', {
+    method: 'POST',
+    body: JSON.stringify({ url }),
+  });
+
+export const deleteVideo = async (id: string): Promise<void> => {
+  const res = await fetch(`${BASE}/admin/videos/${id}`, {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`API error ${res.status}: ${text}`);
+  }
+};
+
+export const resyncVideo = (id: string) =>
+  request<AddVideoResponse>(`/admin/videos/${id}/re-sync`, { method: 'POST' });
+
+export const syncChannel = () =>
+  request<SyncChannelResponse>('/admin/videos/sync-channel', { method: 'POST' });

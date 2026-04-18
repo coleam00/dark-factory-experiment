@@ -57,6 +57,7 @@ services:
       # in-compose postgres service; JWT_SECRET signs session cookies.
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       JWT_SECRET: ${JWT_SECRET}
+      ADMIN_USER_EMAIL: ${ADMIN_USER_EMAIL:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -89,6 +90,7 @@ services:
       # in-compose postgres service; JWT_SECRET signs session cookies.
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       JWT_SECRET: ${JWT_SECRET}
+      ADMIN_USER_EMAIL: ${ADMIN_USER_EMAIL:-}
     depends_on:
       postgres:
         condition: service_healthy

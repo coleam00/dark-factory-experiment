@@ -151,6 +151,64 @@ async def count_chunks() -> int:
 
 
 # ---------------------------------------------------------------------------
+# Admin helpers
+# ---------------------------------------------------------------------------
+
+
+async def list_videos_admin() -> list[dict]:
+    """Videos with chunk_count, newest first. Admin library listing."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """
+            SELECT v.id, v.title, v.description, v.url, v.created_at,
+                   (SELECT COUNT(*) FROM chunks c WHERE c.video_id = v.id) AS chunk_count
+            FROM videos v
+            ORDER BY v.created_at DESC
+            """
+        ) as cursor:
+            rows = await cursor.fetchall()
+    return [dict(r) for r in rows]
+
+
+async def delete_video_cascade(video_id: str) -> bool:
+    """Delete a video and its chunks (FK ON DELETE CASCADE). Returns False if not found."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("PRAGMA foreign_keys=ON;")
+        cursor = await db.execute("DELETE FROM videos WHERE id = ?", (video_id,))
+        await db.commit()
+        return cursor.rowcount > 0
+
+
+async def replace_chunks_for_video(
+    video_id: str,
+    chunks: list[dict],
+) -> None:
+    """Atomically replace all chunks for *video_id*.
+
+    Each entry in *chunks* must have keys: content, embedding, chunk_index.
+    Caller is responsible for fetching/chunking/embedding BEFORE invoking this
+    so a Supadata or OpenRouter failure cannot leave the video chunkless.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("BEGIN")
+        await db.execute("DELETE FROM chunks WHERE video_id = ?", (video_id,))
+        for c in chunks:
+            await db.execute(
+                "INSERT INTO chunks (id, video_id, content, embedding, chunk_index) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    _new_id(),
+                    video_id,
+                    c["content"],
+                    json.dumps(c["embedding"]),
+                    c["chunk_index"],
+                ),
+            )
+        await db.commit()
+
+
+# ---------------------------------------------------------------------------
 # Conversations
 # ---------------------------------------------------------------------------
 

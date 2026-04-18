@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr, Field
 
 from backend import rate_limit, signup_rate_limit
-from backend.auth.dependencies import COOKIE_NAME, get_current_user
+from backend.auth.dependencies import COOKIE_NAME, get_current_user, is_admin_email
 from backend.auth.password import hash_password, verify_password
 from backend.auth.tokens import encode_token
 from backend.config import JWT_EXPIRY_SECONDS
@@ -49,10 +49,15 @@ class MeResponse(BaseModel):
 
     The counter is included on /me so the frontend can render the daily quota
     without a second round-trip on page load.
+
+    `is_admin` is server-computed from ADMIN_USER_EMAIL and is a UX hint only —
+    every /api/admin/* endpoint re-verifies via get_current_admin. The admin
+    email itself never leaves the backend.
     """
 
     id: str
     email: str
+    is_admin: bool
     messages_used_today: int
     messages_remaining_today: int
     rate_window_resets_at: str | None
@@ -171,6 +176,7 @@ async def me(user: dict[str, Any] = Depends(get_current_user)) -> MeResponse:
     return MeResponse(
         id=str(user["id"]),
         email=str(user["email"]),
+        is_admin=is_admin_email(str(user["email"])),
         messages_used_today=status.used,
         messages_remaining_today=status.remaining,
         rate_window_resets_at=status.resets_at.isoformat() if status.resets_at else None,

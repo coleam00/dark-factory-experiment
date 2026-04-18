@@ -24,6 +24,7 @@ export interface AuthUser {
  *   when the user has zero messages in the window (nothing to reset).
  */
 export interface AuthMeResponse extends AuthUser {
+  is_admin: boolean;
   messages_used_today: number;
   messages_remaining_today: number;
   rate_window_resets_at: string | null;

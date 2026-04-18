@@ -4,6 +4,7 @@ import { ChatArea } from './components/ChatArea';
 import { Sidebar } from './components/Sidebar';
 import { ToastProvider } from './components/ToastProvider';
 import { AuthProvider, useAuth } from './hooks/useAuth';
+import { AdminVideos } from './pages/AdminVideos';
 import { Login } from './pages/Login';
 import { Signup } from './pages/Signup';
 
@@ -108,6 +109,14 @@ function App() {
               element={
                 <RequireAuth>
                   <ConversationPage />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/admin"
+              element={
+                <RequireAuth>
+                  <AdminVideos />
                 </RequireAuth>
               }
             />
