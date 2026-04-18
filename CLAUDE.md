@@ -278,6 +278,7 @@ All env var reads happen in `app/backend/config.py`. Add new variables there and
 | `YOUTUBE_CHANNEL_ID` | prod (channel sync) | YouTube channel ID/handle to sync videos from via `POST /api/channels/sync` |
 | `CHANNEL_SYNC_TYPE` | prod (channel sync) | Content type filter for channel sync: `all`, `video`, `short`, `live`. Default: `video` |
 | `DATABASE_URL` | **yes** (prod + dev) | Postgres connection string. Shape: `postgresql://dynachat:<pw>@127.0.0.1:5433/dynachat`. The app refuses to start if this is unset (no SQLite fallback). |
+| `CORS_ORIGINS` | No (dev default) | Comma-separated list of allowed CORS origins. Defaults to `http://localhost:{FRONTEND_PORT},http://127.0.0.1:{FRONTEND_PORT}`. Used in `app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS)` in `main.py`. |
 
 Everything else is currently hardcoded in `config.py` (model names, ports, chunk size, top-k). When adding configurability, add the constant to `config.py` with a sensible default:
 

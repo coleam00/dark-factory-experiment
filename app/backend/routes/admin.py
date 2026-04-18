@@ -86,11 +86,10 @@ async def _fetch_chunks_and_embeddings(url_str: str) -> tuple[dict, list[dict]]:
 
     client = SupadataClient()
     try:
-        try:
-            supadata_data = await client.fetch_transcript(url_str, lang="en")
-        except SupadataError as exc:
-            logger.error("Supadata fetch failed for '%s': %s", url_str, exc)
-            raise HTTPException(status_code=503, detail=f"Transcript fetch failed: {exc}") from exc
+        supadata_data = await client.fetch_transcript(url_str, lang="en")
+    except SupadataError as exc:
+        logger.error("Supadata fetch failed for '%s': %s", url_str, exc)
+        raise HTTPException(status_code=503, detail=f"Transcript fetch failed: {exc}") from exc
     finally:
         await client.close()
 

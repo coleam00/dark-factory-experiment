@@ -118,3 +118,11 @@ SEED_ENABLE: bool = os.environ.get("SEED_ENABLE", "false").strip().lower() in (
 # Server ports
 BACKEND_PORT: int = 8000
 FRONTEND_PORT: int = 5173
+
+# CORS — comma-separated list of allowed origins; defaults to localhost + 127.0.0.1
+# on the configured FRONTEND_PORT so the default dev setup works without any env vars.
+_cors_raw: str = os.environ.get(
+    "CORS_ORIGINS",
+    f"http://localhost:{FRONTEND_PORT},http://127.0.0.1:{FRONTEND_PORT}",
+)
+CORS_ORIGINS: list[str] = [o.strip() for o in _cors_raw.split(",") if o.strip()]

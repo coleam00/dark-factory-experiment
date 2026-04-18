@@ -111,13 +111,13 @@ def chunk_video_timestamped(segments: list[TimestampedSegment]) -> list[dict]:
     if not segments:
         return []
 
-    results: list[dict] = []
     tokenizer = OpenAITokenizer(
         tokenizer=tiktoken.get_encoding("cl100k_base"),
         max_tokens=HYBRID_CHUNKER_MAX_TOKENS,
     )
     chunker = HybridChunker(tokenizer=tokenizer, merge_peers=True)
 
+    results: list[dict] = []
     for segment in segments:
         text: str = segment.get("text", "")
         if not text:
@@ -126,7 +126,6 @@ def chunk_video_timestamped(segments: list[TimestampedSegment]) -> list[dict]:
         start_s: float = segment.get("start", 0.0)
         end_s: float = segment.get("end", 0.0)
 
-        # Run HybridChunker on this segment's text
         doc = _build_docling_document_from_text(text)
         try:
             chunk_iter = chunker.chunk(doc)
