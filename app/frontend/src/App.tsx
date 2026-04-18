@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useRef, useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { ChatArea } from './components/ChatArea';
 import { Sidebar } from './components/Sidebar';
@@ -37,6 +37,10 @@ interface AppLayoutProps {
 
 function AppLayout({ conversationId }: AppLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Shared ref so ChatArea can trigger a sidebar conversation refresh
+  const conversationsRef = useRef<(() => Promise<void>) | null>(null) as React.MutableRefObject<
+    (() => Promise<void>) | null
+  >;
 
   return (
     <div className="app-layout">
@@ -47,6 +51,7 @@ function AppLayout({ conversationId }: AppLayoutProps) {
         activeConversationId={conversationId}
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
+        conversationsRef={conversationsRef}
       />
 
       <div className="main-area">
@@ -71,7 +76,7 @@ function AppLayout({ conversationId }: AppLayoutProps) {
           </svg>
         </button>
 
-        <ChatArea conversationId={conversationId} />
+        <ChatArea conversationId={conversationId} refreshConversationsRef={conversationsRef} />
       </div>
     </div>
   );

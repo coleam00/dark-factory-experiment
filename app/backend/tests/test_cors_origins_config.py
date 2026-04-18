@@ -28,6 +28,7 @@ def test_cors_origins_default_when_not_set():
     env = {k: v for k, v in _REQUIRED_ENV.items()}
     with patch.dict(os.environ, env, clear=True):
         import backend.config as config_module
+
         importlib.reload(config_module)
         assert "http://localhost:5173" in config_module.CORS_ORIGINS
         assert "http://127.0.0.1:5173" in config_module.CORS_ORIGINS
@@ -39,6 +40,7 @@ def test_cors_origins_single_value():
     env["CORS_ORIGINS"] = "https://example.com"
     with patch.dict(os.environ, env, clear=True):
         import backend.config as config_module
+
         importlib.reload(config_module)
         assert config_module.CORS_ORIGINS == ["https://example.com"]
 
@@ -49,6 +51,7 @@ def test_cors_origins_whitespace_stripped():
     env["CORS_ORIGINS"] = "  https://foo.com ,  https://bar.com  "
     with patch.dict(os.environ, env, clear=True):
         import backend.config as config_module
+
         importlib.reload(config_module)
         assert config_module.CORS_ORIGINS == ["https://foo.com", "https://bar.com"]
 
@@ -59,6 +62,7 @@ def test_cors_origins_empty_parts_filtered():
     env["CORS_ORIGINS"] = "https://valid.com,,,"
     with patch.dict(os.environ, env, clear=True):
         import backend.config as config_module
+
         importlib.reload(config_module)
         assert config_module.CORS_ORIGINS == ["https://valid.com"]
         assert "" not in config_module.CORS_ORIGINS
@@ -70,6 +74,7 @@ def test_cors_origins_multiple():
     env["CORS_ORIGINS"] = "https://a.com,https://b.com,https://c.com"
     with patch.dict(os.environ, env, clear=True):
         import backend.config as config_module
+
         importlib.reload(config_module)
         assert len(config_module.CORS_ORIGINS) == 3
         assert "https://a.com" in config_module.CORS_ORIGINS
@@ -83,6 +88,7 @@ def test_cors_origins_trailing_comma():
     env["CORS_ORIGINS"] = "https://foo.com,"
     with patch.dict(os.environ, env, clear=True):
         import backend.config as config_module
+
         importlib.reload(config_module)
         assert config_module.CORS_ORIGINS == ["https://foo.com"]
         assert "" not in config_module.CORS_ORIGINS

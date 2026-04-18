@@ -19,7 +19,7 @@ pytestmark = pytest.mark.skip(
 try:
     import aiosqlite
 except ImportError:
-    aiosqlite = None  # type: ignore[assignment]
+    aiosqlite = None
 
 from backend.db import repository  # noqa: E402
 
@@ -29,16 +29,16 @@ class TestCreateChunkWithTimestamps:
         self, tmp_path: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """create_chunk stores and returns start_seconds, end_seconds, snippet."""
-        db_path = tmp_path / "test_chunk.db"
+        db_path = tmp_path / "test_chunk.db"  # type: ignore[operator]
 
         import backend.config
 
         monkeypatch.setattr(backend.config, "DB_PATH", str(db_path))
         monkeypatch.setattr(repository, "DB_PATH", str(db_path))
-        monkeypatch.setattr(schema, "DB_PATH", str(db_path))
+        monkeypatch.setattr(schema, "DB_PATH", str(db_path))  # type: ignore[name-defined]  # noqa: F821
 
         async with aiosqlite.connect(db_path):
-            await schema.init_db()
+            await schema.init_db()  # type: ignore[name-defined]  # noqa: F821
 
         # Create a video first (required for FK constraint)
         video = await repository.create_video(
@@ -69,16 +69,16 @@ class TestCreateChunkWithTimestamps:
         self, tmp_path: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Chunks persist correctly through list_chunks."""
-        db_path = tmp_path / "test_chunk_roundtrip.db"
+        db_path = tmp_path / "test_chunk_roundtrip.db"  # type: ignore[operator]
 
         import backend.config
 
         monkeypatch.setattr(backend.config, "DB_PATH", str(db_path))
         monkeypatch.setattr(repository, "DB_PATH", str(db_path))
-        monkeypatch.setattr(schema, "DB_PATH", str(db_path))
+        monkeypatch.setattr(schema, "DB_PATH", str(db_path))  # type: ignore[name-defined]  # noqa: F821
 
         async with aiosqlite.connect(db_path):
-            await schema.init_db()
+            await schema.init_db()  # type: ignore[name-defined]  # noqa: F821
 
         video = await repository.create_video(
             title="Test Video",

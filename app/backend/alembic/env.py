@@ -12,7 +12,7 @@ import asyncio
 from logging.config import fileConfig
 
 from sqlalchemy import pool
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from alembic import context
 
@@ -51,10 +51,10 @@ def get_database_url() -> str:
     return ""
 
 
-run_async_engine: create_async_engine | None = None
+run_async_engine: AsyncEngine | None = None
 
 
-def set_async_engine(engine: create_async_engine) -> None:
+def set_async_engine(engine: AsyncEngine) -> None:
     """Allow main.py to inject the shared pool's engine for migration runs."""
     global run_async_engine
     run_async_engine = engine
@@ -90,7 +90,7 @@ def do_run_migrations(connection) -> None:
     """Synchronous wrapper called by connection.run_sync."""
     context.configure(
         connection=connection,
-        target_metadata=target_metadata,
+        target_metadata=target_metadata,  # type: ignore[arg-type]
         compare_type=True,
         render_as_batch=True,  # Handles SERial/Serial mismatches gracefully
     )

@@ -11,13 +11,14 @@ All DB access goes through repository.py — no raw SQL here.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import datetime
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from backend.config import CHANNEL_SYNC_TYPE, SUPADATA_API_KEY, YOUTUBE_CHANNEL_ID
 from backend.db import repository as repo
+from backend.db.repository import _new_id, _now
 from backend.rag import retriever
 from backend.rag.chunker import chunk_video
 from backend.rag.embeddings import embed_batch
@@ -53,22 +54,6 @@ class SyncRun(BaseModel):
 
 class SyncRunsResponse(BaseModel):
     sync_runs: list[SyncRun]
-
-
-# ---------------------------------------------------------------------------
-# Route handlers
-# ---------------------------------------------------------------------------
-
-
-def _new_id() -> str:
-    import uuid
-
-    return str(uuid.uuid4())
-
-
-def _now() -> datetime:
-    """Aware UTC datetime — TIMESTAMPTZ columns need datetime, not ISO strings."""
-    return datetime.now(UTC)
 
 
 @router.post("/channels/sync", response_model=SyncResponse)

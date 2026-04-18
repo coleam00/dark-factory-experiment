@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { type MutableRefObject, type RefObject, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useConversations } from '../hooks/useConversations';
@@ -367,9 +367,10 @@ interface SidebarProps {
   activeConversationId?: string;
   isOpen: boolean;
   onClose: () => void;
+  conversationsRef?: MutableRefObject<(() => Promise<void>) | null>;
 }
 
-export function Sidebar({ activeConversationId, isOpen, onClose }: SidebarProps) {
+export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRef }: SidebarProps) {
   const navigate = useNavigate();
   const { conversations, loading, refetch, rename, filteredConversations } = useConversations();
   const { user } = useAuth();
@@ -388,6 +389,13 @@ export function Sidebar({ activeConversationId, isOpen, onClose }: SidebarProps)
     const timer = setTimeout(() => setDebouncedQuery(searchQuery), 200);
     return () => clearTimeout(timer);
   }, [searchQuery]);
+
+  // Store refetch in the shared ref so ChatArea can trigger it
+  useEffect(() => {
+    if (conversationsRef) {
+      conversationsRef.current = refetch;
+    }
+  }, [refetch, conversationsRef]);
 
   // ── New Chat ──
   const handleNewChat = async () => {

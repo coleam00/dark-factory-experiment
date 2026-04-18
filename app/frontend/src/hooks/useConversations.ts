@@ -24,13 +24,13 @@ export function useConversations() {
   }, []);
 
   const rename = async (id: string, title: string): Promise<{ ok: boolean; error?: string }> => {
-    const prev = conversations;
+    const prevConversations = conversations;
     setConversations((cs) => cs.map((c) => (c.id === id ? { ...c, title } : c)));
     try {
       await renameConversation(id, title);
       return { ok: true };
     } catch (e) {
-      setConversations(prev);
+      setConversations(prevConversations);
       const msg = e instanceof Error ? e.message : 'Rename failed';
       return { ok: false, error: msg };
     }

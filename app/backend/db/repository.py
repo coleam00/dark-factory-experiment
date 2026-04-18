@@ -213,7 +213,7 @@ async def keyword_search(query: str, top_k: int, language: str = "english") -> l
         List of chunk dicts with keys: id, video_id, content, chunk_index,
         start_seconds, end_seconds, snippet, rank (ts_rank score)
     """
-    async with await _acquire() as conn:
+    async with _acquire() as conn:
         rows = await conn.fetch(
             """
             SELECT id, video_id, content, chunk_index, start_seconds, end_seconds, snippet,
@@ -247,7 +247,7 @@ async def vector_search_pg(query_embedding: list[float], top_k: int) -> list[dic
         start_seconds, end_seconds, snippet, distance (cosine distance)
     """
     embedding_json = json.dumps(query_embedding)
-    async with await _acquire() as conn:
+    async with _acquire() as conn:
         rows = await conn.fetch(
             """
             SELECT id, video_id, content, chunk_index, start_seconds, end_seconds, snippet,
@@ -285,7 +285,7 @@ async def delete_video_cascade(video_id: str) -> bool:
     """Delete a video and its chunks (FK ON DELETE CASCADE). Returns False if not found."""
     async with _acquire() as conn:
         result = await conn.execute("DELETE FROM videos WHERE id = $1", video_id)
-        return result != "DELETE 0"
+        return result != "DELETE 0"  # type: ignore[no-any-return]
 
 
 async def replace_chunks_for_video(
@@ -386,7 +386,7 @@ async def update_conversation_title(conv_id: str, user_id: str, title: str) -> b
             conv_id,
             user_id,
         )
-        return result != "UPDATE 0"
+        return result != "UPDATE 0"  # type: ignore[no-any-return]
 
 
 async def touch_conversation(conv_id: str, user_id: str) -> None:
@@ -407,7 +407,7 @@ async def delete_conversation(conv_id: str, user_id: str) -> bool:
             conv_id,
             user_id,
         )
-        return result != "DELETE 0"
+        return result != "DELETE 0"  # type: ignore[no-any-return]
 
 
 async def search_conversations_by_title(user_id: str, query: str, limit: int = 20) -> list[dict]:
@@ -502,7 +502,7 @@ async def list_messages(conversation_id: str, user_id: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
-async def create_sync_run(*, sync_run_id: str, started_at: str) -> dict:
+async def create_sync_run(*, sync_run_id: str, started_at: datetime | str) -> dict:
     """Create a new channel sync run record."""
     async with _acquire() as conn:
         await conn.execute(
@@ -513,13 +513,14 @@ async def create_sync_run(*, sync_run_id: str, started_at: str) -> dict:
             sync_run_id,
             started_at,
         )
+    started_at_str = started_at.isoformat() if isinstance(started_at, datetime) else started_at
     return {
         "id": sync_run_id,
         "status": "running",
         "videos_total": 0,
         "videos_new": 0,
         "videos_error": 0,
-        "started_at": started_at,
+        "started_at": started_at_str,
         "finished_at": None,
     }
 
@@ -528,7 +529,7 @@ async def update_sync_run(
     *,
     sync_run_id: str,
     status: str,
-    finished_at: str | None = None,
+    finished_at: datetime | str | None = None,
     videos_total: int = 0,
     videos_new: int = 0,
     videos_error: int = 0,
@@ -548,7 +549,7 @@ async def update_sync_run(
             videos_error,
             sync_run_id,
         )
-        return result != "UPDATE 0"
+        return result != "UPDATE 0"  # type: ignore[no-any-return]
 
 
 async def list_sync_runs(limit: int = 10) -> list[dict]:
@@ -612,7 +613,7 @@ async def update_sync_video_status(
             error_message,
             video_id,
         )
-        return result != "UPDATE 0"
+        return result != "UPDATE 0"  # type: ignore[no-any-return]
 
 
 async def get_video_by_youtube_id(youtube_video_id: str) -> dict | None:
