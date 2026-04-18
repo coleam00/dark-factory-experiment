@@ -123,9 +123,7 @@ async def get_transcript(video_id: str, lang: str = "en") -> str | None:
             if isinstance(content, str):
                 return content if content else None
             if isinstance(content, list):
-                joined = " ".join(
-                    getattr(chunk, "text", "") for chunk in content
-                ).strip()
+                joined = " ".join(getattr(chunk, "text", "") for chunk in content).strip()
                 return joined if joined else None
             return None
         except SupadataError as exc:

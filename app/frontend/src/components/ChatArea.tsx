@@ -1,4 +1,11 @@
-import { type MutableRefObject, type RefObject, useCallback, useEffect, useRef, useState } from 'react';
+import {
+  type MutableRefObject,
+  type RefObject,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { useMessages } from '../hooks/useMessages';
 import { useStreamingResponse } from '../hooks/useStreamingResponse';
@@ -364,7 +371,16 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
         setTimeout(() => chatInputRef.current?.setInputText(content), 50);
       }
     },
-    [conversationId, isStreaming, setMessages, startStream, scrollToBottom, addToast, refreshAuth, refreshConversationsRef],
+    [
+      conversationId,
+      isStreaming,
+      setMessages,
+      startStream,
+      scrollToBottom,
+      addToast,
+      refreshAuth,
+      refreshConversationsRef,
+    ],
   );
 
   // ── Retry failed message — re-attempt the API call with same content ──

@@ -20,7 +20,7 @@ class TestIngestRequestSegments:
         req = IngestRequest(
             title="Test Video",
             description="A test video description",
-            url="https://youtube.com/watch?v=abc123",
+            url="https://youtube.com/watch?v=abc123",  # type: ignore[arg-type]  # type: ignore[arg-type]
             transcript="Full transcript text here",
             segments=[{"start": 0.0, "end": 10.0, "text": "Hello world"}],
         )
@@ -35,7 +35,7 @@ class TestIngestRequestSegments:
         req = IngestRequest(
             title="Test Video",
             description="A test video description",
-            url="https://youtube.com/watch?v=abc123",
+            url="https://youtube.com/watch?v=abc123",  # type: ignore[arg-type]
             transcript="Full transcript text here",
         )
         assert req.segments is None
@@ -46,7 +46,7 @@ class TestIngestRequestSegments:
             IngestRequest(
                 title="Test Video",
                 description="A test video description",
-                url="https://youtube.com/watch?v=abc123",
+                url="https://youtube.com/watch?v=abc123",  # type: ignore[arg-type]
                 transcript="Full transcript text here",
                 segments=[{"end": 10.0, "text": "Hello"}],
             )
@@ -58,7 +58,7 @@ class TestIngestRequestSegments:
             IngestRequest(
                 title="Test Video",
                 description="A test video description",
-                url="https://youtube.com/watch?v=abc123",
+                url="https://youtube.com/watch?v=abc123",  # type: ignore[arg-type]
                 transcript="Full transcript text here",
                 segments=[{"start": 0.0, "text": "Hello"}],
             )
@@ -70,7 +70,7 @@ class TestIngestRequestSegments:
             IngestRequest(
                 title="Test Video",
                 description="A test video description",
-                url="https://youtube.com/watch?v=abc123",
+                url="https://youtube.com/watch?v=abc123",  # type: ignore[arg-type]
                 transcript="Full transcript text here",
                 segments=[{"start": 0.0, "end": 10.0}],
             )
@@ -82,9 +82,9 @@ class TestIngestRequestSegments:
             IngestRequest(
                 title="Test Video",
                 description="A test video description",
-                url="https://youtube.com/watch?v=abc123",
+                url="https://youtube.com/watch?v=abc123",  # type: ignore[arg-type]
                 transcript="Full transcript text here",
-                segments=["not a dict"],
+                segments=["not a dict"],  # type: ignore[list-item]
             )
         assert "dict" in str(exc_info.value).lower()
 
@@ -94,7 +94,7 @@ class TestIngestRequestSegments:
             IngestRequest(
                 title="Test Video",
                 description="A test video description",
-                url="https://youtube.com/watch?v=abc123",
+                url="https://youtube.com/watch?v=abc123",  # type: ignore[arg-type]
                 transcript="Full transcript text here",
                 segments=[{"start": "abc", "end": 10.0, "text": "Hello"}],
             )
@@ -106,7 +106,7 @@ class TestIngestRequestSegments:
             IngestRequest(
                 title="Test Video",
                 description="A test video description",
-                url="https://youtube.com/watch?v=abc123",
+                url="https://youtube.com/watch?v=abc123",  # type: ignore[arg-type]
                 transcript="Full transcript text here",
                 segments=[{"start": 0.0, "end": "xyz", "text": "Hello"}],
             )
@@ -118,7 +118,7 @@ class TestIngestRequestSegments:
             IngestRequest(
                 title="Test Video",
                 description="A test video description",
-                url="https://youtube.com/watch?v=abc123",
+                url="https://youtube.com/watch?v=abc123",  # type: ignore[arg-type]
                 transcript="Full transcript text here",
                 segments=[{"start": 0.0, "end": 10.0, "text": 123}],
             )
@@ -129,19 +129,19 @@ class TestIngestRequestSegments:
         req = IngestRequest(
             title="Test Video",
             description="A test video description",
-            url="https://youtube.com/watch?v=abc123",
+            url="https://youtube.com/watch?v=abc123",  # type: ignore[arg-type]
             transcript="Full transcript text here",
             segments=[{"start": 0, "end": 10, "text": "Hello world"}],
         )
-        assert req.segments[0]["start"] == 0
-        assert req.segments[0]["end"] == 10
+        assert req.segments[0]["start"] == 0  # type: ignore[index]
+        assert req.segments[0]["end"] == 10  # type: ignore[index]
 
     def test_multiple_segments_passes(self) -> None:
         """Multiple valid segments all pass validation."""
         req = IngestRequest(
             title="Test Video",
             description="A test video description",
-            url="https://youtube.com/watch?v=abc123",
+            url="https://youtube.com/watch?v=abc123",  # type: ignore[arg-type]
             transcript="Full transcript text here",
             segments=[
                 {"start": 0.0, "end": 5.0, "text": "First segment"},
@@ -149,4 +149,4 @@ class TestIngestRequestSegments:
                 {"start": 10.0, "end": 15.0, "text": "Third segment"},
             ],
         )
-        assert len(req.segments) == 3
+        assert len(req.segments) == 3  # type: ignore[arg-type]

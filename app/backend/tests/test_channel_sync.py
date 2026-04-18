@@ -142,12 +142,14 @@ async def test_sync_channel_idempotent_skips_existing_videos():
         mock_get_client.return_value = mock_client
 
         # Patch where names are bound in channels.py (import = local name)
-        with patch("backend.routes.channels.chunk_video", return_value=["chunk1", "chunk2"]):
-            with patch("backend.routes.channels.embed_batch", return_value=[[0.1] * 512]):
-                async with AsyncClient(
-                    transport=ASGITransport(app=app), base_url="http://test"
-                ) as client:
-                    response = await client.post("/api/channels/sync")
+        with (
+            patch("backend.routes.channels.chunk_video", return_value=["chunk1", "chunk2"]),
+            patch("backend.routes.channels.embed_batch", return_value=[[0.1] * 512]),
+        ):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                response = await client.post("/api/channels/sync")
 
     assert response.status_code == 200
     data = response.json()
@@ -167,12 +169,14 @@ async def test_sync_channel_returns_sync_run_id():
         )
         mock_get_client.return_value = mock_client
 
-        with patch("backend.routes.channels.chunk_video", return_value=["chunk1"]):
-            with patch("backend.routes.channels.embed_batch", return_value=[[0.1] * 512]):
-                async with AsyncClient(
-                    transport=ASGITransport(app=app), base_url="http://test"
-                ) as client:
-                    response = await client.post("/api/channels/sync")
+        with (
+            patch("backend.routes.channels.chunk_video", return_value=["chunk1"]),
+            patch("backend.routes.channels.embed_batch", return_value=[[0.1] * 512]),
+        ):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                response = await client.post("/api/channels/sync")
 
     assert response.status_code == 200
     data = response.json()
@@ -242,12 +246,14 @@ async def test_sync_channel_429_triggers_backoff():
         )
         mock_get_client.return_value = mock_client
 
-        with patch("backend.routes.channels.chunk_video", return_value=["chunk1"]):
-            with patch("backend.routes.channels.embed_batch", return_value=[[0.1] * 512]):
-                async with AsyncClient(
-                    transport=ASGITransport(app=app), base_url="http://test"
-                ) as client:
-                    response = await client.post("/api/channels/sync")
+        with (
+            patch("backend.routes.channels.chunk_video", return_value=["chunk1"]),
+            patch("backend.routes.channels.embed_batch", return_value=[[0.1] * 512]),
+        ):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                response = await client.post("/api/channels/sync")
 
     # Retry should have happened (call_count = 2)
     assert call_count == 2
@@ -338,12 +344,14 @@ async def test_sync_channel_embedding_failure_updates_sync_video_status(
         mock_client.youtube.transcript = make_mock_transcript("Sample transcript.")
         mock_get_client.return_value = mock_client
 
-        with patch("backend.routes.channels.chunk_video", return_value=["chunk1"]):
-            with patch("backend.routes.channels.embed_batch", side_effect=failing_embed):
-                async with AsyncClient(
-                    transport=ASGITransport(app=app), base_url="http://test"
-                ) as client:
-                    response = await client.post("/api/channels/sync")
+        with (
+            patch("backend.routes.channels.chunk_video", return_value=["chunk1"]),
+            patch("backend.routes.channels.embed_batch", side_effect=failing_embed),
+        ):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                response = await client.post("/api/channels/sync")
 
     assert response.status_code == 200
     data = response.json()
@@ -421,13 +429,15 @@ async def test_sync_channel_invalidate_cache_called(temp_db_schema, bypass_auth)
         mock_client.youtube.transcript = make_mock_transcript("Sample transcript.")
         mock_get_client.return_value = mock_client
 
-        with patch("backend.routes.channels.chunk_video", return_value=["chunk1"]):
-            with patch("backend.routes.channels.embed_batch", return_value=[[0.1] * 512]):
-                with patch("backend.rag.retriever.invalidate_cache") as mock_invalidate:
-                    async with AsyncClient(
-                        transport=ASGITransport(app=app), base_url="http://test"
-                    ) as client:
-                        response = await client.post("/api/channels/sync")
+        with (
+            patch("backend.routes.channels.chunk_video", return_value=["chunk1"]),
+            patch("backend.routes.channels.embed_batch", return_value=[[0.1] * 512]),
+            patch("backend.rag.retriever.invalidate_cache") as mock_invalidate,
+        ):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                response = await client.post("/api/channels/sync")
 
     assert response.status_code == 200
     mock_invalidate.assert_called_once()
@@ -445,7 +455,7 @@ async def test_list_sync_videos_for_run(temp_db_schema, bypass_auth):
         videos_new=1,
         videos_error=1,
     )
-    sv1 = await repository.create_sync_video(
+    await repository.create_sync_video(
         sync_run_id="test-run",
         youtube_video_id="video1",
         status="ingested",

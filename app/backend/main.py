@@ -17,8 +17,8 @@ from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.auth.dependencies import get_current_admin, get_current_user
-from backend.data.seed import seed_if_empty
 from backend.config import CORS_ORIGINS
+from backend.data.seed import seed_if_empty
 from backend.db.postgres import close_pg_pool, init_pg_pool
 
 logging.basicConfig(level=logging.INFO)

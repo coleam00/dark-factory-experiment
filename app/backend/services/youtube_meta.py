@@ -3,7 +3,7 @@
 Supadata's `youtube.video()` SDK method can't be parsed by the current
 Pydantic model (YoutubeVideo rejects the `is_live` field the API returns),
 so we pull the bits we actually need — title and author — from YouTube's
-own oEmbed endpoint. No auth, no key, safe for 20–5000 calls per sync.
+own oEmbed endpoint. No auth, no key, safe for 20-5000 calls per sync.
 """
 
 from __future__ import annotations
@@ -30,9 +30,7 @@ async def get_video_title(video_id: str) -> str | None:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(_OEMBED_URL, params=params)
             if resp.status_code != 200:
-                logger.warning(
-                    "oEmbed %s for %s: %s", resp.status_code, video_id, resp.text[:200]
-                )
+                logger.warning("oEmbed %s for %s: %s", resp.status_code, video_id, resp.text[:200])
                 return None
             title = resp.json().get("title")
             return str(title) if title else None

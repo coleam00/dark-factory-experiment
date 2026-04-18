@@ -38,7 +38,9 @@ interface AppLayoutProps {
 function AppLayout({ conversationId }: AppLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // Shared ref so ChatArea can trigger a sidebar conversation refresh
-  const conversationsRef = useRef<(() => Promise<void>) | null>(null) as React.MutableRefObject<(() => Promise<void>) | null>;
+  const conversationsRef = useRef<(() => Promise<void>) | null>(null) as React.MutableRefObject<
+    (() => Promise<void>) | null
+  >;
 
   return (
     <div className="app-layout">
