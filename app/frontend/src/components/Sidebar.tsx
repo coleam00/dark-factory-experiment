@@ -399,6 +399,15 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
 
   // ── New Chat ──
   const handleNewChat = async () => {
+    // Guard: if already on an empty conversation, reuse it instead of creating a duplicate
+    if (activeConversationId) {
+      const activeConv = conversations.find((c) => c.id === activeConversationId);
+      if (activeConv && !activeConv.preview) {
+        // Already on an empty conversation — no-op, just close sidebar
+        onClose();
+        return;
+      }
+    }
     setCreatingNew(true);
     setNewChatError(null);
     try {
