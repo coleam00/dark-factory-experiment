@@ -4,12 +4,15 @@ No raw SQL lives in route handlers.
 """
 
 import json
+import logging
 import uuid
 from datetime import UTC, datetime
 
 import aiosqlite
 
 from backend.config import DB_PATH
+
+logger = logging.getLogger(__name__)
 
 
 def _new_id() -> str:
@@ -317,16 +320,20 @@ async def delete_conversation(conv_id: str, user_id: str) -> bool:
 
 async def search_conversations_by_title(user_id: str, query: str, limit: int = 20) -> list[dict]:
     """Return conversations owned by user where title contains substring (case-insensitive)."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        pattern = f"%{query}%"
-        async with db.execute(
-            "SELECT id, title, created_at, updated_at FROM conversations "
-            "WHERE user_id = ? AND title LIKE ? ORDER BY updated_at DESC LIMIT ?",
-            (user_id, pattern, limit),
-        ) as cursor:
-            rows = await cursor.fetchall()
-    return [dict(row) for row in rows]
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            pattern = f"%{query.lower()}%"
+            async with db.execute(
+                "SELECT id, title, created_at, updated_at FROM conversations "
+                "WHERE user_id = ? AND LOWER(title) LIKE ? ORDER BY updated_at DESC LIMIT ?",
+                (user_id, pattern, limit),
+            ) as cursor:
+                rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+    except aiosqlite.Error as e:
+        logger.error("search_conversations_by_title failed for user_id=%s: %s", user_id, e)
+        raise
 
 
 # ---------------------------------------------------------------------------

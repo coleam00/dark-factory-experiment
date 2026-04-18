@@ -18,7 +18,12 @@ export function useMessages(conversationId: string | null) {
     getConversation(conversationId)
       .then((data) => {
         setMessages(data.messages);
-        setConversation({ id: data.id, title: data.title, created_at: data.created_at, updated_at: data.updated_at });
+        setConversation({
+          id: data.id,
+          title: data.title,
+          created_at: data.created_at,
+          updated_at: data.updated_at,
+        });
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load messages'))
       .finally(() => setLoading(false));

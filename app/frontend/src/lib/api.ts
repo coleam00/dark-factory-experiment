@@ -97,8 +97,6 @@ export const renameConversation = (id: string, title: string) =>
     method: 'PATCH',
     body: JSON.stringify({ title }),
   });
-export const searchConversations = (q: string) =>
-  request<Conversation[]>(`/conversations/search?q=${encodeURIComponent(q)}`);
 
 // Videos
 export const getVideos = () => request<Video[]>('/videos');

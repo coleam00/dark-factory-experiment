@@ -240,7 +240,9 @@ interface ChatAreaProps {
 }
 
 export function ChatArea({ conversationId }: ChatAreaProps) {
-  const { messages, setMessages, loading, error, conversation } = useMessages(conversationId || null);
+  const { messages, setMessages, loading, error, conversation } = useMessages(
+    conversationId || null,
+  );
   const { streamingContent, streamingSources, isStreaming, startStream } = useStreamingResponse();
   const { addToast } = useToast();
   const { refresh: refreshAuth } = useAuth();
@@ -386,10 +388,15 @@ export function ChatArea({ conversationId }: ChatAreaProps) {
   const showStreamingBubble = isStreaming;
 
   const handleExport = useCallback(() => {
-    if (conversation) {
-      exportConversationAsMarkdown(conversation, messages);
+    try {
+      if (conversation) {
+        exportConversationAsMarkdown(conversation, messages);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Export failed';
+      addToast(`Export failed: ${msg}`, 'error');
     }
-  }, [conversation, messages]);
+  }, [conversation, messages, addToast]);
 
   return (
     <div

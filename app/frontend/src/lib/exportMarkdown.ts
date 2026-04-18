@@ -1,3 +1,13 @@
+/**
+ * Exports a conversation and its messages as a Markdown file and triggers a browser download.
+ *
+ * @param conversation - The conversation object (used for title and metadata)
+ * @param messages - The list of messages to render in the export
+ *
+ * @example
+ * exportConversationAsMarkdown(conversation, messages);
+ * // Downloads: conversation-<slug>-<date>.md
+ */
 import { saveAs } from 'file-saver';
 import type { Conversation, Message } from './api';
 

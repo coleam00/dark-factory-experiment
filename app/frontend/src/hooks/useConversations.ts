@@ -23,15 +23,16 @@ export function useConversations() {
     fetchConversations();
   }, []);
 
-  const rename = async (id: string, title: string): Promise<boolean> => {
+  const rename = async (id: string, title: string): Promise<{ ok: boolean; error?: string }> => {
     const prev = conversations;
     setConversations((cs) => cs.map((c) => (c.id === id ? { ...c, title } : c)));
     try {
       await renameConversation(id, title);
-      return true;
-    } catch {
+      return { ok: true };
+    } catch (e) {
       setConversations(prev);
-      return false;
+      const msg = e instanceof Error ? e.message : 'Rename failed';
+      return { ok: false, error: msg };
     }
   };
 
@@ -41,5 +42,13 @@ export function useConversations() {
     ? conversations.filter((c) => c.title.toLowerCase().includes(searchQuery.toLowerCase()))
     : conversations;
 
-  return { conversations, loading, error, refetch: fetchConversations, rename, search, filteredConversations: filtered };
+  return {
+    conversations,
+    loading,
+    error,
+    refetch: fetchConversations,
+    rename,
+    search,
+    filteredConversations: filtered,
+  };
 }

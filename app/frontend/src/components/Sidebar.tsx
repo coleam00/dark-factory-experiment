@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useConversations } from '../hooks/useConversations';
+import { useToast } from '../hooks/useToast';
 import { type Conversation, createConversation, deleteConversation } from '../lib/api';
 import { VideoExplorer } from './VideoExplorer';
 
@@ -380,6 +381,7 @@ export function Sidebar({ activeConversationId, isOpen, onClose }: SidebarProps)
   const [explorerOpen, setExplorerOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
+  const { addToast } = useToast();
 
   // Debounce search query
   useEffect(() => {
@@ -443,9 +445,9 @@ export function Sidebar({ activeConversationId, isOpen, onClose }: SidebarProps)
 
   // ── Rename ──
   const handleRename = async (id: string, title: string) => {
-    const ok = await rename(id, title);
-    if (!ok) {
-      // Could add toast here; optimistic revert already happened in the hook
+    const { ok, error } = await rename(id, title);
+    if (!ok && error) {
+      addToast(`Rename failed: ${error}`, 'error');
     }
   };
 
