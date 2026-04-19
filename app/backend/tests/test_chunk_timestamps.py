@@ -8,7 +8,7 @@ leaving them at the default 0.0.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, call, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -57,16 +57,32 @@ async def test_ingest_from_url_stores_timestamps():
 
     chunk_dicts = [
         {"content": "Intro.", "start_seconds": 0.0, "end_seconds": 30.0, "snippet": "Intro."},
-        {"content": "Main content.", "start_seconds": 30.0, "end_seconds": 90.0, "snippet": "Main content."},
-        {"content": "Conclusion.", "start_seconds": 90.0, "end_seconds": 120.0, "snippet": "Conclusion."},
+        {
+            "content": "Main content.",
+            "start_seconds": 30.0,
+            "end_seconds": 90.0,
+            "snippet": "Main content.",
+        },
+        {
+            "content": "Conclusion.",
+            "start_seconds": 90.0,
+            "end_seconds": 120.0,
+            "snippet": "Conclusion.",
+        },
     ]
 
     with (
         patch("backend.routes.ingest.fetch_video_for_ingest", new=fake_helper),
-        patch("backend.routes.ingest.repository.create_video", new_callable=AsyncMock, return_value=mock_video),
+        patch(
+            "backend.routes.ingest.repository.create_video",
+            new_callable=AsyncMock,
+            return_value=mock_video,
+        ),
         patch("backend.routes.ingest.chunk_video_timestamped", return_value=chunk_dicts),
         patch("backend.routes.ingest.embed_batch", return_value=[[0.1] * 3, [0.2] * 3, [0.3] * 3]),
-        patch("backend.routes.ingest.repository.create_chunk", new_callable=AsyncMock) as mock_create_chunk,
+        patch(
+            "backend.routes.ingest.repository.create_chunk", new_callable=AsyncMock
+        ) as mock_create_chunk,
         patch("backend.routes.ingest.retriever.invalidate_cache"),
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
@@ -127,10 +143,16 @@ async def test_ingest_from_url_fallback_stores_timestamps_when_no_segments():
 
     with (
         patch("backend.routes.ingest.fetch_video_for_ingest", new=fake_helper),
-        patch("backend.routes.ingest.repository.create_video", new_callable=AsyncMock, return_value=mock_video),
+        patch(
+            "backend.routes.ingest.repository.create_video",
+            new_callable=AsyncMock,
+            return_value=mock_video,
+        ),
         patch("backend.routes.ingest.chunk_video_fallback", return_value=[fallback_chunk]),
         patch("backend.routes.ingest.embed_batch", return_value=[[0.1] * 3]),
-        patch("backend.routes.ingest.repository.create_chunk", new_callable=AsyncMock) as mock_create_chunk,
+        patch(
+            "backend.routes.ingest.repository.create_chunk", new_callable=AsyncMock
+        ) as mock_create_chunk,
         patch("backend.routes.ingest.retriever.invalidate_cache"),
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:

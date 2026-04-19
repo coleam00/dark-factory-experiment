@@ -193,7 +193,12 @@ async def test_ingest_from_url_happy_path():
         }
     )
 
-    chunk_dict = {"content": "chunk 1", "start_seconds": 0.0, "end_seconds": 3.0, "snippet": "chunk 1"}
+    chunk_dict = {
+        "content": "chunk 1",
+        "start_seconds": 0.0,
+        "end_seconds": 3.0,
+        "snippet": "chunk 1",
+    }
 
     with (
         patch(
@@ -263,9 +268,7 @@ async def test_ingest_from_url_supadata_error_returns_503():
 
     with patch(
         "backend.routes.ingest.fetch_video_for_ingest",
-        new=AsyncMock(
-            side_effect=SupadataError(error="rate_limited", message="429", details="")
-        ),
+        new=AsyncMock(side_effect=SupadataError(error="rate_limited", message="429", details="")),
     ):
         async with AsyncClient(
             transport=ASGITransport(app=app),
