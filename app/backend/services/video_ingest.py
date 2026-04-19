@@ -22,7 +22,7 @@ from supadata import Supadata, SupadataError
 
 from backend.config import SUPADATA_API_KEY
 from backend.ingest.youtube_url import parse_youtube_url
-from backend.services.youtube_meta import get_video_title, get_video_description
+from backend.services.youtube_meta import get_video_description, get_video_title
 
 logger = logging.getLogger(__name__)
 

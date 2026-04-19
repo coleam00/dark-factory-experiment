@@ -185,7 +185,9 @@ async def test_fetch_video_for_ingest_uses_real_description():
         patch("backend.services.video_ingest._get_client", return_value=fake_client),
         patch(
             "backend.services.video_ingest.get_video_description",
-            new=AsyncMock(return_value="This video covers topics like chapter 1, chapter 2, and more."),
+            new=AsyncMock(
+                return_value="This video covers topics like chapter 1, chapter 2, and more."
+            ),
         ),
     ):
         data = await fetch_video_for_ingest("https://www.youtube.com/watch?v=abc123")
