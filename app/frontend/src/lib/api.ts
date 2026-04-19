@@ -86,6 +86,8 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 // Conversations
 export const getConversations = () => request<Conversation[]>('/conversations');
+export const searchConversations = (q: string) =>
+  request<Conversation[]>(`/conversations/search?q=${encodeURIComponent(q)}`);
 export const createConversation = () =>
   request<Conversation>('/conversations', { method: 'POST', body: '{}' });
 export const getConversation = (id: string) =>

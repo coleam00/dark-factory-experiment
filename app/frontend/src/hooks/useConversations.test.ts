@@ -42,35 +42,65 @@ describe('useConversations', () => {
   });
 
   describe('search', () => {
-    it('should filter conversations by title (case-insensitive)', async () => {
-      const conversations = [
+    it('calls searchConversations when query is non-empty', async () => {
+      const matches = [
         { id: '1', title: 'Python Tutorial', created_at: '', updated_at: '' },
-        { id: '2', title: 'JavaScript Guide', created_at: '', updated_at: '' },
         { id: '3', title: 'python advanced', created_at: '', updated_at: '' },
       ];
-      vi.spyOn(api, 'getConversations').mockResolvedValueOnce(conversations as api.Conversation[]);
+      vi.spyOn(api, 'getConversations').mockResolvedValue([] as api.Conversation[]);
+      const spy = vi
+        .spyOn(api, 'searchConversations')
+        .mockResolvedValueOnce(matches as api.Conversation[]);
 
-      const { result } = renderHook(() => useConversations());
-      await waitFor(() => expect(result.current.conversations).toHaveLength(3));
+      const { result } = renderHook(() => useConversations('python'));
 
-      result.current.search('python');
-      await waitFor(() => {
-        expect(result.current.filteredConversations).toHaveLength(2);
-      });
+      await waitFor(() => expect(spy).toHaveBeenCalledWith('python'));
+      await waitFor(() => expect(result.current.conversations).toHaveLength(2));
+      expect(result.current.filteredConversations).toHaveLength(2);
     });
 
-    it('should return all conversations when search is empty', async () => {
+    it('calls getConversations (not search) when query is empty', async () => {
       const conversations = [
         { id: '1', title: 'Chat A', created_at: '', updated_at: '' },
         { id: '2', title: 'Chat B', created_at: '', updated_at: '' },
       ];
-      vi.spyOn(api, 'getConversations').mockResolvedValueOnce(conversations as api.Conversation[]);
+      const getSpy = vi
+        .spyOn(api, 'getConversations')
+        .mockResolvedValue(conversations as api.Conversation[]);
+      const searchSpy = vi.spyOn(api, 'searchConversations');
 
-      const { result } = renderHook(() => useConversations());
+      const { result } = renderHook(() => useConversations(''));
+
       await waitFor(() => expect(result.current.conversations).toHaveLength(2));
+      expect(getSpy).toHaveBeenCalled();
+      expect(searchSpy).not.toHaveBeenCalled();
+    });
 
-      result.current.search('');
-      expect(result.current.filteredConversations).toHaveLength(2);
+    it('trims whitespace-only queries and falls back to full list', async () => {
+      vi.spyOn(api, 'getConversations').mockResolvedValue([
+        { id: '1', title: 'Chat A', created_at: '', updated_at: '' },
+      ] as api.Conversation[]);
+      const searchSpy = vi.spyOn(api, 'searchConversations');
+
+      renderHook(() => useConversations('   '));
+
+      await waitFor(() => expect(api.getConversations).toHaveBeenCalled());
+      expect(searchSpy).not.toHaveBeenCalled();
+    });
+
+    it('refetches when searchQuery prop changes', async () => {
+      vi.spyOn(api, 'getConversations').mockResolvedValue([] as api.Conversation[]);
+      const searchSpy = vi
+        .spyOn(api, 'searchConversations')
+        .mockResolvedValue([] as api.Conversation[]);
+
+      const { rerender } = renderHook(({ q }: { q: string }) => useConversations(q), {
+        initialProps: { q: 'alpha' },
+      });
+      await waitFor(() => expect(searchSpy).toHaveBeenCalledWith('alpha'));
+
+      rerender({ q: 'beta' });
+      await waitFor(() => expect(searchSpy).toHaveBeenCalledWith('beta'));
     });
   });
 });

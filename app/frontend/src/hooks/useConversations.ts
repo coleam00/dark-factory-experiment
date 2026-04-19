@@ -1,27 +1,40 @@
-import { useEffect, useState } from 'react';
-import { type Conversation, getConversations, renameConversation } from '../lib/api';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  type Conversation,
+  getConversations,
+  renameConversation,
+  searchConversations,
+} from '../lib/api';
 
-export function useConversations() {
+export function useConversations(searchQuery?: string) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
+  // Per-fetch ID so a stale response can't overwrite fresher results
+  // when the user types faster than the network replies.
+  const fetchIdRef = useRef(0);
 
-  const fetchConversations = async () => {
+  const load = useCallback(async () => {
+    const trimmed = (searchQuery ?? '').trim();
+    const myId = ++fetchIdRef.current;
     try {
       setLoading(true);
-      const data = await getConversations();
-      setConversations(data);
+      const data = trimmed
+        ? await searchConversations(trimmed)
+        : await getConversations();
+      if (myId === fetchIdRef.current) setConversations(data);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load conversations');
+      if (myId === fetchIdRef.current) {
+        setError(e instanceof Error ? e.message : 'Failed to load conversations');
+      }
     } finally {
-      setLoading(false);
+      if (myId === fetchIdRef.current) setLoading(false);
     }
-  };
+  }, [searchQuery]);
 
   useEffect(() => {
-    fetchConversations();
-  }, []);
+    load();
+  }, [load]);
 
   const rename = async (id: string, title: string): Promise<{ ok: boolean; error?: string }> => {
     const prevConversations = conversations;
@@ -36,19 +49,12 @@ export function useConversations() {
     }
   };
 
-  const search = (q: string) => setSearchQuery(q);
-
-  const filtered = searchQuery
-    ? conversations.filter((c) => c.title.toLowerCase().includes(searchQuery.toLowerCase()))
-    : conversations;
-
   return {
     conversations,
     loading,
     error,
-    refetch: fetchConversations,
+    refetch: load,
     rename,
-    search,
-    filteredConversations: filtered,
+    filteredConversations: conversations,
   };
 }

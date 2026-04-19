@@ -26,7 +26,6 @@ vi.mock('../hooks/useConversations', () => ({
     error: null,
     refetch: vi.fn().mockResolvedValue(undefined),
     rename: vi.fn(),
-    search: vi.fn(),
     filteredConversations: [] as api.Conversation[],
   })),
 }));
@@ -79,7 +78,6 @@ describe('Sidebar handleNewChat', () => {
         error: null,
         refetch: vi.fn(),
         rename: vi.fn(),
-        search: vi.fn(),
         filteredConversations: [emptyConversation] as api.Conversation[],
       });
 
@@ -140,7 +138,6 @@ describe('Sidebar handleNewChat', () => {
         error: null,
         refetch: vi.fn().mockResolvedValue(undefined),
         rename: vi.fn(),
-        search: vi.fn(),
         filteredConversations: [nonEmptyConversation] as api.Conversation[],
       });
 
@@ -191,7 +188,6 @@ describe('Sidebar handleNewChat', () => {
         error: null,
         refetch: vi.fn().mockResolvedValue(undefined),
         rename: vi.fn(),
-        search: vi.fn(),
         filteredConversations: [] as api.Conversation[],
       });
 
@@ -250,7 +246,6 @@ describe('Sidebar handleNewChat', () => {
         error: null,
         refetch: vi.fn().mockResolvedValue(undefined),
         rename: vi.fn(),
-        search: vi.fn(),
         filteredConversations: [] as api.Conversation[],
       });
 
