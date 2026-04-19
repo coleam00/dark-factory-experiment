@@ -188,7 +188,9 @@ async def sync_channel(limit: int | None = None) -> SyncResponse:
             continue
 
         title = supadata_data["title"]
-        description = f"Synced from channel {YOUTUBE_CHANNEL_ID}"
+        description = supadata_data.get("description")
+        if not description:
+            description = f"Synced from channel {YOUTUBE_CHANNEL_ID}"
 
         # Ingest through chunk → embed → store pipeline
         try:
@@ -302,8 +304,7 @@ async def sync_channel(limit: int | None = None) -> SyncResponse:
     retriever.invalidate_cache()
 
     # Determine overall status
-    success = videos_error == 0 or videos_new > 0
-    status = "completed" if success else "failed"
+    status = "completed" if videos_error == 0 or videos_new > 0 else "failed"
     await repo.update_sync_run(
         sync_run_id=sync_run_id,
         status=status,

@@ -346,10 +346,13 @@ class TestSourcesPersistenceRoundtrip:
 
         class _FakeAcquire:
             """Dual-purpose awaitable + async context manager."""
+
             def __await__(self):
                 async def _do():
                     return mock_conn
+
                 return _do().__await__()
+
             async def __aenter__(self):
                 return mock_conn
             async def __aexit__(self, *exc):
@@ -395,7 +398,9 @@ class TestSourcesPersistenceRoundtrip:
             def __await__(self):
                 async def _do():
                     return mock_conn
+
                 return _do().__await__()
+
             async def __aenter__(self):
                 return mock_conn
             async def __aexit__(self, *exc):
@@ -438,6 +443,7 @@ class TestSourcesPersistenceRoundtrip:
 
         # Verify it serializes correctly (as it would in the SSE event)
         import json
+
         sources_json = json.dumps(source_citations)
         parsed = json.loads(sources_json)
         assert parsed[0]["retrieval_failed"] is True

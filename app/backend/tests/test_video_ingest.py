@@ -45,6 +45,16 @@ def mock_oembed_title():
         yield
 
 
+@pytest.fixture
+def mock_video_description():
+    """Stub the YouTube Data API description lookup so tests don't hit the API."""
+    with patch(
+        "backend.services.video_ingest.get_video_description",
+        new=AsyncMock(return_value=None),
+    ):
+        yield
+
+
 # ---------------------------------------------------------------------------
 # URL parsing unit tests
 # ---------------------------------------------------------------------------
@@ -105,7 +115,7 @@ def _mock_transcript_string(text: str):
 
 
 @pytest.mark.asyncio
-async def test_fetch_video_for_ingest_list_content():
+async def test_fetch_video_for_ingest_list_content(mock_video_description):
     """List-mode SDK response → segments with ms→s conversion + joined transcript."""
     mock_result = _mock_transcript_list(
         [
@@ -131,7 +141,7 @@ async def test_fetch_video_for_ingest_list_content():
 
 
 @pytest.mark.asyncio
-async def test_fetch_video_for_ingest_string_content():
+async def test_fetch_video_for_ingest_string_content(mock_video_description):
     """String-mode SDK response → transcript populated, segments empty."""
     mock_result = _mock_transcript_string("The whole transcript as one string.")
     fake_client = SimpleNamespace(transcript=lambda **kwargs: mock_result)
@@ -163,6 +173,44 @@ async def test_fetch_video_for_ingest_fallback_title_when_oembed_missing():
         data = await fetch_video_for_ingest("https://www.youtube.com/watch?v=abc123")
 
     assert data["title"] == "Video abc123"
+
+
+@pytest.mark.asyncio
+async def test_fetch_video_for_ingest_uses_real_description():
+    """get_video_description returning a real string → description is the real string."""
+    mock_result = _mock_transcript_string("Anything")
+    fake_client = SimpleNamespace(transcript=lambda **kwargs: mock_result)
+
+    with (
+        patch("backend.services.video_ingest._get_client", return_value=fake_client),
+        patch(
+            "backend.services.video_ingest.get_video_description",
+            new=AsyncMock(
+                return_value="This video covers topics like chapter 1, chapter 2, and more."
+            ),
+        ),
+    ):
+        data = await fetch_video_for_ingest("https://www.youtube.com/watch?v=abc123")
+
+    assert data["description"] == "This video covers topics like chapter 1, chapter 2, and more."
+
+
+@pytest.mark.asyncio
+async def test_fetch_video_for_ingest_fallback_description_when_api_unavailable():
+    """get_video_description returning None → description falls back to placeholder."""
+    mock_result = _mock_transcript_string("Anything")
+    fake_client = SimpleNamespace(transcript=lambda **kwargs: mock_result)
+
+    with (
+        patch("backend.services.video_ingest._get_client", return_value=fake_client),
+        patch(
+            "backend.services.video_ingest.get_video_description",
+            new=AsyncMock(return_value=None),
+        ),
+    ):
+        data = await fetch_video_for_ingest("https://www.youtube.com/watch?v=abc123")
+
+    assert data["description"] == "Ingested from https://www.youtube.com/watch?v=abc123"
 
 
 # ---------------------------------------------------------------------------
