@@ -22,7 +22,7 @@ from backend.config import SUPADATA_API_KEY
 
 logger = logging.getLogger(__name__)
 
-SUPADATA_BASE_URL = "https://api.supadata.io"
+SUPADATA_BASE_URL = "https://api.supadata.ai"
 MAX_RETRIES = 2
 
 

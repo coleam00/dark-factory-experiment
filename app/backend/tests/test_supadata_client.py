@@ -92,7 +92,7 @@ async def test_client_fetch_transcript_happy_path():
     }
 
     with respx.mock:
-        respx.get("https://api.supadata.io/v1/youtube/transcript").mock(
+        respx.get("https://api.supadata.ai/v1/youtube/transcript").mock(
             return_value=Response(200, json=happy_response),
         )
 
@@ -114,7 +114,7 @@ async def test_client_fetch_transcript_happy_path():
 async def test_client_fetch_transcript_rate_limit_429():
     """429 from Supadata → SupadataError with 503 after retries exhausted."""
     with respx.mock:
-        respx.get("https://api.supadata.io/v1/youtube/transcript").mock(
+        respx.get("https://api.supadata.ai/v1/youtube/transcript").mock(
             return_value=Response(
                 429,
                 headers={"retry-after": "1"},
@@ -155,7 +155,7 @@ async def test_client_fetch_transcript_500_without_lang_retries():
         return Response(200, json=happy_response)
 
     with respx.mock:
-        route = respx.get("https://api.supadata.io/v1/youtube/transcript")
+        route = respx.get("https://api.supadata.ai/v1/youtube/transcript")
         route.side_effect = side_effect
 
         client = SupadataClient()
@@ -216,7 +216,7 @@ async def test_ingest_from_url_happy_path():
         ) as mock_create_chunk,
         patch("backend.routes.ingest.retriever.invalidate_cache") as mock_invalidate,
     ):
-        respx.get("https://api.supadata.io/v1/youtube/transcript").mock(
+        respx.get("https://api.supadata.ai/v1/youtube/transcript").mock(
             return_value=Response(200, json=supadata_response),
         )
 
@@ -294,7 +294,7 @@ async def test_ingest_from_url_empty_chunks_returns_stored_no_chunks():
             return_value=[],  # empty transcript → 0 chunks
         ),
     ):
-        respx.get("https://api.supadata.io/v1/youtube/transcript").mock(
+        respx.get("https://api.supadata.ai/v1/youtube/transcript").mock(
             return_value=Response(200, json=supadata_response),
         )
 
