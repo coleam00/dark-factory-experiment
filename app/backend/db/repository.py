@@ -449,19 +449,7 @@ async def create_message(
     """Insert a message. Returns None if the conversation does not belong to the user."""
     msg_id = _new_id()
     now = _now()
-    sources_json: str | None
-    if sources:
-        try:
-            sources_json = json.dumps(sources)
-        except (TypeError, ValueError) as exc:
-            logger.error(
-                "Failed to serialize sources for message in conversation %s: %s — saving without citations",
-                conversation_id,
-                exc,
-            )
-            sources_json = None
-    else:
-        sources_json = None
+    sources_json = json.dumps(sources) if sources is not None else None
     async with _acquire() as conn:
         # Verify ownership atomically — INSERT only succeeds if the conversation
         # row exists for this user. Prevents cross-user message injection even
@@ -517,19 +505,7 @@ async def list_messages(conversation_id: str, user_id: str) -> list[dict]:
         # asyncpg returns JSONB as a raw JSON string when no type codec is registered
         # (see db/postgres.py — no set_type_codec call). If a codec is ever added,
         # this json.loads() call must be removed.
-        if d.get("sources"):
-            try:
-                d["sources"] = json.loads(d["sources"])
-            except (json.JSONDecodeError, TypeError) as exc:
-                logger.warning(
-                    "Failed to deserialize sources for message %s in conversation %s: %s",
-                    d.get("id"),
-                    conversation_id,
-                    exc,
-                )
-                d["sources"] = None
-        else:
-            d["sources"] = None
+        d["sources"] = json.loads(d["sources"]) if d.get("sources") else None
         results.append(d)
     return results
 
