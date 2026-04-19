@@ -22,7 +22,7 @@ from supadata import Supadata, SupadataError
 
 from backend.config import SUPADATA_API_KEY
 from backend.ingest.youtube_url import parse_youtube_url
-from backend.services.youtube_meta import get_video_title
+from backend.services.youtube_meta import get_video_title, get_video_description
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +93,10 @@ async def fetch_video_for_ingest(url: str, lang: str = "en") -> dict[str, Any]:
 
     fetched_title = await get_video_title(parsed.video_id)
     title = fetched_title if fetched_title else f"Video {parsed.video_id}"
-    description = f"Ingested from {url}"
+
+    # Fetch real description from YouTube Data API; fall back to placeholder if unavailable
+    fetched_description = await get_video_description(parsed.video_id)
+    description = fetched_description if fetched_description else f"Ingested from {url}"
 
     return {
         "youtube_video_id": parsed.video_id,

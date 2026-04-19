@@ -107,6 +107,10 @@ YOUTUBE_CHANNEL_ID: str = os.environ.get("YOUTUBE_CHANNEL_ID", "")
 # Content type filter for channel sync: 'all', 'video', 'short', 'live'
 CHANNEL_SYNC_TYPE: str = os.environ.get("CHANNEL_SYNC_TYPE", "video")
 
+# YouTube Data API v3 key — required for real video descriptions via videos.list?part=snippet
+# Optional: if unset, video descriptions fall back to placeholder strings
+YOUTUBE_API_KEY: str = os.environ.get("YOUTUBE_API_KEY", "")
+
 # Whether startup should auto-seed the 10 mock videos bundled in data/seed.py.
 # Defaults to OFF — the seed fixtures use synthesised YouTube IDs
 # (AgntBld001a, etc.) which break the citation modal in production. Set

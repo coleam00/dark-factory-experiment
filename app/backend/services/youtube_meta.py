@@ -15,6 +15,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 _OEMBED_URL = "https://www.youtube.com/oembed"
+_YOUTUBE_API_URL = "https://www.googleapis.com/youtube/v3/videos"
 
 
 async def get_video_title(video_id: str) -> str | None:
@@ -36,4 +37,44 @@ async def get_video_title(video_id: str) -> str | None:
             return str(title) if title else None
     except Exception as exc:
         logger.warning("oEmbed title fetch failed for %s: %s", video_id, exc)
+        return None
+
+
+async def get_video_description(video_id: str) -> str | None:
+    """Return the YouTube video description, or None if the lookup fails.
+
+    Calls YouTube Data API v3 videos.list?part=snippet when YOUTUBE_API_KEY
+    is set. Returns None on any failure (no key, network error, quota exceeded)
+    so callers can fall back to placeholder text.
+
+    Never raises — a missing description falls back to the caller's placeholder.
+    """
+    from backend.config import YOUTUBE_API_KEY
+
+    if not YOUTUBE_API_KEY:
+        return None
+
+    params = {
+        "part": "snippet",
+        "id": video_id,
+        "key": YOUTUBE_API_KEY,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(_YOUTUBE_API_URL, params=params)
+            if resp.status_code != 200:
+                logger.warning(
+                    "YouTube Data API %s for %s: %s",
+                    resp.status_code,
+                    video_id,
+                    resp.text[:200],
+                )
+                return None
+            items = resp.json().get("items", [])
+            if not items:
+                return None
+            description = items[0].get("snippet", {}).get("description", "")
+            return description if description else None
+    except Exception as exc:
+        logger.warning("YouTube Data API description fetch failed for %s: %s", video_id, exc)
         return None
