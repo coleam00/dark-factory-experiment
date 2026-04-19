@@ -35,7 +35,7 @@ async def get_video_title(video_id: str) -> str | None:
                 logger.warning("oEmbed %s for %s: %s", resp.status_code, video_id, resp.text[:200])
                 return None
             title = resp.json().get("title")
-            return str(title) if title else None
+            return title or None
     except asyncio.CancelledError:
         raise
     except httpx.TimeoutException as exc:
@@ -87,7 +87,7 @@ async def get_video_description(video_id: str) -> str | None:
             if not items:
                 return None
             description = items[0].get("snippet", {}).get("description", "")
-            return description if description else None
+            return description or None
     except asyncio.CancelledError:
         raise
     except httpx.TimeoutException as exc:

@@ -73,10 +73,10 @@ async def fetch_video_for_ingest(url: str, lang: str = "en") -> dict[str, Any]:
     # SDK is synchronous; offload to a thread so we don't block the event loop.
     result = await asyncio.to_thread(client.transcript, url=url, lang=lang)
 
-    segments: list[dict[str, Any]] = []
     content = getattr(result, "content", None)
     if isinstance(content, str):
         transcript = content
+        segments = []
     elif isinstance(content, list):
         parts: list[str] = []
         for chunk in content:
@@ -90,13 +90,14 @@ async def fetch_video_for_ingest(url: str, lang: str = "en") -> dict[str, Any]:
         transcript = " ".join(parts)
     else:
         transcript = ""
+        segments = []
 
     fetched_title = await get_video_title(parsed.video_id)
-    title = fetched_title if fetched_title else f"Video {parsed.video_id}"
+    title = fetched_title or f"Video {parsed.video_id}"
 
     # Fetch real description from YouTube Data API; fall back to placeholder if unavailable
     fetched_description = await get_video_description(parsed.video_id)
-    description = fetched_description if fetched_description else f"Ingested from {url}"
+    description = fetched_description or f"Ingested from {url}"
 
     return {
         "youtube_video_id": parsed.video_id,

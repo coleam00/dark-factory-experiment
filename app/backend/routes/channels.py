@@ -304,8 +304,7 @@ async def sync_channel(limit: int | None = None) -> SyncResponse:
     retriever.invalidate_cache()
 
     # Determine overall status
-    success = videos_error == 0 or videos_new > 0
-    status = "completed" if success else "failed"
+    status = "completed" if videos_error == 0 or videos_new > 0 else "failed"
     await repo.update_sync_run(
         sync_run_id=sync_run_id,
         status=status,
