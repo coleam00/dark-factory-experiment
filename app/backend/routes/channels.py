@@ -120,7 +120,7 @@ async def sync_channel(limit: int | None = None) -> SyncResponse:
     )
     # Extra safety clamp in case Supadata returned more than requested across
     # the three buckets (e.g. type='all').
-    if limit and limit > 0:
+    if limit > 0:
         all_video_ids = all_video_ids[:limit]
     videos_total = len(all_video_ids)
     videos_new = 0

@@ -70,15 +70,13 @@ async def fetch_video_for_ingest(url: str, lang: str = "en") -> dict[str, Any]:
     if isinstance(content, str):
         transcript = content
     elif isinstance(content, list):
-        parts: list[str] = []
+        parts = [getattr(chunk, "text", "") or "" for chunk in content]
         for chunk in content:
-            text = getattr(chunk, "text", "") or ""
             offset_ms = getattr(chunk, "offset", 0) or 0
             duration_ms = getattr(chunk, "duration", 0) or 0
             start_s = float(offset_ms) / 1000.0
             end_s = start_s + float(duration_ms) / 1000.0
-            parts.append(text)
-            segments.append({"start": start_s, "end": end_s, "text": text})
+            segments.append({"start": start_s, "end": end_s, "text": getattr(chunk, "text", "") or ""})
         transcript = " ".join(parts)
     else:
         transcript = ""
