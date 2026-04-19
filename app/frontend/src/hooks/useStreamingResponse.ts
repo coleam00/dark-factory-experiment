@@ -32,6 +32,7 @@ export function useStreamingResponse() {
 
       let fullText = '';
       let sources: Citation[] = [];
+      let streamError: Error | null = null;
 
       try {
         const abortController = new AbortController();
@@ -121,7 +122,8 @@ export function useStreamingResponse() {
               } catch {
                 // Use default message
               }
-              throw new Error(errMsg);
+              streamError = new Error(errMsg);
+              break;
             } else if (data) {
               // Tokens are JSON-encoded strings to safely handle newlines/special chars
               let token = data;
@@ -148,6 +150,7 @@ export function useStreamingResponse() {
         setStreamingContent('');
         setStreamingSources([]);
       }
+      if (streamError) throw streamError;
     },
     [],
   );

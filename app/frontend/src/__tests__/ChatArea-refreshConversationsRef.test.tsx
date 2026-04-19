@@ -51,6 +51,7 @@ vi.mock('../hooks/useStreamingResponse', () => ({
       // Simulate successful SSE completion
       onComplete({ fullText: 'Test response', sources: [] });
     }),
+    abortStream: vi.fn(),
   }),
 }));
 

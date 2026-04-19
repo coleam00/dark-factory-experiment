@@ -6,7 +6,9 @@
  *   - Handles malformed sources JSON gracefully with console.warn
  */
 
+import { renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { useStreamingResponse } from './useStreamingResponse';
 
 const mockCitation = {
   chunk_id: 'chunk-1',
@@ -112,5 +114,25 @@ describe('useStreamingResponse SSE parsing', () => {
     expect(sources).toHaveLength(2);
     expect((sources[0] as typeof mockCitation).chunk_id).toBe('chunk-1');
     expect((sources[1] as typeof mockCitation).chunk_id).toBe('chunk-2');
+  });
+});
+
+describe('abortStream', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should be a no-op when no stream is active', () => {
+    const { result } = renderHook(() => useStreamingResponse());
+    expect(result.current.abortStream).not.toThrow();
+    expect(result.current.isStreaming).toBe(false);
+  });
+
+  it('should be callable multiple times without throwing', () => {
+    const { result } = renderHook(() => useStreamingResponse());
+    result.current.abortStream();
+    result.current.abortStream();
+    result.current.abortStream();
+    expect(result.current.isStreaming).toBe(false);
   });
 });

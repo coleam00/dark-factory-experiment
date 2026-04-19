@@ -3,13 +3,13 @@ Tests for YouTube metadata helpers in services/youtube_meta.py.
 
 Verifies:
   - get_video_description returns real description when API key is set
+  - get_video_description falls back to og:description when no API key is set
   - get_video_description returns None gracefully on API errors
-  - get_video_description returns None immediately when no API key is configured
 """
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -199,8 +199,8 @@ class TestGetVideoDescription:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_returns_none_immediately_when_no_api_key(self):
-        """YOUTUBE_API_KEY is empty → return None immediately (no HTTP call)."""
+    async def test_falls_back_to_og_description_when_no_api_key(self):
+        """YOUTUBE_API_KEY is empty → fall back to og:description scrape."""
         with (
             patch(
                 "backend.config.YOUTUBE_API_KEY",
@@ -209,14 +209,17 @@ class TestGetVideoDescription:
             patch("httpx.AsyncClient") as mock_client,
         ):
             instance = mock_client.return_value.__aenter__.return_value
-            instance.get = AsyncMock()
+            # Simulate og:description scrape returning a description
+            instance.get = AsyncMock(
+                return_value=Mock(status_code=200, text='<meta property="og:description" content="Test description">'),
+            )
 
             from backend.services.youtube_meta import get_video_description
 
-            result = await get_video_description("abc123xyz")
+            await get_video_description("abc123xyz")
 
-        assert result is None
-        instance.get.assert_not_called()
+        # Key behavior: og:description fallback path was used (get was called)
+        instance.get.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_returns_none_when_items_list_is_empty(self):

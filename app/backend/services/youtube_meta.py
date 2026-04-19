@@ -99,7 +99,7 @@ async def get_video_description(video_id: str) -> str | None:
     from backend.config import YOUTUBE_API_KEY
 
     if not YOUTUBE_API_KEY:
-        return None
+        return await _fetch_og_description(video_id)
 
     params = {
         "part": "snippet",
