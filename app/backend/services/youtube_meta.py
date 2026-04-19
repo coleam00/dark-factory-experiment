@@ -8,6 +8,7 @@ own oEmbed endpoint. No auth, no key, safe for 20-5000 calls per sync.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import httpx
@@ -35,6 +36,17 @@ async def get_video_title(video_id: str) -> str | None:
                 return None
             title = resp.json().get("title")
             return str(title) if title else None
+    except asyncio.CancelledError:
+        raise
+    except httpx.TimeoutException as exc:
+        logger.warning("oEmbed timeout for %s: %s", video_id, exc)
+        return None
+    except httpx.HTTPStatusError as exc:
+        logger.warning("oEmbed HTTP error %s for %s: %s", exc.response.status_code, video_id, exc)
+        return None
+    except httpx.NetworkError as exc:
+        logger.warning("oEmbed network error for %s: %s", video_id, exc)
+        return None
     except Exception as exc:
         logger.warning("oEmbed title fetch failed for %s: %s", video_id, exc)
         return None
@@ -58,6 +70,7 @@ async def get_video_description(video_id: str) -> str | None:
         "part": "snippet",
         "id": video_id,
         "key": YOUTUBE_API_KEY,
+        "hl": "en",
     }
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -75,6 +88,22 @@ async def get_video_description(video_id: str) -> str | None:
                 return None
             description = items[0].get("snippet", {}).get("description", "")
             return description if description else None
+    except asyncio.CancelledError:
+        raise
+    except httpx.TimeoutException as exc:
+        logger.warning("YouTube Data API timeout for %s: %s", video_id, exc)
+        return None
+    except httpx.HTTPStatusError as exc:
+        logger.warning(
+            "YouTube Data API HTTP error %s for %s: %s",
+            exc.response.status_code,
+            video_id,
+            exc,
+        )
+        return None
+    except httpx.NetworkError as exc:
+        logger.warning("YouTube Data API network error for %s: %s", video_id, exc)
+        return None
     except Exception as exc:
         logger.warning("YouTube Data API description fetch failed for %s: %s", video_id, exc)
         return None

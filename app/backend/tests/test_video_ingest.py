@@ -45,7 +45,7 @@ def mock_oembed_title():
         yield
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def mock_video_description():
     """Stub the YouTube Data API description lookup so tests don't hit the API."""
     with patch(
@@ -115,7 +115,7 @@ def _mock_transcript_string(text: str):
 
 
 @pytest.mark.asyncio
-async def test_fetch_video_for_ingest_list_content():
+async def test_fetch_video_for_ingest_list_content(mock_video_description):
     """List-mode SDK response → segments with ms→s conversion + joined transcript."""
     mock_result = _mock_transcript_list(
         [
@@ -141,7 +141,7 @@ async def test_fetch_video_for_ingest_list_content():
 
 
 @pytest.mark.asyncio
-async def test_fetch_video_for_ingest_string_content():
+async def test_fetch_video_for_ingest_string_content(mock_video_description):
     """String-mode SDK response → transcript populated, segments empty."""
     mock_result = _mock_transcript_string("The whole transcript as one string.")
     fake_client = SimpleNamespace(transcript=lambda **kwargs: mock_result)

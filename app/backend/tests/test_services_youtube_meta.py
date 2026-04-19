@@ -146,6 +146,36 @@ class TestGetVideoDescription:
         assert result is None
 
     @pytest.mark.asyncio
+    async def test_returns_none_on_500_internal_error(self):
+        """YouTube API returns 500 (internal server error) → return None (log warning)."""
+
+        async def fake_get(*args, **kwargs):
+            class FakeResp:
+                status_code = 500
+
+                @property
+                def text(self):
+                    return "Internal server error"
+
+            return FakeResp()
+
+        with (
+            patch(
+                "backend.config.YOUTUBE_API_KEY",
+                "test-api-key",
+            ),
+            patch("httpx.AsyncClient") as mock_client,
+        ):
+            instance = mock_client.return_value.__aenter__.return_value
+            instance.get = AsyncMock(side_effect=fake_get)
+
+            from backend.services.youtube_meta import get_video_description
+
+            result = await get_video_description("abc123xyz")
+
+        assert result is None
+
+    @pytest.mark.asyncio
     async def test_returns_none_on_network_timeout(self):
         """Network timeout → return None (log warning)."""
 
