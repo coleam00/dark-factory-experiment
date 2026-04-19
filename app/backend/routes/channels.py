@@ -190,7 +190,9 @@ async def sync_channel(limit: int | None = None) -> SyncResponse:
         real_title = await youtube_meta.get_video_title(youtube_video_id)
         title = real_title or f"Video {youtube_video_id}"
         # youtube_meta.py imports YOUTUBE_API_KEY at module level; pass it through.
-        real_description = await youtube_meta.get_video_description(youtube_video_id, YOUTUBE_API_KEY)
+        real_description = await youtube_meta.get_video_description(
+            youtube_video_id, YOUTUBE_API_KEY
+        )
         description = real_description or f"Synced from channel {YOUTUBE_CHANNEL_ID}"
 
         # Ingest through chunk → embed → store pipeline
