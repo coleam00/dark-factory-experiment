@@ -37,3 +37,39 @@ async def get_video_title(video_id: str) -> str | None:
     except Exception as exc:
         logger.warning("oEmbed title fetch failed for %s: %s", video_id, exc)
         return None
+
+
+# YouTube Data API v3 endpoint for video metadata
+_YOUTUBE_API_URL = "https://www.googleapis.com/youtube/v3/videos"
+
+
+async def get_video_description(video_id: str, api_key: str) -> str | None:
+    """Return the YouTube video description, or None if the lookup fails.
+
+    Requires a YouTube Data API v3 key. Never raises — a missing description
+    falls back to the caller's placeholder string.
+    """
+    if not api_key:
+        return None
+
+    params = {
+        "part": "snippet",
+        "id": video_id,
+        "key": api_key,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(_YOUTUBE_API_URL, params=params)
+            if resp.status_code != 200:
+                logger.warning(
+                    "YouTube API %s for %s: %s", resp.status_code, video_id, resp.text[:200]
+                )
+                return None
+            items = resp.json().get("items", [])
+            if not items:
+                return None
+            description = items[0].get("snippet", {}).get("description", "")
+            return description or None
+    except Exception as exc:
+        logger.warning("YouTube API description fetch failed for %s: %s", video_id, exc)
+        return None

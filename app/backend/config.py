@@ -101,6 +101,10 @@ HYBRID_K_CONSTANT: int = 60
 HYBRID_OVERFETCH_FACTOR: int = 2
 KEYWORD_LANGUAGE: str = "english"
 
+# YouTube Data API v3 key — used to fetch real video descriptions during ingest.
+# Optional; if unset, descriptions fall back to the ingest placeholder string.
+YOUTUBE_API_KEY: str = os.environ.get("YOUTUBE_API_KEY", "")
+
 # YouTube channel to sync from (used by POST /api/channels/sync)
 YOUTUBE_CHANNEL_ID: str = os.environ.get("YOUTUBE_CHANNEL_ID", "")
 

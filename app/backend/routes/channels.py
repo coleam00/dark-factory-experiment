@@ -16,7 +16,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from backend.config import CHANNEL_SYNC_TYPE, SUPADATA_API_KEY, YOUTUBE_CHANNEL_ID
+from backend.config import CHANNEL_SYNC_TYPE, SUPADATA_API_KEY, YOUTUBE_API_KEY, YOUTUBE_CHANNEL_ID
 from backend.db import repository as repo
 from backend.db.repository import _new_id, _now
 from backend.rag import retriever
@@ -184,11 +184,14 @@ async def sync_channel(limit: int | None = None) -> SyncResponse:
 
         # Build video metadata. oEmbed gives us the real title (and falls back
         # silently to the placeholder on failure, so one flaky lookup doesn't
-        # block ingest).
+        # block ingest). YouTube Data API gives us the real description when
+        # YOUTUBE_API_KEY is configured.
         youtube_url = f"https://www.youtube.com/watch?v={youtube_video_id}"
         real_title = await youtube_meta.get_video_title(youtube_video_id)
         title = real_title or f"Video {youtube_video_id}"
-        description = f"Synced from channel {YOUTUBE_CHANNEL_ID}"
+        # youtube_meta.py imports YOUTUBE_API_KEY at module level; pass it through.
+        real_description = await youtube_meta.get_video_description(youtube_video_id, YOUTUBE_API_KEY)
+        description = real_description or f"Synced from channel {YOUTUBE_CHANNEL_ID}"
 
         # Ingest through chunk → embed → store pipeline
         try:

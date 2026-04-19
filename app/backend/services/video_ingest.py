@@ -20,9 +20,9 @@ from typing import Any
 
 from supadata import Supadata, SupadataError
 
-from backend.config import SUPADATA_API_KEY
+from backend.config import SUPADATA_API_KEY, YOUTUBE_API_KEY
 from backend.ingest.youtube_url import parse_youtube_url
-from backend.services.youtube_meta import get_video_title
+from backend.services.youtube_meta import get_video_description, get_video_title
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +85,8 @@ async def fetch_video_for_ingest(url: str, lang: str = "en") -> dict[str, Any]:
 
     fetched_title = await get_video_title(parsed.video_id)
     title = fetched_title if fetched_title else f"Video {parsed.video_id}"
-    description = f"Ingested from {url}"
+    real_description = await get_video_description(parsed.video_id, YOUTUBE_API_KEY)
+    description = real_description or f"Ingested from {url}"
 
     return {
         "youtube_video_id": parsed.video_id,
