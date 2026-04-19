@@ -261,9 +261,7 @@ async def test_ingest_from_url_supadata_error_returns_503():
 
     with patch(
         "backend.routes.ingest.fetch_video_for_ingest",
-        new=AsyncMock(
-            side_effect=SupadataError(error="rate_limited", message="429", details="")
-        ),
+        new=AsyncMock(side_effect=SupadataError(error="rate_limited", message="429", details="")),
     ):
         async with AsyncClient(
             transport=ASGITransport(app=app),

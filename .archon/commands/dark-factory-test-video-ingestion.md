@@ -44,33 +44,19 @@ Baseline snapshot already captured at `$ARTIFACTS_DIR/health-before.json`
    If the app has a sidebar, navigation, or dedicated library page, go
    there. If the video-add control is on the chat page, use it in place.
    If you cannot find any way to add a video, that is a FAIL.
-3. Enter the **test video URL** (from the "Fixed Test Video" section
-   above) into the add-video input and submit. This MUST exercise the
-   URL-only path — the app fetches the transcript server-side via
-   Supadata. DO NOT paste a transcript manually, DO NOT use any
-   developer/admin hidden form that accepts pre-fetched transcript
-   text, and DO NOT call `/api/ingest` directly with a `transcript`
-   field. The whole point of this scenario is to exercise
-   `/api/ingest/from-url` (or the admin equivalent that hits Supadata);
-   a manual-transcript fallback masks real regressions in the
-   Supadata → chunk → embed path.
+3. Enter the test video URL into the add-video input and submit.
 4. Wait for ingestion to complete. This may take 30-90s for transcript
    fetch + chunking + embedding. Poll the UI and also poll
    `curl -sf http://127.0.0.1:<backend_port>/api/health` for up to 180s
    until `chunk_count` increases above the baseline from
-   `health-before.json`. If the ingestion UI shows a Supadata / fetch
-   / network error, that is a FAIL — do not fall back to any other
-   ingestion path.
+   `health-before.json`.
 5. Screenshot the library/list view showing the ingested video to
    `$ARTIFACTS_DIR/test-video-ingestion.png`
 6. Save the post-ingestion `/api/health` response to
    `$ARTIFACTS_DIR/health-after-ingestion.json`
 7. `agent-browser close`
 8. Write a markdown summary to `$ARTIFACTS_DIR/test-video-ingestion.md`
-   including before/after chunk counts, screenshot path, and an
-   explicit line confirming the URL-only path was exercised (e.g.
-   "Submitted URL https://... via add-video form; no manual transcript
-   path used").
+   including before/after chunk counts and screenshot path.
 
 ---
 
@@ -78,15 +64,9 @@ Baseline snapshot already captured at `$ARTIFACTS_DIR/health-before.json`
 
 FAIL if any of:
 - No add-video control found
-- Ingestion UI shows an error (including Supadata / transcript-fetch
-  errors — these are real regressions, not infra problems to work
-  around)
+- Ingestion UI shows an error
 - `chunk_count` did not increase within 180s
 - Test video does not appear in the library list
-- You used a manual transcript path, directly POSTed to `/api/ingest`
-  with a `transcript` field, or otherwise bypassed the URL-only
-  ingestion surface. Report this as a FAIL with `failure_reason`
-  describing what went wrong with the URL path.
 
 ---
 

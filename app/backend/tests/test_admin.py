@@ -289,9 +289,7 @@ async def test_resync_preserves_chunks_on_supadata_failure(client):
     with patch(
         "backend.routes.admin.fetch_video_for_ingest",
         new=AsyncMock(
-            side_effect=SupadataError(
-                error="rate_limited", message="rate-limited", details=""
-            )
+            side_effect=SupadataError(error="rate_limited", message="rate-limited", details="")
         ),
     ):
         r = await client.post(f"/api/admin/videos/{video['id']}/re-sync")
