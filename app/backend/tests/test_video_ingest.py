@@ -193,6 +193,8 @@ async def test_ingest_from_url_happy_path():
         }
     )
 
+    chunk_dict = {"content": "chunk 1", "start_seconds": 0.0, "end_seconds": 3.0, "snippet": "chunk 1"}
+
     with (
         patch(
             "backend.routes.ingest.fetch_video_for_ingest",
@@ -204,8 +206,8 @@ async def test_ingest_from_url_happy_path():
             return_value=mock_video,
         ) as mock_create_video,
         patch(
-            "backend.routes.ingest.chunk_video",
-            return_value=["chunk 1"],
+            "backend.routes.ingest.chunk_video_timestamped",
+            return_value=[chunk_dict],
         ) as mock_chunk,
         patch(
             "backend.routes.ingest.embed_batch",
@@ -309,7 +311,7 @@ async def test_ingest_from_url_empty_chunks_returns_stored_no_chunks():
             return_value=mock_video,
         ),
         patch(
-            "backend.routes.ingest.chunk_video",
+            "backend.routes.ingest.chunk_video_fallback",
             return_value=[],  # empty transcript → 0 chunks
         ),
     ):

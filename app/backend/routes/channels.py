@@ -20,9 +20,10 @@ from backend.config import CHANNEL_SYNC_TYPE, SUPADATA_API_KEY, YOUTUBE_CHANNEL_
 from backend.db import repository as repo
 from backend.db.repository import _new_id, _now
 from backend.rag import retriever
-from backend.rag.chunker import chunk_video
+from backend.rag.chunker import chunk_video_fallback, chunk_video_timestamped
 from backend.rag.embeddings import embed_batch
-from backend.services import supadata, youtube_meta
+from backend.services import supadata
+from backend.services.video_ingest import fetch_video_for_ingest
 
 logger = logging.getLogger(__name__)
 
@@ -152,9 +153,10 @@ async def sync_channel(limit: int | None = None) -> SyncResponse:
             )
             continue
 
-        # Fetch transcript
+        # Fetch transcript + segments + title via the unified helper.
+        youtube_url = f"https://www.youtube.com/watch?v={youtube_video_id}"
         try:
-            transcript = await supadata.get_transcript(youtube_video_id)
+            supadata_data = await fetch_video_for_ingest(youtube_url, lang="en")
         except Exception as exc:
             logger.warning(
                 "Transcript fetch failed for video %s: %s",
@@ -169,6 +171,9 @@ async def sync_channel(limit: int | None = None) -> SyncResponse:
             )
             continue
 
+        transcript = supadata_data["transcript"]
+        segments = supadata_data.get("segments", [])
+
         if not transcript:
             logger.warning(
                 "No transcript available for video %s",
@@ -182,12 +187,7 @@ async def sync_channel(limit: int | None = None) -> SyncResponse:
             )
             continue
 
-        # Build video metadata. oEmbed gives us the real title (and falls back
-        # silently to the placeholder on failure, so one flaky lookup doesn't
-        # block ingest).
-        youtube_url = f"https://www.youtube.com/watch?v={youtube_video_id}"
-        real_title = await youtube_meta.get_video_title(youtube_video_id)
-        title = real_title or f"Video {youtube_video_id}"
+        title = supadata_data["title"]
         description = f"Synced from channel {YOUTUBE_CHANNEL_ID}"
 
         # Ingest through chunk → embed → store pipeline
@@ -215,9 +215,12 @@ async def sync_channel(limit: int | None = None) -> SyncResponse:
         video_id = video_record["id"]
 
         # Chunk the transcript
-        chunk_texts: list[str] = chunk_video({"title": title, "transcript": transcript})
+        if segments:
+            chunk_dicts: list[dict] = chunk_video_timestamped(segments)
+        else:
+            chunk_dicts = chunk_video_fallback({"title": title, "transcript": transcript})
 
-        if not chunk_texts:
+        if not chunk_dicts:
             logger.warning(
                 "Chunker returned 0 chunks for video %s",
                 youtube_video_id,
@@ -231,6 +234,7 @@ async def sync_channel(limit: int | None = None) -> SyncResponse:
             continue
 
         # Embed all chunks
+        chunk_texts = [c["content"] for c in chunk_dicts]
         try:
             embeddings = embed_batch(chunk_texts)
         except Exception as exc:
@@ -247,14 +251,17 @@ async def sync_channel(limit: int | None = None) -> SyncResponse:
             )
             continue
 
-        # Store chunks
+        # Store chunks with timestamp data
         try:
-            for idx, (text, embedding) in enumerate(zip(chunk_texts, embeddings, strict=False)):
+            for idx, (chunk, embedding) in enumerate(zip(chunk_dicts, embeddings, strict=False)):
                 await repo.create_chunk(
                     video_id=video_id,
-                    content=text,
+                    content=chunk["content"],
                     embedding=embedding,
                     chunk_index=idx,
+                    start_seconds=chunk["start_seconds"],
+                    end_seconds=chunk["end_seconds"],
+                    snippet=chunk["snippet"],
                 )
         except Exception as exc:
             logger.error(
@@ -279,7 +286,7 @@ async def sync_channel(limit: int | None = None) -> SyncResponse:
             "Ingested video %s (%s): %d chunks",
             youtube_video_id,
             title,
-            len(chunk_texts),
+            len(chunk_dicts),
         )
 
     # Invalidate retriever cache once at the end
