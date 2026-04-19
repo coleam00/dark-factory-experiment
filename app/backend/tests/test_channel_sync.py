@@ -643,4 +643,4 @@ async def test_sync_channel_falls_back_to_placeholder_when_no_description(
     sync_runs = await repository.list_sync_runs(limit=10)
     sync_videos = await repository.list_sync_videos_for_run(sync_runs[0]["id"])
     assert sync_videos[0]["status"] == "ingested"
-    assert sync_videos[0]["description"] == f"Ingested from {mock_supadata_records[0]['url']}"
+    assert sync_videos[0]["description"] == "Synced from channel UC_testchannel"
