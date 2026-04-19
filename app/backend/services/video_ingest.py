@@ -30,8 +30,6 @@ logger = logging.getLogger(__name__)
 class VideoIngestError(Exception):
     """Raised when video ingest input is invalid (e.g., bad URL)."""
 
-    pass
-
 
 _client: Supadata | None = None
 
