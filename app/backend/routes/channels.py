@@ -188,9 +188,7 @@ async def sync_channel(limit: int | None = None) -> SyncResponse:
             continue
 
         title = supadata_data["title"]
-        description = supadata_data.get("description")
-        if not description:
-            description = f"Synced from channel {YOUTUBE_CHANNEL_ID}"
+        description = supadata_data.get("description") or f"Synced from channel {YOUTUBE_CHANNEL_ID}"
 
         # Ingest through chunk → embed → store pipeline
         try:

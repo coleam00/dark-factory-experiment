@@ -211,7 +211,10 @@ class TestGetVideoDescription:
             instance = mock_client.return_value.__aenter__.return_value
             # Simulate og:description scrape returning a description
             instance.get = AsyncMock(
-                return_value=Mock(status_code=200, text='<meta property="og:description" content="Test description">'),
+                return_value=Mock(
+                    status_code=200,
+                    text='<meta property="og:description" content="Test description">',
+                ),
             )
 
             from backend.services.youtube_meta import get_video_description
