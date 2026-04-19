@@ -355,6 +355,7 @@ class TestSourcesPersistenceRoundtrip:
 
             async def __aenter__(self):
                 return mock_conn
+
             async def __aexit__(self, *exc):
                 return False
 
@@ -403,6 +404,7 @@ class TestSourcesPersistenceRoundtrip:
 
             async def __aenter__(self):
                 return mock_conn
+
             async def __aexit__(self, *exc):
                 return False
 

@@ -33,7 +33,9 @@ async def _fetch_og_description(video_id: str) -> str | None:
         async with httpx.AsyncClient(
             timeout=10.0,
             follow_redirects=True,
-            headers={"User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"},
+            headers={
+                "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+            },
         ) as client:
             resp = await client.get(watch_url)
             if resp.status_code != 200:
@@ -97,7 +99,7 @@ async def get_video_description(video_id: str) -> str | None:
     from backend.config import YOUTUBE_API_KEY
 
     if not YOUTUBE_API_KEY:
-        return await _fetch_og_description(video_id)
+        return None
 
     params = {
         "part": "snippet",

@@ -611,7 +611,9 @@ async def test_sync_channel_uses_real_description_from_supadata(temp_db_schema, 
     assert sync_videos[0]["status"] == "ingested"
 
 
-async def test_sync_channel_falls_back_to_placeholder_when_no_description(temp_db_schema, bypass_auth):
+async def test_sync_channel_falls_back_to_placeholder_when_no_description(
+    temp_db_schema, bypass_auth
+):
     """supadata_data has no description field → placeholder used."""
     mock_supadata_records = [
         {
