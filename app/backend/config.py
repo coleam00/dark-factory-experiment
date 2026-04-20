@@ -124,6 +124,10 @@ SEED_ENABLE: bool = os.environ.get("SEED_ENABLE", "false").strip().lower() in (
     "on",
 )
 
+# Frontend dist directory (built static assets from Vite build)
+# When set, the SPA catch-all serves static files from this directory
+FRONTEND_DIST: str = os.environ.get("FRONTEND_DIST", "")
+
 # Server ports
 BACKEND_PORT: int = 8000
 FRONTEND_PORT: int = 5173

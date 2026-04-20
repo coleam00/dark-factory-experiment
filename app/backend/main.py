@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 
 from backend.auth.dependencies import get_current_admin, get_current_user
-from backend.config import CORS_ORIGINS
+from backend.config import CORS_ORIGINS, FRONTEND_DIST
 from backend.data.seed import seed_if_empty
 from backend.db.postgres import close_pg_pool, init_pg_pool
 
@@ -163,7 +163,20 @@ async def stream_test():
 # In dev (FRONTEND_DIST unset), Caddy proxies / to Vite on 5173, so this
 # block is never reached — but the catch-all is harmless in that case.
 # ---------------------------------------------------------------------------
-_frontend_dist = os.environ.get("FRONTEND_DIST", "")
+_frontend_dist = FRONTEND_DIST
+
+
+@app.get("/", include_in_schema=False)
+async def serve_root():
+    """Serve index.html for the root path (/) which doesn't match /{path:path})."""
+    index_path = Path(_frontend_dist) / "index.html" if _frontend_dist else Path("index.html")
+    if not index_path.exists():
+        raise HTTPException(
+            status_code=500,
+            detail=f"index.html not found. FRONTEND_DIST={_frontend_dist!r}, cwd={os.getcwd()}. "
+            "Set FRONTEND_DIST environment variable or ensure index.html exists at current directory.",
+        )
+    return FileResponse(str(index_path))
 
 
 @app.get("/{path:path}", include_in_schema=False)
@@ -173,13 +186,23 @@ async def serve_spa_or_static(path: str):
     When FRONTEND_DIST is set, also serve actual static files (JS/CSS/assets)
     from that directory so hashed build artifacts are served correctly.
     """
-    if path.startswith("api/"):
+    if path == "api" or path.startswith("api/"):
         raise HTTPException(status_code=404)
 
     if _frontend_dist:
-        file_path = Path(_frontend_dist) / path
-        if file_path.is_file():
-            return FileResponse(str(file_path))
+        try:
+            file_path = Path(_frontend_dist) / path
+            if file_path.is_file():
+                return FileResponse(str(file_path))
+        except OSError as exc:
+            logger.error("Static file error for path=%s frontend_dist=%s: %s", path, _frontend_dist, exc)
+            raise HTTPException(status_code=500, detail="Static file error") from exc
 
     index_path = Path(_frontend_dist) / "index.html" if _frontend_dist else Path("index.html")
+    if not index_path.exists():
+        raise HTTPException(
+            status_code=500,
+            detail=f"index.html not found. FRONTEND_DIST={_frontend_dist!r}, cwd={os.getcwd()}. "
+            "Set FRONTEND_DIST environment variable or ensure index.html exists at current directory.",
+        )
     return FileResponse(str(index_path))
