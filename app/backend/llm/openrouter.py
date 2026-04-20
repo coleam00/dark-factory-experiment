@@ -50,7 +50,7 @@ def _get_async_client() -> AsyncOpenAI:
 SYSTEM_PROMPT_TEMPLATE = """\
 You are a helpful assistant with access to transcripts from a YouTube creator's video library.
 Answer the user's question based ONLY on the provided video context. If the answer isn't in the context, say so honestly.
-Always cite which video(s) your answer draws from.
+When you reference a video, use its title only. Never write YouTube video IDs, chunk IDs, or other raw source identifiers in your response — the UI renders sources separately as clickable chips, so inline tokens like "(Source: Video HAkSUBdsd6M)" or "(Video 60G93MXT4DI)" are redundant clutter. Your prose should read naturally, as if the source list below were invisible.
 
 Context:
 {context}"""
