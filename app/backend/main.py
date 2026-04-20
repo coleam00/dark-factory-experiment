@@ -13,8 +13,7 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, StreamingResponse
 
 from backend.auth.dependencies import get_current_admin, get_current_user
 from backend.config import CORS_ORIGINS
@@ -157,12 +156,30 @@ async def stream_test():
 
 
 # ---------------------------------------------------------------------------
-# Frontend static assets (production only — Vite serves them in dev)
+# Frontend static assets / SPA catch-all
 #
-# When FRONTEND_DIST env var points at a built `dist/`, mount it at `/` so
-# FastAPI serves index.html + hashed JS/CSS from the same origin as `/api/*`.
-# This mount is registered LAST so the `/api/*` routes above take precedence.
+# When FRONTEND_DIST env var points at a built `dist/`, serve static files
+# from it and fall back to index.html for any path that isn't an API route.
+# In dev (FRONTEND_DIST unset), Caddy proxies / to Vite on 5173, so this
+# block is never reached — but the catch-all is harmless in that case.
 # ---------------------------------------------------------------------------
 _frontend_dist = os.environ.get("FRONTEND_DIST", "")
-if _frontend_dist and Path(_frontend_dist).is_dir():
-    app.mount("/", StaticFiles(directory=_frontend_dist, html=True), name="frontend")
+
+
+@app.get("/{path:path}", include_in_schema=False)
+async def serve_spa_or_static(path: str):
+    """Serve index.html for any non-API path (SPA catch-all).
+
+    When FRONTEND_DIST is set, also serve actual static files (JS/CSS/assets)
+    from that directory so hashed build artifacts are served correctly.
+    """
+    if path.startswith("api/"):
+        raise HTTPException(status_code=404)
+
+    if _frontend_dist:
+        file_path = Path(_frontend_dist) / path
+        if file_path.is_file():
+            return FileResponse(str(file_path))
+
+    index_path = Path(_frontend_dist) / "index.html" if _frontend_dist else Path("index.html")
+    return FileResponse(str(index_path))
