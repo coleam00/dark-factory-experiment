@@ -94,7 +94,7 @@ async def sync_channel(limit: int | None = None) -> SyncResponse:
 
     # Enumerate channel videos from Supadata. Pass limit through so we don't
     # pull 5000 IDs when the caller only wants 20.
-    supadata_limit = limit if limit and limit > 0 else 5000
+    supadata_limit = limit if limit else 5000
     try:
         channel_videos = await supadata.get_channel_video_ids(
             channel_id=YOUTUBE_CHANNEL_ID,
@@ -188,7 +188,9 @@ async def sync_channel(limit: int | None = None) -> SyncResponse:
             continue
 
         title = supadata_data["title"]
-        description = supadata_data.get("description") or f"Synced from channel {YOUTUBE_CHANNEL_ID}"
+        description = (
+            supadata_data.get("description") or f"Synced from channel {YOUTUBE_CHANNEL_ID}"
+        )
 
         # Ingest through chunk → embed → store pipeline
         try:
@@ -216,7 +218,6 @@ async def sync_channel(limit: int | None = None) -> SyncResponse:
 
         # Chunk the transcript
         if video_segments:
-            chunk_dicts: list[dict]
             chunk_dicts, had_errors = chunk_video_timestamped(video_segments)
             if had_errors:
                 logger.warning(
@@ -302,7 +303,7 @@ async def sync_channel(limit: int | None = None) -> SyncResponse:
     retriever.invalidate_cache()
 
     # Determine overall status
-    status = "completed" if videos_error == 0 or videos_new > 0 else "failed"
+    status = "failed" if videos_error > 0 and videos_new == 0 else "completed"
     await repo.update_sync_run(
         sync_run_id=sync_run_id,
         status=status,
