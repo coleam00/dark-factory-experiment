@@ -43,10 +43,7 @@ describe('ChatInput', () => {
 
     it('shows correct placeholder when streaming', () => {
       render(<ChatInput onSend={vi.fn()} isStreaming={true} />);
-      expect(screen.getByRole('textbox')).toHaveAttribute(
-        'placeholder',
-        'Waiting for response…',
-      );
+      expect(screen.getByRole('textbox')).toHaveAttribute('placeholder', 'Waiting for response…');
     });
 
     it('shows correct placeholder when not streaming', () => {
