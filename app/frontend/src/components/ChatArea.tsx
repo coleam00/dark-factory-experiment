@@ -350,6 +350,13 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
             sources: sources.length > 0 ? sources : undefined,
           };
           setMessages((prev) => [...prev, assistantMsg]);
+        }, () => {
+          // User clicked Stop — remove optimistic message, restore input, no error UI
+          if (pendingUserMsgIdRef.current) {
+            setMessages((prev) => prev.filter((m) => m.id !== pendingUserMsgIdRef.current));
+            pendingUserMsgIdRef.current = null;
+          }
+          chatInputRef.current?.setInputText(content);
         });
         pendingUserMsgIdRef.current = null;
         // Pull fresh quota counter so the sidebar updates after each send.

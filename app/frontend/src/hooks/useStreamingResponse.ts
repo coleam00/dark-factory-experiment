@@ -25,6 +25,7 @@ export function useStreamingResponse() {
       conversationId: string,
       userMessage: string,
       onComplete: (result: StreamResult) => void,
+      onAbort?: () => void,
     ): Promise<void> => {
       setIsStreaming(true);
       setStreamingContent('');
@@ -85,7 +86,20 @@ export function useStreamingResponse() {
         let buffer = '';
 
         while (true) {
-          const { done, value } = await reader.read();
+          let readResult: ReadableStreamReadResult<Uint8Array>;
+          try {
+            readResult = await reader.read();
+          } catch (readErr) {
+            // AbortController.abort() causes reader.read() to throw AbortError.
+            // Catch it here (inside try) so finally does NOT run before we can
+            // call onAbort — streaming state is still true at this point.
+            if (readErr instanceof Error && readErr.name === 'AbortError') {
+              onAbort?.();
+              return; // ← early return: no error UI, just restore input
+            }
+            throw readErr;
+          }
+          const { done, value } = readResult;
           if (done) break;
 
           buffer += decoder.decode(value, { stream: true });
