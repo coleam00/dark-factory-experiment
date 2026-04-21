@@ -197,12 +197,38 @@ async def test_logout_clears_cookie_and_blocks_me(client):
     )
     r_logout = await client.post("/api/auth/logout")
     assert r_logout.status_code == 204
-    # Clear client-side cookies as the browser would after Set-Cookie with
-    # max-age=0 / deletion. httpx's ASGI transport doesn't automatically honour
-    # the delete-cookie response, so drop them manually to match browser state.
-    client.cookies.clear()
+    # No manual cookies.clear() — the Set-Cookie deletion directive must
+    # actually take effect in the client jar (regression test for #111).
     r_me = await client.get("/api/auth/me")
     assert r_me.status_code == 401
+
+
+async def test_logout_set_cookie_header_has_matching_attributes(client):
+    """Regression test for #111.
+
+    The logout handler must emit a Set-Cookie directive whose attributes match
+    the ones used when the cookie was minted (Secure, HttpOnly, SameSite=Lax,
+    Path=/). Browsers only honour a deletion when every attribute matches; if
+    any are missing the original cookie survives and the JWT remains valid
+    until its server-side expiry.
+    """
+    await client.post(
+        "/api/auth/signup",
+        json={"email": "frank@example.com", "password": "password123"},
+    )
+    r_logout = await client.post("/api/auth/logout")
+    assert r_logout.status_code == 204
+
+    set_cookie = r_logout.headers.get("set-cookie", "")
+    assert "session=" in set_cookie
+    # Attributes are case-insensitive per RFC 6265.
+    lowered = set_cookie.lower()
+    assert "path=/" in lowered
+    assert "httponly" in lowered
+    assert "secure" in lowered
+    assert "samesite=lax" in lowered
+    # Either max-age=0 or an expiry in the past signals deletion.
+    assert "max-age=0" in lowered or "expires=" in lowered
 
 
 # ---------------------------------------------------------------------------

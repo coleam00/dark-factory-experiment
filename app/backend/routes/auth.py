@@ -77,6 +77,24 @@ def _set_session_cookie(response: Response, user_id: str) -> None:
     )
 
 
+def _clear_session_cookie(response: Response) -> None:
+    """Invalidate the session cookie on the client.
+
+    Browsers only honour a `Set-Cookie` deletion directive when every
+    attribute matches the original cookie — Secure, SameSite, HttpOnly, Path.
+    Omitting any of them leaves the original cookie intact and the user stays
+    authenticated until the JWT's own expiry (see issue #111). This helper is
+    intentionally symmetric with `_set_session_cookie` so the two can't drift.
+    """
+    response.delete_cookie(
+        key=COOKIE_NAME,
+        path="/",
+        httponly=True,
+        secure=True,
+        samesite="lax",
+    )
+
+
 def _user_to_response(user: dict[str, Any]) -> UserResponse:
     return UserResponse(id=str(user["id"]), email=str(user["email"]))
 
@@ -163,10 +181,16 @@ async def login(body: LoginRequest, response: Response) -> UserResponse:
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-async def logout(response: Response) -> Response:
-    """Clear the session cookie. Always 204 — idempotent."""
-    response.delete_cookie(key=COOKIE_NAME, path="/")
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+async def logout() -> Response:
+    """Clear the session cookie. Always 204 — idempotent.
+
+    Builds the response directly so the deletion Set-Cookie header lands on
+    the wire; relying on the FastAPI-injected `response` object drops headers
+    when we return a new `Response(...)`.
+    """
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
+    _clear_session_cookie(response)
+    return response
 
 
 @router.get("/me", response_model=MeResponse)
