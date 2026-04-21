@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { type Video, getVideos, ingestVideo } from '../lib/api';
+import { useAuth } from '../hooks/useAuth';
 
 // ── Skeleton card ────────────────────────────────────────────────
 function SkeletonCard() {
@@ -87,6 +88,7 @@ const INGEST_FIELDS = [
 ] as const;
 
 export function VideoExplorer({ isOpen, onClose }: VideoExplorerProps) {
+  const { user } = useAuth();
   const [videos, setVideos] = useState<Video[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -204,13 +206,15 @@ export function VideoExplorer({ isOpen, onClose }: VideoExplorerProps) {
               <line x1="11" y1="3" x2="3" y2="11" />
             </svg>
           </button>
-          <button
-            onClick={() => setIngestOpen(true)}
-            className="px-3 py-1.5 bg-blue-500 border-none rounded-md text-white text-sm cursor-pointer"
-            title="Add new video"
-          >
-            + Add Video
-          </button>
+          {user?.is_admin && (
+            <button
+              onClick={() => setIngestOpen(true)}
+              className="px-3 py-1.5 bg-blue-500 border-none rounded-md text-white text-sm cursor-pointer"
+              title="Add new video"
+            >
+              + Add Video
+            </button>
+          )}
         </div>
 
         {/* Content */}

@@ -3,6 +3,23 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { VideoExplorer } from '../components/VideoExplorer';
 import * as api from '../lib/api';
 
+// Default auth mock: admin user so the "+ Add Video" button renders. The
+// non-admin gate is covered by its own suite below that re-mocks useAuth.
+vi.mock('../hooks/useAuth', () => ({
+  useAuth: () => ({
+    user: {
+      id: 'test-admin',
+      email: 'admin@test',
+      is_admin: true,
+      messages_used_today: 0,
+      messages_remaining_today: 100,
+      rate_window_resets_at: null,
+    },
+    status: 'authed',
+    refresh: vi.fn(),
+  }),
+}));
+
 describe('VideoExplorer', () => {
   beforeEach(() => {
     vi.clearAllMocks();
