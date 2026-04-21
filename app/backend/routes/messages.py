@@ -212,6 +212,7 @@ def _extract_text_from_sse(sse_chunks: list[str]) -> str:
     tokens = []
     for chunk in sse_chunks:
         if not chunk.startswith("data: "):
+            logger.debug("Skipping non-data SSE chunk: %r", chunk[:100])
             continue
         content = chunk[len("data: ") :].rstrip("\n")
         if not content or content == "[DONE]":
@@ -248,8 +249,15 @@ def _is_refusal(text: str) -> bool:
         "outside the scope of",
         "don't have access to",
         "not part of my knowledge",
+        "haven't been provided",
+        "not available in",
+        "cannot answer questions about",
+        "not able to help",
     )
-    return any(pattern.lower() in text.lower() for pattern in refusal_patterns)
+    matched = any(pattern.lower() in text.lower() for pattern in refusal_patterns)
+    if matched:
+        logger.debug("Refusal detected in assistant response")
+    return matched
 
 
 async def _maybe_set_conversation_title(

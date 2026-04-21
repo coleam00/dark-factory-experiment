@@ -526,3 +526,274 @@ class TestRefusalSourcesSuppression:
 
         text = "That's not part of my knowledge base."
         assert _is_refusal(text) is True
+
+    def test_is_refusal_detects_additional_phrases(self) -> None:
+        """Additional refusal variations that may come from LLMs."""
+        from backend.routes.messages import _is_refusal
+
+        additional_refusals = [
+            "I haven't been provided with any videos about that topic.",
+            "That information is not available in the materials I've been given.",
+            "I cannot answer questions about topics not covered in the provided content.",
+            "I'm not able to help with that as it's not covered in the source material.",
+        ]
+        for text in additional_refusals:
+            assert _is_refusal(text) is True, f"Failed on: {text}"
+
+
+class TestExtractTextFromSse:
+    """Tests for _extract_text_from_sse helper."""
+
+    def test_extracts_json_encoded_token(self) -> None:
+        """JSON-encoded tokens are decoded and concatenated."""
+        from backend.routes.messages import _extract_text_from_sse
+
+        chunks = ['data: "Hello "\n\n', 'data: "world"\n\n']
+        assert _extract_text_from_sse(chunks) == "Hello world"
+
+    def test_skips_dones(self) -> None:
+        """[DONE] markers are skipped."""
+        from backend.routes.messages import _extract_text_from_sse
+
+        chunks = ['data: "Hello"\n\n', "data: [DONE]\n\n"]
+        assert _extract_text_from_sse(chunks) == "Hello"
+
+    def test_skips_error_payloads(self) -> None:
+        """Error JSON payloads are skipped."""
+        from backend.routes.messages import _extract_text_from_sse
+
+        chunks = ['data: {"error": "oops"}\n\n', 'data: "Hello"\n\n']
+        assert _extract_text_from_sse(chunks) == "Hello"
+
+    def test_fallback_on_invalid_json(self) -> None:
+        """Non-JSON data: lines are treated as raw text."""
+        from backend.routes.messages import _extract_text_from_sse
+
+        chunks = ["data: raw text\n\n"]
+        assert _extract_text_from_sse(chunks) == "raw text"
+
+    def test_reconstructs_full_refusal(self) -> None:
+        """Refusal text spanning multiple SSE chunks is fully reconstructed.
+
+        Real LLM streams send complete phrases as tokens, not individual words.
+        """
+        import json
+
+        from backend.routes.messages import _extract_text_from_sse, _is_refusal
+
+        # Simulate realistic LLM streaming - phrases as complete tokens
+        refusal_phrases = [
+            "Those topics are ",
+            "not covered in any of the videos",
+            ".",
+        ]
+        chunks = [f"data: {json.dumps(phrase)}\n\n" for phrase in refusal_phrases]
+        result = _extract_text_from_sse(chunks)
+        assert result == "Those topics are not covered in any of the videos."
+        assert _is_refusal(result) is True
+
+    def test_skips_non_data_chunks(self) -> None:
+        """SSE chunks not starting with 'data: ' are skipped."""
+        from backend.routes.messages import _extract_text_from_sse
+
+        chunks = [
+            "event: sources\ndata: []\n\n",
+            'data: "Hello"\n\n',
+        ]
+        assert _extract_text_from_sse(chunks) == "Hello"
+
+
+class TestRefusalSourcesSuppressionIntegration:
+    """Integration tests for SSE sources suppression on refusals.
+
+    Verifies the full path: stream_chat yields refusal tokens → event_generator
+    suppresses sources event → response contains [DONE] but no 'event: sources'.
+    """
+
+    async def test_sources_event_suppressed_on_refusal(self) -> None:
+        """When LLM refuses, the sources SSE event must not be emitted."""
+        import json
+        from unittest.mock import AsyncMock, patch
+
+        from httpx import ASGITransport, AsyncClient
+
+        from backend.auth.tokens import encode_token
+        from backend.main import app
+
+        refusal_text = "Those topics are not covered in any of the videos."
+        refusal_token = json.dumps(refusal_text)
+        refusal_chunk = f"data: {refusal_token}\n\n"
+        done_chunk = "data: [DONE]\n\n"
+
+        source_citations = [
+            {
+                "chunk_id": "c1",
+                "video_id": "v1",
+                "video_title": "Test Video",
+                "video_url": "https://youtube.com/watch?v=abc",
+                "start_seconds": 10.0,
+                "end_seconds": 20.0,
+                "snippet": "Test snippet",
+            }
+        ]
+
+        async def mock_stream_chat(*args, **kwargs):
+            yield refusal_chunk
+            yield done_chunk
+
+        from uuid import uuid4
+
+        test_user_id = str(uuid4())
+        test_conv_id = str(uuid4())
+        valid_token = encode_token(test_user_id)
+
+        async def mock_get_user_by_id(user_id):
+            return {
+                "id": test_user_id,
+                "email": "test@example.com",
+                "password_hash": "hashed",
+                "created_at": "2026-01-01T00:00:00Z",
+            }
+
+        async def mock_get_conversation(conv_id, user_id):
+            if conv_id == test_conv_id:
+                return {
+                    "id": test_conv_id,
+                    "user_id": test_user_id,
+                    "title": "Test",
+                    "created_at": "2026-01-01T00:00:00Z",
+                }
+            return None
+
+        async def mock_create_message(**kwargs):
+            return {"id": str(uuid4()), **kwargs}
+
+        async def mock_list_messages(conv_id, user_id):
+            return []
+
+        # Patch users_repo.get_user_by_id (used by get_current_user in auth.dependencies)
+        with (
+            patch("backend.auth.dependencies.users_repo.get_user_by_id", mock_get_user_by_id),
+            patch("backend.db.repository.get_conversation", mock_get_conversation),
+            patch("backend.db.repository.create_message", mock_create_message),
+            patch("backend.db.repository.list_messages", mock_list_messages),
+            patch("backend.routes.messages.stream_chat", mock_stream_chat),
+            patch(
+                "backend.routes.messages.embed_text",
+                new_callable=AsyncMock,
+                return_value=[[0.1] * 1536],
+            ),
+            patch(
+                "backend.routes.messages.retrieve_hybrid",
+                new_callable=AsyncMock,
+                return_value=source_citations,
+            ),
+        ):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                response = await client.post(
+                    f"/api/conversations/{test_conv_id}/messages",
+                    json={"content": "off-topic question"},
+                    headers={"Cookie": f"session={valid_token}"},
+                )
+
+        output = response.text
+        # Sources event must NOT be present
+        assert "event: sources" not in output, (
+            f"Expected no 'event: sources' in output, but got: {output}"
+        )
+        # [DONE] should still be present
+        assert "data: [DONE]" in output, f"Expected [DONE] in output, but got: {output}"
+
+    async def test_sources_event_emitted_on_normal_answer(self) -> None:
+        """When LLM gives a normal answer, sources SSE event IS emitted."""
+        import json
+        from unittest.mock import AsyncMock, patch
+
+        from httpx import ASGITransport, AsyncClient
+
+        from backend.auth.tokens import encode_token
+        from backend.main import app
+
+        answer_text = "The video explains that this feature works well."
+        answer_token = json.dumps(answer_text)
+        answer_chunk = f"data: {answer_token}\n\n"
+        done_chunk = "data: [DONE]\n\n"
+
+        source_citations = [
+            {
+                "chunk_id": "c1",
+                "video_id": "v1",
+                "video_title": "Test Video",
+                "video_url": "https://youtube.com/watch?v=abc",
+                "start_seconds": 10.0,
+                "end_seconds": 20.0,
+                "snippet": "Test snippet",
+            }
+        ]
+
+        async def mock_stream_chat(*args, **kwargs):
+            yield answer_chunk
+            yield done_chunk
+
+        from uuid import uuid4
+
+        test_user_id = str(uuid4())
+        test_conv_id = str(uuid4())
+        valid_token = encode_token(test_user_id)
+
+        async def mock_get_user_by_id(user_id):
+            return {
+                "id": test_user_id,
+                "email": "test@example.com",
+                "password_hash": "hashed",
+                "created_at": "2026-01-01T00:00:00Z",
+            }
+
+        async def mock_get_conversation(conv_id, user_id):
+            if conv_id == test_conv_id:
+                return {
+                    "id": test_conv_id,
+                    "user_id": test_user_id,
+                    "title": "Test",
+                    "created_at": "2026-01-01T00:00:00Z",
+                }
+            return None
+
+        async def mock_create_message(**kwargs):
+            return {"id": str(uuid4()), **kwargs}
+
+        async def mock_list_messages(conv_id, user_id):
+            return []
+
+        with (
+            patch("backend.auth.dependencies.users_repo.get_user_by_id", mock_get_user_by_id),
+            patch("backend.db.repository.get_conversation", mock_get_conversation),
+            patch("backend.db.repository.create_message", mock_create_message),
+            patch("backend.db.repository.list_messages", mock_list_messages),
+            patch("backend.routes.messages.stream_chat", mock_stream_chat),
+            patch(
+                "backend.routes.messages.embed_text",
+                new_callable=AsyncMock,
+                return_value=[[0.1] * 1536],
+            ),
+            patch(
+                "backend.routes.messages.retrieve_hybrid",
+                new_callable=AsyncMock,
+                return_value=source_citations,
+            ),
+        ):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                response = await client.post(
+                    f"/api/conversations/{test_conv_id}/messages",
+                    json={"content": "question about video"},
+                    headers={"Cookie": f"session={valid_token}"},
+                )
+
+        output = response.text
+        # Sources event MUST be present
+        assert "event: sources" in output, (
+            f"Expected 'event: sources' in output for normal answer, but got: {output}"
+        )
+        assert "data: [DONE]" in output
