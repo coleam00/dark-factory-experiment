@@ -477,7 +477,8 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
       if (activeConversationId === confirmId) {
         navigate('/');
       }
-    } catch {
+    } catch (e) {
+      console.error('[Sidebar] Delete conversation failed:', e);
       setDeleteError(true);
     } finally {
       setDeleting(false);

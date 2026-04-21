@@ -147,13 +147,16 @@ async def create_message(
 
     # 6. Stream the response
     async def event_generator() -> AsyncGenerator[str, None]:
-        full_response = []
+        full_response: list[str] = []
         try:
             async for sse_chunk in stream_chat(llm_messages, context=context):
                 # Intercept [DONE] to inject sources event first
+                # Only emit sources if chunks were actually used (i.e., not a refusal)
                 if sse_chunk == "data: [DONE]\n\n" and source_citations:
-                    sources_json = json.dumps(source_citations)
-                    yield f"event: sources\ndata: {sources_json}\n\n"
+                    assistant_text = _extract_text_from_sse(full_response)
+                    if not _is_refusal(assistant_text):
+                        sources_json = json.dumps(source_citations)
+                        yield f"event: sources\ndata: {sources_json}\n\n"
                 full_response.append(sse_chunk)
                 yield sse_chunk
         finally:
@@ -209,6 +212,7 @@ def _extract_text_from_sse(sse_chunks: list[str]) -> str:
     tokens = []
     for chunk in sse_chunks:
         if not chunk.startswith("data: "):
+            logger.debug("Skipping non-data SSE chunk: %r", chunk[:100])
             continue
         content = chunk[len("data: ") :].rstrip("\n")
         if not content or content == "[DONE]":
@@ -226,6 +230,50 @@ def _extract_text_from_sse(sse_chunks: list[str]) -> str:
             # Fallback: treat as raw text (backward compat with unencoded tokens)
             tokens.append(content)
     return "".join(tokens)
+
+
+def _is_refusal(text: str) -> bool:
+    """
+    Returns True if the assistant text explicitly declines to answer because
+    the query falls outside the video context.
+
+    This check prevents misleading "Sources (N)" renders when the LLM
+    correctly refused to use any retrieved chunks.
+    """
+    refusal_patterns = (
+        "not covered in any of the videos",
+        # Contraction-form variants — the LLM often phrases the refusal as
+        # "aren't/isn't covered", which doesn't contain the substring "not".
+        # The E2E regression from pass-1 validation showed this: the model
+        # said "Those topics aren't covered in any of the videos in my
+        # context...", no pattern matched, and "Sources (N)" still rendered.
+        "aren't covered in any of the videos",
+        "aren't covered",
+        "isn't covered",
+        "aren't in the context",
+        "isn't in the context",
+        "aren't part of",
+        "isn't part of",
+        "aren't available",
+        "isn't available",
+        "aren't discussed",
+        "isn't discussed",
+        "not in the context",
+        "don't have information about",
+        "can't help with that",
+        "I can only answer questions about",
+        "outside the scope of",
+        "don't have access to",
+        "not part of my knowledge",
+        "haven't been provided",
+        "not available in",
+        "cannot answer questions about",
+        "not able to help",
+    )
+    matched = any(pattern.lower() in text.lower() for pattern in refusal_patterns)
+    if matched:
+        logger.debug("Refusal detected in assistant response")
+    return matched
 
 
 async def _maybe_set_conversation_title(
