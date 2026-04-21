@@ -297,14 +297,25 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
   }, []);
 
   // ── Send pending message after conversation is created ──
+  // handleSend is intentionally omitted from the deps array below. It is memoized via
+  // useCallback with all required deps (navigate, setMessages, startStream, etc.), so it is
+  // guaranteed stable whenever conversationId is set. Adding it to the deps array would create
+  // a temporal-dead-zone error since handleSend is const-declared after this effect.
   useEffect(() => {
     if (conversationId && pendingMessageRef.current) {
       const msg = pendingMessageRef.current;
       pendingMessageRef.current = null;
-      // Delay slightly to ensure useMessages has loaded the conversation
-      setTimeout(() => handleSend(msg), 100);
+      // 2s timeout — if handleSend hasn't completed by then, show error to user.
+      // This catches the silent-failure path where conversationId is set but the pending
+      // message never fires (e.g., component re-mount, race condition).
+      const timeoutId = setTimeout(() => {
+        addToast('Failed to send message. Please try again.', 'error');
+      }, 2000);
+      handleSend(msg);
+      return () => clearTimeout(timeoutId);
     }
-  }, [conversationId]); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId]);
 
   // ── Citation click handler (opens modal) ──
   const handleCitationClick = useCallback((citation: Citation) => {
@@ -321,8 +332,12 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
         try {
           const conv = await createConversation();
           navigate(`/c/${conv.id}`);
-        } catch {
+        } catch (e) {
           pendingMessageRef.current = null;
+          console.error(
+            '[ChatArea] Failed to create conversation:',
+            e instanceof Error ? e.message : String(e),
+          );
           addToast('Could not create conversation. Please try again.', 'error');
         }
         return;
@@ -439,6 +454,7 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Export failed';
+      console.error('[ChatArea] Export failed:', msg);
       addToast(`Export failed: ${msg}`, 'error');
     }
   }, [conversation, messages, addToast]);

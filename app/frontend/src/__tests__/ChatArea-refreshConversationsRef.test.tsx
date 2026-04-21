@@ -16,6 +16,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatArea } from '../components/ChatArea';
+import { useToast } from '../hooks/useToast';
 import * as api from '../lib/api';
 
 // Mock useNavigate
@@ -199,7 +200,11 @@ describe('ChatArea refreshConversationsRef', () => {
     } as unknown as Response);
 
     // No error should be thrown when refreshConversationsRef is undefined
-    render(<ChatArea conversationId="conv-1" refreshConversationsRef={undefined} />);
+    render(
+      <MemoryRouter>
+        <ChatArea conversationId="conv-1" refreshConversationsRef={undefined} />
+      </MemoryRouter>,
+    );
 
     await waitFor(() => {
       expect(screen.getByRole('textbox')).toBeInTheDocument();
@@ -258,5 +263,53 @@ describe('ChatArea refreshConversationsRef', () => {
 
     // Verify scrollIntoView was called AFTER RAF
     expect(scrollSpy).toHaveBeenCalled();
+  });
+
+  it('should create conversation and navigate when sending with no conversationId', async () => {
+    const mockConv = { id: 'new-conv-123', title: 'New Chat', created_at: '', updated_at: '' };
+    vi.spyOn(api, 'createConversation').mockResolvedValue(mockConv as api.Conversation);
+
+    render(
+      <MemoryRouter>
+        <ChatArea conversationId={undefined} refreshConversationsRef={undefined} />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByRole('textbox')).toBeInTheDocument());
+
+    const input = screen.getByRole('textbox');
+    fireEvent.change(input, { target: { value: 'Hello world' } });
+    fireEvent.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => {
+      expect(api.createConversation).toHaveBeenCalledTimes(1);
+    });
+
+    expect(mockNavigate).toHaveBeenCalledWith('/c/new-conv-123');
+  });
+
+  it('should handle createConversation error gracefully', async () => {
+    vi.spyOn(api, 'createConversation').mockRejectedValue(new Error('Server error'));
+
+    const addToastSpy = vi.fn();
+    vi.mocked(useToast).mockReturnValue({ addToast: addToastSpy, removeToast: vi.fn() });
+
+    render(
+      <MemoryRouter>
+        <ChatArea conversationId={undefined} />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByRole('textbox')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Test' } });
+    fireEvent.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => {
+      expect(addToastSpy).toHaveBeenCalledWith(
+        'Could not create conversation. Please try again.',
+        'error',
+      );
+    });
   });
 });
