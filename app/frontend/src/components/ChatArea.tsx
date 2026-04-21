@@ -1,10 +1,11 @@
 import { type MutableRefObject, useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useMessages } from '../hooks/useMessages';
 import { useStreamingResponse } from '../hooks/useStreamingResponse';
 import { useToast } from '../hooks/useToast';
 import type { Citation, Message as MessageType } from '../lib/api';
-import { RateLimitError } from '../lib/api';
+import { RateLimitError, createConversation } from '../lib/api';
 import { exportConversationAsMarkdown } from '../lib/exportMarkdown';
 import { ChatInput, type ChatInputHandle } from './ChatInput';
 import { CitationModal } from './CitationModal';
@@ -237,6 +238,7 @@ interface ChatAreaProps {
 }
 
 export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaProps) {
+  const navigate = useNavigate();
   const { messages, setMessages, loading, error, conversation } = useMessages(
     conversationId || null,
   );
@@ -244,6 +246,9 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
     useStreamingResponse();
   const { addToast } = useToast();
   const { refresh: refreshAuth } = useAuth();
+
+  // Pending message to send after creating a conversation on the landing page
+  const pendingMessageRef = useRef<string | null>(null);
 
   const chatInputRef = useRef<ChatInputHandle>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -291,6 +296,16 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
     }
   }, []);
 
+  // ── Send pending message after conversation is created ──
+  useEffect(() => {
+    if (conversationId && pendingMessageRef.current) {
+      const msg = pendingMessageRef.current;
+      pendingMessageRef.current = null;
+      // Delay slightly to ensure useMessages has loaded the conversation
+      setTimeout(() => handleSend(msg), 100);
+    }
+  }, [conversationId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Citation click handler (opens modal) ──
   const handleCitationClick = useCallback((citation: Citation) => {
     setSelectedCitation(citation);
@@ -299,7 +314,21 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
   // ── Send handler ──
   const handleSend = useCallback(
     async (content: string) => {
-      if (!conversationId || isStreaming) return;
+      // If no conversation, create one first then send
+      if (!conversationId) {
+        if (isStreaming) return;
+        pendingMessageRef.current = content;
+        try {
+          const conv = await createConversation();
+          navigate(`/c/${conv.id}`);
+        } catch {
+          pendingMessageRef.current = null;
+          addToast('Could not create conversation. Please try again.', 'error');
+        }
+        return;
+      }
+
+      if (isStreaming) return;
 
       // Clear any previous inline error
       setInlineError(null);
@@ -370,6 +399,7 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
     [
       conversationId,
       isStreaming,
+      navigate,
       setMessages,
       startStream,
       scrollToBottom,
@@ -548,27 +578,25 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
         }}
       />
 
-      {/* ── Chat input (only when a conversation is active) ── */}
-      {conversationId && (
-        <div
-          style={{
-            position: 'absolute',
-            bottom: 0,
-            left: 0,
-            right: 0,
-            padding: '0 24px 24px',
-            zIndex: 2,
-          }}
-        >
-          <ChatInput
-            ref={chatInputRef}
-            onSend={handleSend}
-            isStreaming={isStreaming}
-            disabled={!conversationId}
-            onStop={abortStream}
-          />
-        </div>
-      )}
+      {/* ── Chat input ── */}
+      <div
+        style={{
+          position: 'absolute',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          padding: '0 24px 24px',
+          zIndex: 2,
+        }}
+      >
+        <ChatInput
+          ref={chatInputRef}
+          onSend={handleSend}
+          isStreaming={isStreaming}
+          disabled={isStreaming}
+          onStop={abortStream}
+        />
+      </div>
 
       {/* ── Citation modal ── */}
       {selectedCitation && (

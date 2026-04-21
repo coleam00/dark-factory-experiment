@@ -13,9 +13,20 @@
  */
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatArea } from '../components/ChatArea';
 import * as api from '../lib/api';
+
+// Mock useNavigate
+const mockNavigate = vi.fn();
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual('react-router-dom');
+  return {
+    ...actual,
+    useNavigate: () => mockNavigate,
+  };
+});
 
 // Mock the hooks that ChatArea depends on
 vi.mock('../hooks/useMessages', () => ({
@@ -106,12 +117,14 @@ describe('ChatArea refreshConversationsRef', () => {
     vi.spyOn(global, 'fetch').mockResolvedValue(mockResponse as unknown as Response);
 
     render(
-      <ChatArea
-        conversationId="conv-1"
-        refreshConversationsRef={
-          refreshConversationsRef as React.MutableRefObject<(() => Promise<void>) | null>
-        }
-      />,
+      <MemoryRouter>
+        <ChatArea
+          conversationId="conv-1"
+          refreshConversationsRef={
+            refreshConversationsRef as React.MutableRefObject<(() => Promise<void>) | null>
+          }
+        />
+      </MemoryRouter>,
     );
 
     // Wait for ChatInput to be ready
@@ -148,12 +161,14 @@ describe('ChatArea refreshConversationsRef', () => {
     } as unknown as Response);
 
     render(
-      <ChatArea
-        conversationId="conv-1"
-        refreshConversationsRef={
-          refreshConversationsRef as React.MutableRefObject<(() => Promise<void>) | null>
-        }
-      />,
+      <MemoryRouter>
+        <ChatArea
+          conversationId="conv-1"
+          refreshConversationsRef={
+            refreshConversationsRef as React.MutableRefObject<(() => Promise<void>) | null>
+          }
+        />
+      </MemoryRouter>,
     );
 
     await waitFor(() => {
@@ -219,12 +234,14 @@ describe('ChatArea refreshConversationsRef', () => {
     const scrollSpy = vi.spyOn(Element.prototype, 'scrollIntoView');
 
     render(
-      <ChatArea
-        conversationId="conv-1"
-        refreshConversationsRef={
-          refreshConversationsRef as React.MutableRefObject<(() => Promise<void>) | null>
-        }
-      />,
+      <MemoryRouter>
+        <ChatArea
+          conversationId="conv-1"
+          refreshConversationsRef={
+            refreshConversationsRef as React.MutableRefObject<(() => Promise<void>) | null>
+          }
+        />
+      </MemoryRouter>,
     );
 
     await waitFor(() => {
