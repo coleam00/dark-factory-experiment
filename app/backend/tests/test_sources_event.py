@@ -449,3 +449,80 @@ class TestSourcesPersistenceRoundtrip:
         sources_json = json.dumps(source_citations)
         parsed = json.loads(sources_json)
         assert parsed[0]["retrieval_failed"] is True
+
+
+class TestRefusalSourcesSuppression:
+    """Tests for suppression of sources section on off-topic refusals."""
+
+    def test_is_refusal_detects_not_covered_phrase(self) -> None:
+        """Refusal phrases containing 'not covered in any of the videos' are detected."""
+        from backend.routes.messages import _is_refusal
+
+        text = (
+            "Those topics aren't covered in any of the videos in my context — "
+            "they're focused entirely on Claude Code."
+        )
+        assert _is_refusal(text) is True
+
+    def test_is_refusal_detects_can_only_answer(self) -> None:
+        """Refusal phrases containing 'can only answer questions about' are detected."""
+        from backend.routes.messages import _is_refusal
+
+        text = "I can only answer questions about the topics covered in the provided videos."
+        assert _is_refusal(text) is True
+
+    def test_is_refusal_detects_dont_have_information(self) -> None:
+        """Refusal phrases containing 'don't have information' are detected."""
+        from backend.routes.messages import _is_refusal
+
+        text = "I don't have information about that topic."
+        assert _is_refusal(text) is True
+
+    def test_is_refusal_rejects_normal_answer(self) -> None:
+        """A substantive answer that happens to use 'not' does not trigger refusal detection."""
+        from backend.routes.messages import _is_refusal
+
+        text = "The video explains that this approach does not work well when nested."
+        assert _is_refusal(text) is False
+
+    def test_is_refusal_is_case_insensitive(self) -> None:
+        """Refusal detection is case-insensitive."""
+        from backend.routes.messages import _is_refusal
+
+        text = "THOSE TOPICS AREN'T COVERED IN ANY OF THE VIDEOS"
+        assert _is_refusal(text) is True
+
+    def test_is_refusal_empty_text(self) -> None:
+        """Empty text returns False (edge case — shouldn't happen in practice)."""
+        from backend.routes.messages import _is_refusal
+
+        assert _is_refusal("") is False
+        assert _is_refusal("   ") is False
+
+    def test_is_refusal_detects_cant_help(self) -> None:
+        """Refusal phrase 'can't help with that' is detected."""
+        from backend.routes.messages import _is_refusal
+
+        text = "I'm sorry, but I can't help with that request."
+        assert _is_refusal(text) is True
+
+    def test_is_refusal_detects_outside_scope(self) -> None:
+        """Refusal phrase 'outside the scope of' is detected."""
+        from backend.routes.messages import _is_refusal
+
+        text = "That question is outside the scope of the content I've been provided."
+        assert _is_refusal(text) is True
+
+    def test_is_refusal_detects_dont_have_access(self) -> None:
+        """Refusal phrase 'don't have access to' is detected."""
+        from backend.routes.messages import _is_refusal
+
+        text = "I don't have access to information about that."
+        assert _is_refusal(text) is True
+
+    def test_is_refusal_detects_not_part_of_knowledge(self) -> None:
+        """Refusal phrase 'not part of my knowledge' is detected."""
+        from backend.routes.messages import _is_refusal
+
+        text = "That's not part of my knowledge base."
+        assert _is_refusal(text) is True

@@ -151,9 +151,12 @@ async def create_message(
         try:
             async for sse_chunk in stream_chat(llm_messages, context=context):
                 # Intercept [DONE] to inject sources event first
+                # Only emit sources if chunks were actually used (i.e., not a refusal)
                 if sse_chunk == "data: [DONE]\n\n" and source_citations:
-                    sources_json = json.dumps(source_citations)
-                    yield f"event: sources\ndata: {sources_json}\n\n"
+                    assistant_text = _extract_text_from_sse(full_response)
+                    if not _is_refusal(assistant_text):
+                        sources_json = json.dumps(source_citations)
+                        yield f"event: sources\ndata: {sources_json}\n\n"
                 full_response.append(sse_chunk)
                 yield sse_chunk
         finally:
@@ -226,6 +229,27 @@ def _extract_text_from_sse(sse_chunks: list[str]) -> str:
             # Fallback: treat as raw text (backward compat with unencoded tokens)
             tokens.append(content)
     return "".join(tokens)
+
+
+def _is_refusal(text: str) -> bool:
+    """
+    Returns True if the assistant text explicitly declines to answer because
+    the query falls outside the video context.
+
+    This check prevents misleading "Sources (N)" renders when the LLM
+    correctly refused to use any retrieved chunks.
+    """
+    refusal_patterns = (
+        "not covered in any of the videos",
+        "not in the context",
+        "don't have information about",
+        "can't help with that",
+        "I can only answer questions about",
+        "outside the scope of",
+        "don't have access to",
+        "not part of my knowledge",
+    )
+    return any(pattern in text.lower() for pattern in refusal_patterns)
 
 
 async def _maybe_set_conversation_title(
