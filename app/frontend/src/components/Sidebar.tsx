@@ -204,6 +204,7 @@ function ConvItem({
             setEditing(true);
             setEditValue(conv.title);
           }}
+          aria-label="Rename conversation"
           title="Rename conversation"
           style={{
             position: 'absolute',
@@ -741,7 +742,7 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
             gap: 8,
           }}
         >
-          <span style={{ fontSize: 12, color: '#475569' }}>RAG YouTube Chat</span>
+          <span style={{ fontSize: 12, color: '#475569' }}>DynaChat</span>
 
           {/* Library admin link — admin-only. is_admin is a server-computed
               hint only; the /api/admin/* endpoints re-verify on every call. */}
