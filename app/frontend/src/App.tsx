@@ -6,6 +6,7 @@ import { ToastProvider } from './components/ToastProvider';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { AdminVideos } from './pages/AdminVideos';
 import { Login } from './pages/Login';
+import { NotFound } from './pages/NotFound';
 import { Signup } from './pages/Signup';
 
 // ── Auth guard ───────────────────────────────────────────────────
@@ -125,6 +126,7 @@ function App() {
                 </RequireAuth>
               }
             />
+            <Route path="*" element={<NotFound />} />
           </Routes>
         </ToastProvider>
       </AuthProvider>
