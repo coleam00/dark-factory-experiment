@@ -1,17 +1,18 @@
 import { type MutableRefObject, useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useMessages } from '../hooks/useMessages';
 import { useStreamingResponse } from '../hooks/useStreamingResponse';
 import { useToast } from '../hooks/useToast';
 import type { Citation, Message as MessageType } from '../lib/api';
-import { RateLimitError } from '../lib/api';
+import { RateLimitError, createConversation } from '../lib/api';
 import { exportConversationAsMarkdown } from '../lib/exportMarkdown';
 import { ChatInput, type ChatInputHandle } from './ChatInput';
 import { CitationModal } from './CitationModal';
 import { Message } from './Message';
 
 function formatResetTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) || iso;
+  return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 
 // ── Skeleton message rows ─────────────────────────────────────────
@@ -237,6 +238,7 @@ interface ChatAreaProps {
 }
 
 export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaProps) {
+  const navigate = useNavigate();
   const { messages, setMessages, loading, error, conversation } = useMessages(
     conversationId || null,
   );
@@ -245,11 +247,13 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
   const { addToast } = useToast();
   const { refresh: refreshAuth } = useAuth();
 
+  // Pending message to send after creating a conversation on the landing page
+  const pendingMessageRef = useRef<string | null>(null);
+
   const chatInputRef = useRef<ChatInputHandle>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const autoScrollRef = useRef(true);
-  const [, setForceUpdate] = useState(0);
 
   // Inline error state (for failed sends)
   const [inlineError, setInlineError] = useState<string | null>(null);
@@ -284,11 +288,7 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
     const el = scrollContainerRef.current;
     if (!el) return;
     const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    const shouldAutoScroll = distFromBottom < 100;
-    if (shouldAutoScroll !== autoScrollRef.current) {
-      autoScrollRef.current = shouldAutoScroll;
-      setForceUpdate((n) => n + 1);
-    }
+    autoScrollRef.current = distFromBottom < 100;
   }, []);
 
   // ── Citation click handler (opens modal) ──
@@ -299,7 +299,25 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
   // ── Send handler ──
   const handleSend = useCallback(
     async (content: string) => {
-      if (!conversationId || isStreaming) return;
+      // If no conversation, create one first then send
+      if (!conversationId) {
+        if (isStreaming) return;
+        pendingMessageRef.current = content;
+        try {
+          const conv = await createConversation();
+          navigate(`/c/${conv.id}`);
+        } catch (e) {
+          pendingMessageRef.current = null;
+          console.error(
+            '[ChatArea] Failed to create conversation:',
+            e instanceof Error ? e.message : String(e),
+          );
+          addToast('Could not create conversation. Please try again.', 'error');
+        }
+        return;
+      }
+
+      if (isStreaming) return;
 
       // Clear any previous inline error
       setInlineError(null);
@@ -370,6 +388,7 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
     [
       conversationId,
       isStreaming,
+      navigate,
       setMessages,
       startStream,
       scrollToBottom,
@@ -378,6 +397,22 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
       refreshConversationsRef,
     ],
   );
+
+  // ── Send pending message after conversation is created ──
+  useEffect(() => {
+    if (!conversationId || !pendingMessageRef.current) return;
+
+    const msg = pendingMessageRef.current;
+    pendingMessageRef.current = null;
+    // 2s timeout — if handleSend hasn't completed by then, show error to user.
+    // This catches the silent-failure path where conversationId is set but the pending
+    // message never fires (e.g., component re-mount, race condition).
+    const timeoutId = setTimeout(() => {
+      addToast('Failed to send message. Please try again.', 'error');
+    }, 2000);
+    handleSend(msg);
+    return () => clearTimeout(timeoutId);
+  }, [conversationId, handleSend]);
 
   // ── Retry failed message — re-attempt the API call with same content ──
   const handleRetry = useCallback(() => {
@@ -409,6 +444,7 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Export failed';
+      console.error('[ChatArea] Export failed:', msg);
       addToast(`Export failed: ${msg}`, 'error');
     }
   }, [conversation, messages, addToast]);
@@ -548,27 +584,25 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
         }}
       />
 
-      {/* ── Chat input (only when a conversation is active) ── */}
-      {conversationId && (
-        <div
-          style={{
-            position: 'absolute',
-            bottom: 0,
-            left: 0,
-            right: 0,
-            padding: '0 24px 24px',
-            zIndex: 2,
-          }}
-        >
-          <ChatInput
-            ref={chatInputRef}
-            onSend={handleSend}
-            isStreaming={isStreaming}
-            disabled={!conversationId}
-            onStop={abortStream}
-          />
-        </div>
-      )}
+      {/* ── Chat input ── */}
+      <div
+        style={{
+          position: 'absolute',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          padding: '0 24px 24px',
+          zIndex: 2,
+        }}
+      >
+        <ChatInput
+          ref={chatInputRef}
+          onSend={handleSend}
+          isStreaming={isStreaming}
+          disabled={isStreaming}
+          onStop={abortStream}
+        />
+      </div>
 
       {/* ── Citation modal ── */}
       {selectedCitation && (

@@ -13,9 +13,20 @@
  */
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatArea } from '../components/ChatArea';
 import * as api from '../lib/api';
+
+// Mock useNavigate
+const mockNavigate = vi.fn();
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual('react-router-dom');
+  return {
+    ...actual,
+    useNavigate: () => mockNavigate,
+  };
+});
 
 // Mock the hooks that ChatArea depends on
 vi.mock('../hooks/useMessages', () => ({
@@ -57,7 +68,8 @@ vi.mock('../hooks/useStreamingResponse', () => ({
 
 vi.mock('../hooks/useToast', () => ({
   useToast: () => ({
-    addToast: vi.fn(),
+    addToast: addToastRef.current,
+    removeToast: vi.fn(),
   }),
 }));
 
@@ -73,10 +85,15 @@ beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn();
 });
 
+// Mutable ref captured by the useToast mock factory - updated in beforeEach
+const addToastRef = { current: vi.fn() };
+
 describe('ChatArea refreshConversationsRef', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.spyOn(api, 'getConversations').mockResolvedValue([]);
+    // Reset addToastRef to a fresh spy for each test
+    addToastRef.current = vi.fn();
   });
 
   /**
@@ -106,12 +123,14 @@ describe('ChatArea refreshConversationsRef', () => {
     vi.spyOn(global, 'fetch').mockResolvedValue(mockResponse as unknown as Response);
 
     render(
-      <ChatArea
-        conversationId="conv-1"
-        refreshConversationsRef={
-          refreshConversationsRef as React.MutableRefObject<(() => Promise<void>) | null>
-        }
-      />,
+      <MemoryRouter>
+        <ChatArea
+          conversationId="conv-1"
+          refreshConversationsRef={
+            refreshConversationsRef as React.MutableRefObject<(() => Promise<void>) | null>
+          }
+        />
+      </MemoryRouter>,
     );
 
     // Wait for ChatInput to be ready
@@ -148,12 +167,14 @@ describe('ChatArea refreshConversationsRef', () => {
     } as unknown as Response);
 
     render(
-      <ChatArea
-        conversationId="conv-1"
-        refreshConversationsRef={
-          refreshConversationsRef as React.MutableRefObject<(() => Promise<void>) | null>
-        }
-      />,
+      <MemoryRouter>
+        <ChatArea
+          conversationId="conv-1"
+          refreshConversationsRef={
+            refreshConversationsRef as React.MutableRefObject<(() => Promise<void>) | null>
+          }
+        />
+      </MemoryRouter>,
     );
 
     await waitFor(() => {
@@ -184,7 +205,11 @@ describe('ChatArea refreshConversationsRef', () => {
     } as unknown as Response);
 
     // No error should be thrown when refreshConversationsRef is undefined
-    render(<ChatArea conversationId="conv-1" refreshConversationsRef={undefined} />);
+    render(
+      <MemoryRouter>
+        <ChatArea conversationId="conv-1" refreshConversationsRef={undefined} />
+      </MemoryRouter>,
+    );
 
     await waitFor(() => {
       expect(screen.getByRole('textbox')).toBeInTheDocument();
@@ -219,12 +244,14 @@ describe('ChatArea refreshConversationsRef', () => {
     const scrollSpy = vi.spyOn(Element.prototype, 'scrollIntoView');
 
     render(
-      <ChatArea
-        conversationId="conv-1"
-        refreshConversationsRef={
-          refreshConversationsRef as React.MutableRefObject<(() => Promise<void>) | null>
-        }
-      />,
+      <MemoryRouter>
+        <ChatArea
+          conversationId="conv-1"
+          refreshConversationsRef={
+            refreshConversationsRef as React.MutableRefObject<(() => Promise<void>) | null>
+          }
+        />
+      </MemoryRouter>,
     );
 
     await waitFor(() => {
@@ -241,5 +268,51 @@ describe('ChatArea refreshConversationsRef', () => {
 
     // Verify scrollIntoView was called AFTER RAF
     expect(scrollSpy).toHaveBeenCalled();
+  });
+
+  it('should create conversation and navigate when sending with no conversationId', async () => {
+    const mockConv = { id: 'new-conv-123', title: 'New Chat', created_at: '', updated_at: '' };
+    vi.spyOn(api, 'createConversation').mockResolvedValue(mockConv as api.Conversation);
+
+    render(
+      <MemoryRouter>
+        <ChatArea conversationId={undefined} refreshConversationsRef={undefined} />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByRole('textbox')).toBeInTheDocument());
+
+    const input = screen.getByRole('textbox');
+    fireEvent.change(input, { target: { value: 'Hello world' } });
+    fireEvent.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => {
+      expect(api.createConversation).toHaveBeenCalledTimes(1);
+    });
+
+    expect(mockNavigate).toHaveBeenCalledWith('/c/new-conv-123');
+  });
+
+  it('should handle createConversation error gracefully', async () => {
+    vi.spyOn(api, 'createConversation').mockRejectedValue(new Error('Server error'));
+
+    render(
+      <MemoryRouter>
+        <ChatArea conversationId={undefined} />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByRole('textbox')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Test' } });
+    fireEvent.click(screen.getByRole('button', { name: /send/i }));
+
+    // Wait for the error to propagate
+    await new Promise((r) => setTimeout(r, 200));
+
+    expect(addToastRef.current).toHaveBeenCalledWith(
+      'Could not create conversation. Please try again.',
+      'error',
+    );
   });
 });
