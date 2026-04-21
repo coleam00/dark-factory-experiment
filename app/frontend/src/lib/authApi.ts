@@ -47,6 +47,29 @@ export class AuthError extends Error {
   }
 }
 
+/**
+ * Normalize FastAPI's polymorphic `detail` field into a human-readable string.
+ *
+ * Handlers return `{"detail": "..."}` for most errors, but the default
+ * validation handler returns `{"detail": [{loc, msg, type}, ...]}`. Rendering
+ * the array via JS string coercion produces "[object Object]" in the UI.
+ */
+function formatDetail(detail: unknown): string | null {
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    const parts = detail
+      .map((d) => {
+        if (d && typeof d === 'object' && 'msg' in d && typeof (d as { msg: unknown }).msg === 'string') {
+          return (d as { msg: string }).msg;
+        }
+        return null;
+      })
+      .filter((p): p is string => p !== null);
+    return parts.length > 0 ? parts.join(', ') : null;
+  }
+  return null;
+}
+
 async function authRequest<T>(path: string, init: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     credentials: 'include',
@@ -61,8 +84,9 @@ async function authRequest<T>(path: string, init: RequestInit): Promise<T> {
       if (body?.error === 'signup_rate_limited' && typeof body?.message === 'string') {
         detail = body.message;
         if (body.scope === 'ip' || body.scope === 'global') scope = body.scope;
-      } else if (body?.detail) {
-        detail = body.detail;
+      } else {
+        const formatted = formatDetail(body?.detail);
+        if (formatted) detail = formatted;
       }
     } catch {
       // fall through with statusText
