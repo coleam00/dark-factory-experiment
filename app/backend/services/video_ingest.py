@@ -89,7 +89,6 @@ async def fetch_video_for_ingest(url: str, lang: str = "en") -> dict[str, Any]:
             parts.append(text)
             segments.append({"start": start_s, "end": end_s, "text": text})
         transcript = " ".join(parts)
-    # else: transcript stays "" and segments stays []
 
     fetched_title, _ = await get_video_title(parsed.video_id)
     title = fetched_title or f"Video {parsed.video_id}"

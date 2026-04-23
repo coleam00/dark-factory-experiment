@@ -201,7 +201,7 @@ async def sync_channel(limit: int | None = None, force: bool = False) -> SyncRes
         )
 
         # Fetch channel title from oEmbed for human-readable attribution
-        _dbg_video_title, channel_title = await get_video_title(youtube_video_id)
+        _, channel_title = await get_video_title(youtube_video_id)
         if channel_title is None:
             logger.warning(
                 "oEmbed channel title unavailable for video %s (channel %s)",

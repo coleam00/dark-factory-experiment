@@ -111,7 +111,7 @@ async def expand_and_merge(
         # originally-retrieved chunk in each raw span.
         for raw in raw_spans:
             # Find the first originally-retrieved chunk in this raw span
-            anchor: dict = raw[0]  # fallback: first chunk
+            anchor = raw[0]
             for c in raw:
                 if c["chunk_index"] in retrieved_by_index:
                     anchor = c
