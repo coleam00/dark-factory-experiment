@@ -209,7 +209,7 @@ the diff touches `app/backend/rag/`, `app/backend/llm/`, `app/backend/config.py`
 - [ ] Chunker still uses `docling_core HybridChunker` with `HYBRID_CHUNKER_MAX_TOKENS=512`
 - [ ] Embeddings still use `openai/text-embedding-3-small` via OpenRouter
 - [ ] No new vector database introduced (FAISS, Chroma, pgvector) — that's architectural
-- [ ] Chat completion still uses `anthropic/claude-sonnet-4.6` via OpenRouter
+- [ ] Chat completion still uses `moonshotai/kimi-k2.6` via OpenRouter
 - [ ] SSE format is unchanged: `data: <json-string>\n\n` with `event: sources` before `[DONE]`
 - [ ] Citations still include title, URL, timestamp deep-link, and transcript snippet
 

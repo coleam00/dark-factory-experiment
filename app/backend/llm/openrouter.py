@@ -1,6 +1,6 @@
 """OpenRouter streaming chat completions wrapper.
 
-Streams tokens from anthropic/claude-sonnet-4.6 via OpenRouter, with optional
+Streams tokens from moonshotai/kimi-k2.6 via OpenRouter, with optional
 tool-use support (e.g. `get_video_transcript` in backend.rag.tools).
 
 `stream_chat(messages, context, tools=None, tool_executor=None, max_tool_calls=0)`

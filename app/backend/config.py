@@ -67,7 +67,7 @@ if not ADMIN_USER_EMAIL:
 
 OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
 EMBEDDING_MODEL: str = "openai/text-embedding-3-small"
-CHAT_MODEL: str = "anthropic/claude-sonnet-4.6"
+CHAT_MODEL: str = "moonshotai/kimi-k2.6"
 
 # Postgres — required for all data (chat + auth). The app fails fast without it.
 # In prod, docker-compose injects DATABASE_URL from the POSTGRES_* vars.
