@@ -489,11 +489,38 @@ class TestRefusalSourcesSuppression:
             "I searched through the video library, but I couldn't find what you're looking for.",
             # "only using them as examples"
             "The videos that mention 'cookies' are only using them as examples in AI agent demos.",
+            # "only mentioned as examples"
+            "The examples in the transcript are only mentioned as examples in AI discussions.",
             # "check elsewhere"
             "If you're looking for a recipe, check elsewhere.",
+            # "check other sources"
+            "Check other sources for that recipe instead.",
         ]
         for text in kimi_refusals:
             assert _is_refusal(text) is True, f"Failed on Kimi phrase: {text}"
+
+    def test_is_refusal_kimi_patterns_no_false_positives(self) -> None:
+        """Legitimate answers that don't trigger Kimi refusal detection.
+
+        Most Kimi patterns ("couldn't find", "I searched through", "not an actual",
+        "no actual", "check other sources", "only using them as examples", "only
+        mentioned as examples") are short English fragments that can legitimately appear
+        in normal answers. Documented risk per code review findings.
+
+        This test verifies that phrases COMPLETELY FREE of Kimi patterns are not
+        incorrectly flagged as refusals.
+        """
+        from backend.routes.messages import _is_refusal
+
+        # These legitimate answers don't contain any Kimi refusal patterns
+        legitimate_answers = [
+            "The implementation uses a standard algorithm.",
+            "This function processes data efficiently.",
+            "The video covers advanced caching strategies.",
+            "You can find more information in the documentation.",
+        ]
+        for text in legitimate_answers:
+            assert _is_refusal(text) is False, f"False positive on: {text}"
 
 
 class TestExtractTextFromSse:
