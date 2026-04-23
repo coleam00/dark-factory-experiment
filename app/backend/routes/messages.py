@@ -26,10 +26,12 @@ from pydantic import BaseModel, Field, field_validator
 
 from backend import rate_limit
 from backend.auth.dependencies import get_current_user
+from backend.config import RETRIEVAL_MAX_PER_VIDEO
 from backend.db import repository
 from backend.llm.openrouter import stream_chat
 from backend.rag.embeddings import embed_text
 from backend.rag.retriever_hybrid import retrieve_hybrid
+from backend.rag.selection import apply_per_video_cap
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +120,7 @@ async def create_message(
         query_embedding = await asyncio.to_thread(embed_text, user_content)
         chunks = await retrieve_hybrid(user_content, query_embedding, top_k=5)
         if chunks:
+            chunks = apply_per_video_cap(chunks, RETRIEVAL_MAX_PER_VIDEO)
             context = _format_context(chunks)
     except asyncio.CancelledError:
         raise  # Must propagate to FastAPI for proper cancellation handling
