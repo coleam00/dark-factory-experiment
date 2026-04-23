@@ -17,6 +17,7 @@ from supadata import SupadataError
 
 from backend.db import repository
 from backend.ingest.youtube_url import parse_youtube_url
+from backend.rag import catalog as catalog_module
 from backend.rag import retriever_hybrid
 from backend.rag.chunker import chunk_video_fallback, chunk_video_timestamped
 from backend.rag.embeddings import embed_batch
@@ -185,6 +186,7 @@ async def ingest_video(body: IngestRequest) -> IngestResponse:
             )
     finally:
         retriever_hybrid.invalidate_cache()
+        catalog_module.invalidate_catalog_cache()
 
     logger.info("Ingestion complete for '%s': %d chunks stored", body.title, len(chunk_dicts))
 
@@ -294,6 +296,7 @@ async def ingest_from_url(body: IngestFromUrlRequest) -> IngestFromUrlResponse:
             )
     finally:
         retriever_hybrid.invalidate_cache()
+        catalog_module.invalidate_catalog_cache()
 
     logger.info("Ingestion complete for '%s': %d chunks stored", title, len(chunk_dicts))
 

@@ -28,9 +28,10 @@ from pydantic import BaseModel, Field, field_validator
 
 from backend import rate_limit
 from backend.auth.dependencies import get_current_user
-from backend.config import LLM_TOOLS_ENABLED, LLM_TOOLS_MAX_PER_TURN
+from backend.config import CATALOG_ENABLED, LLM_TOOLS_ENABLED, LLM_TOOLS_MAX_PER_TURN
 from backend.db import repository
 from backend.llm.openrouter import stream_chat
+from backend.rag.catalog import get_catalog_block
 from backend.rag.tools import TOOL_SCHEMAS, execute_tool, serialize_tool_result
 
 logger = logging.getLogger(__name__)
@@ -154,7 +155,15 @@ async def create_message(
         executor = _executor
         max_tool_calls = LLM_TOOLS_MAX_PER_TURN
 
-    # 6. Stream the response. The model drives retrieval via tool calls;
+    # 6. Fetch catalog block for library-awareness injection.
+    catalog_block: str | None = None
+    if CATALOG_ENABLED:
+        try:
+            catalog_block = await get_catalog_block()
+        except Exception as exc:
+            logger.warning("Failed to fetch video catalog; proceeding without it: %s", exc)
+
+    # 7. Stream the response. The model drives retrieval via tool calls;
     # chunks it pulls flow into source_citations via tool_chunks_acc.
     # ``final_text_buf`` receives the assistant's final-round text so the
     # refusal check ignores inter-round commentary ("let me try semantic").
@@ -168,6 +177,7 @@ async def create_message(
                 tool_executor=executor,
                 max_tool_calls=max_tool_calls,
                 final_text_out=final_text_buf,
+                catalog_block=catalog_block,
             ):
                 # Intercept [DONE] to inject the sources event first.
                 if sse_chunk == "data: [DONE]\n\n":

@@ -34,6 +34,15 @@ def reset_retriever_hybrid_cache():
     retriever_hybrid_module._video_cache.clear()
 
 
+@pytest.fixture(autouse=True)
+def reset_catalog_cache():
+    """Ensure the module-level catalog cache is clean before and after every test."""
+    import backend.rag.catalog as catalog_module
+    catalog_module._catalog_cache = None
+    yield
+    catalog_module._catalog_cache = None
+
+
 @pytest.fixture
 def message_store() -> dict[str, list[datetime]]:
     """Per-test in-memory `user_messages` store keyed by stringified UUID.

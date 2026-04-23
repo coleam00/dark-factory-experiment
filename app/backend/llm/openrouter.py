@@ -69,6 +69,37 @@ def build_system_prompt(max_tool_calls: int = 0) -> str:
     return prompt
 
 
+def build_system_prompt_blocks(max_tool_calls: int = 0, catalog_block: str | None = None) -> list[dict]:
+    """
+    Build the system prompt as a list of content blocks with cache_control markers.
+
+    Returns a list of content blocks for the Anthropic API. Block 1 is always
+    the base system prompt with cache_control. Block 2 (catalog) is included
+    only if catalog_block is non-empty.
+
+    Args:
+        max_tool_calls: Positive cap appends tool-use guidance to block 1.
+        catalog_block: Non-empty catalog string to inject as a second block.
+
+    Returns:
+        List of content block dicts, each with "type", "text", and "cache_control".
+    """
+    text = _BASE_SYSTEM_PROMPT
+    if max_tool_calls > 0:
+        text += _TOOL_GUIDANCE.format(max_per_turn=max_tool_calls)
+
+    blocks: list[dict] = [
+        {"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}
+    ]
+
+    if catalog_block:
+        blocks.append(
+            {"type": "text", "text": catalog_block, "cache_control": {"type": "ephemeral"}}
+        )
+
+    return blocks
+
+
 ToolExecutor = Callable[[str, str], Awaitable[str]]
 """(tool_name, raw_arguments_json) -> tool result string (role: tool content)."""
 
@@ -79,6 +110,7 @@ async def stream_chat(
     tool_executor: ToolExecutor | None = None,
     max_tool_calls: int = 0,
     final_text_out: list[str] | None = None,
+    catalog_block: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """Stream a chat completion via OpenRouter. When tools + executor are
     supplied, execute tool calls in a loop until finish_reason=stop.
@@ -95,12 +127,22 @@ async def stream_chat(
     """
     client = _get_async_client()
     tools_active = bool(tools) and tool_executor is not None and max_tool_calls > 0
-    system_prompt = build_system_prompt(max_tool_calls=max_tool_calls if tools_active else 0)
 
-    full_messages: list[ChatCompletionMessageParam] = [
-        {"role": "system", "content": system_prompt},
-        *cast(list[ChatCompletionMessageParam], messages),
-    ]
+    if catalog_block:
+        system_blocks = build_system_prompt_blocks(
+            max_tool_calls=max_tool_calls if tools_active else 0,
+            catalog_block=catalog_block,
+        )
+        full_messages: list[ChatCompletionMessageParam] = [
+            cast(ChatCompletionMessageParam, {"role": "system", "content": system_blocks}),
+            *cast(list[ChatCompletionMessageParam], messages),
+        ]
+    else:
+        system_prompt = build_system_prompt(max_tool_calls=max_tool_calls if tools_active else 0)
+        full_messages = [
+            {"role": "system", "content": system_prompt},
+            *cast(list[ChatCompletionMessageParam], messages),
+        ]
     base_kwargs: dict[str, Any] = {"model": CHAT_MODEL, "stream": True}
     if tools_active:
         base_kwargs["tools"] = tools

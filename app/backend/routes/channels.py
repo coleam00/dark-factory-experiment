@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from backend.config import CHANNEL_SYNC_TYPE, SUPADATA_API_KEY, YOUTUBE_CHANNEL_ID
 from backend.db import repository as repo
 from backend.db.repository import _new_id, _now
+from backend.rag import catalog as catalog_module
 from backend.rag import retriever_hybrid
 from backend.rag.chunker import chunk_video_fallback, chunk_video_timestamped
 from backend.rag.embeddings import embed_batch
@@ -348,6 +349,7 @@ async def sync_channel(limit: int | None = None, force: bool = False) -> SyncRes
 
     # Invalidate retriever cache once at the end
     retriever_hybrid.invalidate_cache()
+    catalog_module.invalidate_catalog_cache()
 
     # Determine overall status
     status = "failed" if videos_error > 0 and videos_new == 0 else "completed"

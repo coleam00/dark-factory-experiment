@@ -126,6 +126,15 @@ LLM_TOOLS_MAX_PER_TURN: int = int(os.environ.get("LLM_TOOLS_MAX_PER_TURN", "6"))
 # ~120K chars ≈ 30K tokens on English prose.
 TRANSCRIPT_TOOL_MAX_CHARS: int = int(os.environ.get("TRANSCRIPT_TOOL_MAX_CHARS", "120000"))
 
+# Video catalog injected into system prompt (library-awareness for LLM)
+CATALOG_ENABLED: bool = os.environ.get("CATALOG_ENABLED", "true").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+CATALOG_TIER: str = os.environ.get("CATALOG_TIER", "minimal")
+
 # YouTube channel to sync from (used by POST /api/channels/sync)
 YOUTUBE_CHANNEL_ID: str = os.environ.get("YOUTUBE_CHANNEL_ID", "")
 
