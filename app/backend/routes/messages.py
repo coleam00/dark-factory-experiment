@@ -164,18 +164,19 @@ async def create_message(
                 "Failed to load video whitelist for transcript tool; disabling tool for this turn: %s",
                 exc,
             )
-            video_id_whitelist = set()
-        if video_id_whitelist:
+            tools_param = None
+        else:
+            if video_id_whitelist:
 
-            async def _executor(name: str, raw_args: str) -> str:
-                result = await execute_tool(name, raw_args, video_id_whitelist=video_id_whitelist)
-                if result.get("ok") and result.get("chunks"):
-                    tool_chunks_acc.extend(result["chunks"])
-                return serialize_tool_result(result)
+                async def _executor(name: str, raw_args: str) -> str:
+                    result = await execute_tool(name, raw_args, video_id_whitelist=video_id_whitelist)
+                    if result.get("ok") and result.get("chunks"):
+                        tool_chunks_acc.extend(result["chunks"])
+                    return serialize_tool_result(result)
 
-            tools_param = TOOL_SCHEMAS
-            executor = _executor
-            max_tool_calls = TRANSCRIPT_TOOL_MAX_PER_TURN
+                tools_param = TOOL_SCHEMAS
+                executor = _executor
+                max_tool_calls = TRANSCRIPT_TOOL_MAX_PER_TURN
 
     # 6b. Stream the response
     async def event_generator() -> AsyncGenerator[str, None]:

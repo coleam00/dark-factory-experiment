@@ -92,6 +92,34 @@ async def get_video(video_id: str) -> dict | None:
     return dict(row) if row else None
 
 
+async def get_full_transcript(video_id: str) -> dict | None:
+    """Return a video with all its chunks as a single transcript dict, or None if not found.
+
+    Returns a dict with keys: video (the video row), chunks (list of chunk dicts,
+    oldest-first by chunk_index), or None if the video does not exist.
+    """
+    async with _acquire() as conn:
+        video_row = await conn.fetchrow("SELECT * FROM videos WHERE id = $1", video_id)
+        if not video_row:
+            return None
+        chunk_rows = await conn.fetch(
+            """
+            SELECT id, video_id, content, embedding, chunk_index, start_seconds, end_seconds, snippet
+            FROM chunks
+            WHERE video_id = $1
+            ORDER BY chunk_index
+            """,
+            video_id,
+        )
+    video = dict(video_row)
+    chunks = []
+    for r in chunk_rows:
+        d = dict(r)
+        d["embedding"] = json.loads(d["embedding"])
+        chunks.append(d)
+    return {"video": video, "chunks": chunks}
+
+
 async def delete_video(video_id: str) -> None:
     """Delete a video and all its associated chunks (FK cascade handles chunks)."""
     async with _acquire() as conn:
