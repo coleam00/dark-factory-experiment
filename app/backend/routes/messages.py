@@ -26,10 +26,12 @@ from pydantic import BaseModel, Field, field_validator
 
 from backend import rate_limit
 from backend.auth.dependencies import get_current_user
+from backend.config import TRANSCRIPT_TOOL_ENABLED, TRANSCRIPT_TOOL_MAX_PER_TURN
 from backend.db import repository
 from backend.llm.openrouter import stream_chat
 from backend.rag.embeddings import embed_text
 from backend.rag.retriever_hybrid import retrieve_hybrid
+from backend.rag.tools import TOOL_SCHEMAS, execute_tool, serialize_tool_result
 
 logger = logging.getLogger(__name__)
 
@@ -145,15 +147,63 @@ async def create_message(
         for citation in source_citations:
             citation["retrieval_failed"] = True
 
-    # 6. Stream the response
+    # 6a. Prepare tool-use plumbing. The executor is a closure that mutates
+    # tool_chunks_acc so the outer handler can merge tool-loaded chunks into
+    # source_citations once streaming finishes. The whitelist prevents the
+    # model from requesting ids that aren't actually in the library.
+    tool_chunks_acc: list[dict] = []
+    tools_param: list[dict] | None = None
+    executor = None
+    max_tool_calls = 0
+    if TRANSCRIPT_TOOL_ENABLED:
+        try:
+            all_videos = await repository.list_videos()
+            video_id_whitelist: set[str] = {v["id"] for v in all_videos if v.get("id")}
+        except Exception as exc:
+            logger.warning(
+                "Failed to load video whitelist for transcript tool; disabling tool for this turn: %s",
+                exc,
+            )
+            video_id_whitelist = set()
+        if video_id_whitelist:
+
+            async def _executor(name: str, raw_args: str) -> str:
+                result = await execute_tool(name, raw_args, video_id_whitelist=video_id_whitelist)
+                if result.get("ok") and result.get("chunks"):
+                    tool_chunks_acc.extend(result["chunks"])
+                return serialize_tool_result(result)
+
+            tools_param = TOOL_SCHEMAS
+            executor = _executor
+            max_tool_calls = TRANSCRIPT_TOOL_MAX_PER_TURN
+
+    # 6b. Stream the response
     async def event_generator() -> AsyncGenerator[str, None]:
         full_response = []
         try:
-            async for sse_chunk in stream_chat(llm_messages, context=context):
-                # Intercept [DONE] to inject sources event first
-                if sse_chunk == "data: [DONE]\n\n" and source_citations:
-                    sources_json = json.dumps(source_citations)
-                    yield f"event: sources\ndata: {sources_json}\n\n"
+            async for sse_chunk in stream_chat(
+                llm_messages,
+                context=context,
+                tools=tools_param,
+                tool_executor=executor,
+                max_tool_calls=max_tool_calls,
+            ):
+                # Intercept [DONE] to inject the sources event first. Merge
+                # any chunks the model loaded via tool calls into
+                # source_citations so citation chips include them.
+                if sse_chunk == "data: [DONE]\n\n":
+                    if tool_chunks_acc:
+                        existing_ids = {
+                            c.get("chunk_id") for c in source_citations if c.get("chunk_id")
+                        }
+                        for tc in tool_chunks_acc:
+                            tc_id = tc.get("chunk_id")
+                            if tc_id and tc_id not in existing_ids:
+                                source_citations.append(tc)
+                                existing_ids.add(tc_id)
+                    if source_citations:
+                        sources_json = json.dumps(source_citations)
+                        yield f"event: sources\ndata: {sources_json}\n\n"
                 full_response.append(sse_chunk)
                 yield sse_chunk
         finally:

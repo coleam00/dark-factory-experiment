@@ -101,6 +101,19 @@ HYBRID_K_CONSTANT: int = 60
 HYBRID_OVERFETCH_FACTOR: int = 2
 KEYWORD_LANGUAGE: str = "english"
 
+# Full-transcript tool — lets the LLM read an entire video's transcript when
+# retrieved chunks are insufficient. Disabled rolls back to pure chunk-based
+# retrieval. Per-turn cap protects OpenRouter budget from runaway tool calls.
+TRANSCRIPT_TOOL_ENABLED: bool = os.environ.get(
+    "TRANSCRIPT_TOOL_ENABLED", "true"
+).strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+TRANSCRIPT_TOOL_MAX_PER_TURN: int = int(os.environ.get("TRANSCRIPT_TOOL_MAX_PER_TURN", "2"))
+
 # YouTube channel to sync from (used by POST /api/channels/sync)
 YOUTUBE_CHANNEL_ID: str = os.environ.get("YOUTUBE_CHANNEL_ID", "")
 
