@@ -18,12 +18,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from backend.rag.catalog import (
-    _catalog_cache,
     _render_catalog,
     get_catalog_block,
     invalidate_catalog_cache,
 )
-
 
 # -------------------------------------------------------------------------- #
 # Fixtures
@@ -59,10 +57,11 @@ _SEEDED_VIDEOS = [
 @pytest.fixture(autouse=True)
 def reset_catalog_cache():
     """Ensure the module-level catalog cache is clean before and after every test."""
-    global _catalog_cache
-    _catalog_cache = None
+    import backend.rag.catalog as catalog_mod
+
+    catalog_mod._catalog_cache = None
     yield
-    _catalog_cache = None
+    catalog_mod._catalog_cache = None
 
 
 # -------------------------------------------------------------------------- #
@@ -120,26 +119,27 @@ class TestGetCatalogBlock:
 
     async def test_invalidate_then_get_refetches(self):
         """invalidate_catalog_cache() followed by get_catalog_block() re-fetches from DB."""
-        # First call populates the cache
+        import backend.rag.catalog as catalog_mod
+
         with patch(
             "backend.rag.catalog.repository.list_videos",
             new_callable=AsyncMock,
             return_value=_SEEDED_VIDEOS,
         ) as mock_list:
-            first = await get_catalog_block()
+            # First call populates the cache
+            _ = await get_catalog_block()
             assert mock_list.call_count == 1
 
-        # Cache is now warm; second call should NOT re-fetch
-        global _catalog_cache
-        assert _catalog_cache is not None
-        second = await get_catalog_block()
-        assert mock_list.call_count == 1  # still 1, cache was hit
+            # Cache is now warm; second call should NOT re-fetch
+            assert catalog_mod._catalog_cache is not None
+            _ = await get_catalog_block()
+            assert mock_list.call_count == 1  # still 1, cache was hit
 
-        # Invalidate then call again — should re-fetch
-        invalidate_catalog_cache()
-        assert _catalog_cache is None
-        third = await get_catalog_block()
-        assert mock_list.call_count == 2
+            # Invalidate then call again — should re-fetch (patch is still active)
+            invalidate_catalog_cache()
+            assert catalog_mod._catalog_cache is None
+            _ = await get_catalog_block()
+            assert mock_list.call_count == 2
 
     async def test_empty_library_returns_empty_string(self):
         """Zero videos in DB returns empty string (not None)."""
@@ -195,8 +195,9 @@ class TestCatalogEnabledFalse:
 
     async def test_catalog_enabled_false_skips_fetch(self, monkeypatch):
         """CATALOG_ENABLED=False bypasses catalog fetch (returns None directly)."""
-        import backend.config
-        monkeypatch.setattr(backend.config, "CATALOG_ENABLED", False)
+        import backend.rag.catalog as catalog_mod
+
+        monkeypatch.setattr(catalog_mod, "CATALOG_ENABLED", False)
 
         with patch(
             "backend.rag.catalog.repository.list_videos",

@@ -568,7 +568,12 @@ class TestRefusalSourcesSuppressionIntegration:
         # an injected closure. We simulate a successful search + then a refusal
         # response by calling the executor ourselves inside mock_stream_chat.
         async def mock_stream_chat(
-            messages, tools=None, tool_executor=None, max_tool_calls=0, final_text_out=None
+            messages,
+            tools=None,
+            tool_executor=None,
+            max_tool_calls=0,
+            final_text_out=None,
+            catalog_block=None,
         ):
             if tool_executor is not None:
                 await tool_executor("search_videos", json.dumps({"query": "test"}))
@@ -666,7 +671,12 @@ class TestRefusalSourcesSuppressionIntegration:
         ]
 
         async def mock_stream_chat(
-            messages, tools=None, tool_executor=None, max_tool_calls=0, final_text_out=None
+            messages,
+            tools=None,
+            tool_executor=None,
+            max_tool_calls=0,
+            final_text_out=None,
+            catalog_block=None,
         ):
             if tool_executor is not None:
                 await tool_executor("search_videos", json.dumps({"query": "test"}))

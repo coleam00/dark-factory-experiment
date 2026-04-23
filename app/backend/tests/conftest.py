@@ -38,6 +38,7 @@ def reset_retriever_hybrid_cache():
 def reset_catalog_cache():
     """Ensure the module-level catalog cache is clean before and after every test."""
     import backend.rag.catalog as catalog_module
+
     catalog_module._catalog_cache = None
     yield
     catalog_module._catalog_cache = None

@@ -69,7 +69,9 @@ def build_system_prompt(max_tool_calls: int = 0) -> str:
     return prompt
 
 
-def build_system_prompt_blocks(max_tool_calls: int = 0, catalog_block: str | None = None) -> list[dict]:
+def build_system_prompt_blocks(
+    max_tool_calls: int = 0, catalog_block: str | None = None
+) -> list[dict]:
     """
     Build the system prompt as a list of content blocks with cache_control markers.
 
@@ -88,9 +90,7 @@ def build_system_prompt_blocks(max_tool_calls: int = 0, catalog_block: str | Non
     if max_tool_calls > 0:
         text += _TOOL_GUIDANCE.format(max_per_turn=max_tool_calls)
 
-    blocks: list[dict] = [
-        {"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}
-    ]
+    blocks: list[dict] = [{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}]
 
     if catalog_block:
         blocks.append(
