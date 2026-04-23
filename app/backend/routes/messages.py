@@ -181,7 +181,9 @@ async def create_message(
                                 window=RETRIEVAL_EXPANSION_WINDOW,
                             )
                         except Exception as exc:
-                            logger.warning("Chunk expansion failed, using unexpanded chunks: %s", exc)
+                            logger.warning(
+                                "Chunk expansion failed, using unexpanded chunks: %s", exc
+                            )
                         seen: set[str] = set()
                         for tc in tool_chunks_acc:
                             tc_id = tc.get("chunk_id")

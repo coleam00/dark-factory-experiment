@@ -2,6 +2,7 @@
 Chunk expansion — fetch neighboring chunks within the same video and merge
 overlapping/adjacent spans into a single contextual unit.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -116,15 +117,17 @@ async def expand_and_merge(
                     break
 
             content = "\n\n".join(c["content"] for c in raw)
-            result.append({
-                "video_id": raw[0]["video_id"],
-                "video_title": raw[0].get("video_title", ""),
-                "video_url": raw[0].get("video_url", ""),
-                "content": content,
-                "start_seconds": raw[0]["start_seconds"],
-                "end_seconds": raw[-1]["end_seconds"],
-                "snippet": anchor["snippet"],
-                "chunk_id": anchor.get("chunk_id") or anchor.get("id", ""),
-            })
+            result.append(
+                {
+                    "video_id": raw[0]["video_id"],
+                    "video_title": raw[0].get("video_title", ""),
+                    "video_url": raw[0].get("video_url", ""),
+                    "content": content,
+                    "start_seconds": raw[0]["start_seconds"],
+                    "end_seconds": raw[-1]["end_seconds"],
+                    "snippet": anchor["snippet"],
+                    "chunk_id": anchor.get("chunk_id") or anchor.get("id", ""),
+                }
+            )
 
     return result
