@@ -170,4 +170,4 @@ def _rrf_merge(
             rows[chunk_id] = row
 
     ranked = sorted(scores, key=scores.__getitem__, reverse=True)[:top_k]
-    return [{**rows[cid], "rrf_score": scores[cid]} for cid in ranked]
+    return [rows[cid] | {"rrf_score": scores[cid]} for cid in ranked]

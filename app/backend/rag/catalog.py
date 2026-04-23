@@ -54,11 +54,11 @@ def build_catalog_block(videos: list[dict], tier: str) -> dict:
         A content block dict suitable for inclusion in the system message's
         content array.
     """
-    lines = ["Available videos in the library:", ""]
-    for idx, v in enumerate(videos, 1):
-        title = v.get("title") or "Untitled"
-        url = v.get("url", "")
-        lines.append(f"{idx}. {title} — {url}")
+    video_lines = [
+        f"{i}. {v.get('title') or 'Untitled'} — {v.get('url', '')}"
+        for i, v in enumerate(videos, 1)
+    ]
+    lines = ["Available videos in the library:", "", *video_lines]
 
     cache_control: dict = {"type": "ephemeral"}
     if tier == "extended":

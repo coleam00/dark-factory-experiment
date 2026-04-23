@@ -25,7 +25,7 @@ This is a fresh-context session — you start with no prior knowledge of how thi
 2. **Never modify tests to make tests pass.** If a test failure is in `issues_to_fix`, fix the source code that the test is exercising. Pre-existing passing tests must not be touched.
 3. **Never modify governance files**: `FACTORY_RULES.md`, `MISSION.md`, `CLAUDE.md`, `.github/**`, `Dockerfile`, `docker-compose.yml`, `.env*`, `.archon/config.yaml`, `.archon/workflows/**`, `.archon/commands/**`. Any attempt will trigger an auto-reject on pass-2.
 4. **Never add new dependencies** unless the validator's feedback explicitly says a new dep is needed to fix a specific issue.
-5. **Respect DynaChat hard invariants** (per CLAUDE.md): the 25-message cap, the RAG pipeline config (`HybridChunker` with 512 tokens, `text-embedding-3-small`, `kimi-k2.6` via OpenRouter), SSE streaming format, rate-limit middleware, auth flow.
+5. **Respect DynaChat hard invariants** (per CLAUDE.md): the 25-message cap, the RAG pipeline config (`HybridChunker` with 512 tokens, `text-embedding-3-small`, `claude-sonnet-4.6` via OpenRouter), SSE streaming format, rate-limit middleware, auth flow.
 6. **Maximum PR size 500 lines changed total.** If the existing PR is already close to 500 lines and your fixes would push past it, STOP and leave a comment explaining — the PR should be split.
 
 ---

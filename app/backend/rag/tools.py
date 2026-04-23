@@ -323,10 +323,8 @@ def _format_transcript(video: dict, chunks: list[dict], max_chars: int | None = 
     header = f"# {title}\n"
     parts: list[str] = [header]
     char_count = len(header)
-    kept_chunks = 0
-    total_chunks = 0
+    kept = 0
     for c in chunks:
-        total_chunks += 1
         start = int(c.get("start_seconds") or 0.0)
         mins, secs = divmod(start, 60)
         content = (c.get("content") or "").strip()
@@ -339,11 +337,10 @@ def _format_transcript(video: dict, chunks: list[dict], max_chars: int | None = 
             break
         parts.append(piece)
         char_count += addition
-        kept_chunks += 1
-    if max_chars is not None and kept_chunks < total_chunks:
-        dropped = total_chunks - kept_chunks
+        kept += 1
+    if max_chars is not None and kept < len(chunks):
         parts.append(
-            f"\n[transcript truncated — {dropped} more chunks omitted to stay "
+            f"\n[transcript truncated — {len(chunks) - kept} more chunks omitted to stay "
             f"within the {max_chars}-character cap for tool responses]"
         )
     return "\n\n".join(parts)
