@@ -333,6 +333,7 @@ class TestGetVideoTitle:
     @pytest.mark.asyncio
     async def test_returns_none_tuple_on_404(self):
         """oEmbed returns 404 → (None, None)."""
+
         async def fake_get(*args, **kwargs):
             class FakeResp:
                 status_code = 404
