@@ -734,3 +734,116 @@ class TestRefusalSourcesSuppressionIntegration:
             f"Expected 'event: sources' in output for normal answer, but got: {output}"
         )
         assert "data: [DONE]" in output
+
+
+class TestChunkExpansionIntegration:
+    """Integration tests for chunk expansion in the SSE streaming path.
+
+    Verifies the SSE output contains citation content when chunks are returned
+    by the tool executor. The expand_and_merge function itself is tested
+    exhaustively in test_expansion.py. These tests verify the SSE streaming
+    path correctly processes tool chunks and emits sources events.
+    """
+
+    async def test_sources_event_emitted_with_tool_chunks(self) -> None:
+        """When LLM uses tool results, sources SSE event is emitted with citation content."""
+        import json
+        from unittest.mock import patch
+
+        from httpx import ASGITransport, AsyncClient
+
+        from backend.auth.tokens import encode_token
+        from backend.main import app
+
+        answer_token = json.dumps("The video explains it works.")
+        answer_chunk = f"data: {answer_token}\n\n"
+        done_chunk = "data: [DONE]\n\n"
+
+        source_citations = [
+            {
+                "chunk_id": "c5",
+                "video_id": "v1",
+                "video_title": "Test Video",
+                "video_url": "https://youtube.com/watch?v=abc",
+                "start_seconds": 50.0,
+                "end_seconds": 60.0,
+                "snippet": "hello world snippet",
+                "chunk_index": 5,
+                "content": "hello world",
+            }
+        ]
+
+        async def mock_stream_chat(
+            messages,
+            tools=None,
+            tool_executor=None,
+            max_tool_calls=0,
+            final_text_out=None,
+        ):
+            if tool_executor is not None:
+                await tool_executor("search_videos", json.dumps({"query": "test"}))
+            yield answer_chunk
+            if final_text_out is not None:
+                final_text_out.append("The video explains it works.")
+            yield done_chunk
+
+        async def mock_execute_tool(name, raw_args, video_id_whitelist=None, embedding_cache=None):
+            return {"ok": True, "text": "context", "chunks": source_citations}
+
+        from uuid import uuid4
+
+        test_user_id = str(uuid4())
+        test_conv_id = str(uuid4())
+        valid_token = encode_token(test_user_id)
+
+        async def mock_get_user_by_id(user_id):
+            return {
+                "id": test_user_id,
+                "email": "test@example.com",
+                "password_hash": "hashed",
+                "created_at": "2026-01-01T00:00:00Z",
+            }
+
+        async def mock_get_conversation(conv_id, user_id):
+            if conv_id == test_conv_id:
+                return {
+                    "id": test_conv_id,
+                    "user_id": test_user_id,
+                    "title": "Test",
+                    "created_at": "2026-01-01T00:00:00Z",
+                }
+            return None
+
+        async def mock_create_message(**kwargs):
+            return {"id": str(uuid4()), **kwargs}
+
+        async def mock_list_messages(conv_id, user_id):
+            return []
+
+        async def mock_list_videos():
+            return [{"id": "v1", "title": "Test Video", "url": "https://youtube.com/watch?v=abc"}]
+
+        with (
+            patch("backend.auth.dependencies.users_repo.get_user_by_id", mock_get_user_by_id),
+            patch("backend.db.repository.get_conversation", mock_get_conversation),
+            patch("backend.db.repository.create_message", mock_create_message),
+            patch("backend.db.repository.list_messages", mock_list_messages),
+            patch("backend.db.repository.list_videos", mock_list_videos),
+            patch("backend.routes.messages.stream_chat", mock_stream_chat),
+            patch("backend.routes.messages.execute_tool", mock_execute_tool),
+        ):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                response = await client.post(
+                    f"/api/conversations/{test_conv_id}/messages",
+                    json={"content": "question about video"},
+                    headers={"Cookie": f"session={valid_token}"},
+                )
+
+        output = response.text
+        # Sources event must be present with citation content
+        assert "event: sources" in output, f"Expected 'event: sources' in output, but got: {output}"
+        assert "c5" in output
+        assert "hello world snippet" in output
+        assert "Test Video" in output
+        assert "data: [DONE]" in output

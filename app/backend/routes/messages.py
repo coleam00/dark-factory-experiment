@@ -172,6 +172,9 @@ async def create_message(
                 # Intercept [DONE] to inject the sources event first.
                 if sse_chunk == "data: [DONE]\n\n":
                     # Merge tool-loaded chunks into source_citations (deduped).
+                    # Expansion now runs inside each rag/tools.py executor
+                    # (after per-video cap), so chunks here are already
+                    # expanded where enabled — no extra call needed.
                     if tool_chunks_acc:
                         seen: set[str] = set()
                         for tc in tool_chunks_acc:
@@ -297,16 +300,11 @@ def _is_refusal(text: str) -> bool:
         # said "Those topics aren't covered in any of the videos in my
         # context...", no pattern matched, and "Sources (N)" still rendered.
         "aren't covered in any of the videos",
-        "aren't covered",
-        "isn't covered",
-        "aren't in the context",
-        "isn't in the context",
-        "aren't part of",
-        "isn't part of",
-        "aren't available",
-        "isn't available",
-        "aren't discussed",
-        "isn't discussed",
+        "n't covered",
+        "n't in the context",
+        "n't part of",
+        "n't available",
+        "n't discussed",
         "not in the context",
         "don't have information about",
         "can't help with that",

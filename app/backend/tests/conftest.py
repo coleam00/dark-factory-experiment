@@ -177,3 +177,34 @@ def patch_signup_rate_limit(monkeypatch):
 
     monkeypatch.setattr(signup_rate_limit, "check", fake_check)
     monkeypatch.setattr(signup_rate_limit, "record", fake_record)
+
+
+class _FakeNeighbors:
+    """Callable with settable side_effect for expansion tests."""
+
+    def __init__(self):
+        self._side_effect = None
+
+    async def __call__(self, video_id: str, chunk_index: int, window: int = 1) -> list[dict]:
+        if self._side_effect:
+            result: list[dict] = await self._side_effect(video_id, chunk_index, window)
+            return result
+        return []
+
+    @property
+    def side_effect(self):
+        return self._side_effect
+
+    @side_effect.setter
+    def side_effect(self, value):
+        self._side_effect = value
+
+
+@pytest.fixture
+def patch_get_chunk_neighbors(monkeypatch):
+    """Stub `repository.get_chunk_neighbors` so expansion tests don't need a real DB."""
+    from backend.db import repository as repo_mod
+
+    fake = _FakeNeighbors()
+    monkeypatch.setattr(repo_mod, "get_chunk_neighbors", fake)
+    yield fake

@@ -125,6 +125,9 @@ async def retrieve_hybrid(
                 "end_seconds": chunk.get("end_seconds", 0.0),
                 "snippet": chunk.get("snippet", ""),
                 "score": chunk.get("rrf_score", 0.0),
+                # Preserve chunk_index so small-to-big neighbor expansion can
+                # fetch siblings in-video (see backend/rag/expansion.py).
+                "chunk_index": chunk.get("chunk_index", 0),
             }
         )
 

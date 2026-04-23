@@ -95,6 +95,7 @@ JWT_EXPIRY_SECONDS: int = 7 * 24 * 60 * 60  # 7 days
 # RAG settings
 RETRIEVAL_TOP_K: int = 5
 HYBRID_CHUNKER_MAX_TOKENS: int = 512
+RETRIEVAL_EXPANSION_WINDOW: int = int(os.environ.get("RETRIEVAL_EXPANSION_WINDOW", "1"))
 
 # Hybrid retrieval (RRF) constants
 HYBRID_K_CONSTANT: int = 60

@@ -195,6 +195,37 @@ async def list_chunks_for_video(video_id: str) -> list[dict]:
     return result
 
 
+async def get_chunk_neighbors(
+    video_id: str,
+    chunk_index: int,
+    window: int = 1,
+) -> list[dict]:
+    """
+    Return chunks within [chunk_index - window, chunk_index + window] for a video.
+
+    Used by the expansion step to fetch surrounding context for a retrieved chunk.
+    Returns chunks ordered by chunk_index ascending.
+    """
+    min_index = max(0, chunk_index - window)
+    max_index = chunk_index + window
+    async with _acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT c.id, c.video_id, c.content, c.chunk_index,
+                   c.start_seconds, c.end_seconds, c.snippet,
+                   v.title AS video_title, v.url AS video_url
+            FROM chunks c
+            JOIN videos v ON v.id = c.video_id
+            WHERE c.video_id = $1 AND c.chunk_index >= $2 AND c.chunk_index <= $3
+            ORDER BY c.chunk_index ASC
+            """,
+            video_id,
+            min_index,
+            max_index,
+        )
+    return [dict(r) for r in rows]
+
+
 async def count_chunks() -> int:
     async with _acquire() as conn:
         row = await conn.fetchrow("SELECT COUNT(*) FROM chunks")

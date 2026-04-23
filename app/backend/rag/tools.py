@@ -201,6 +201,9 @@ async def _hydrate_chunks(raw_chunks: list[dict]) -> list[dict]:
             "start_seconds": c.get("start_seconds", 0.0),
             "end_seconds": c.get("end_seconds", 0.0),
             "snippet": c.get("snippet", ""),
+            # Preserve chunk_index so downstream small-to-big expansion (see
+            # rag/expansion.py) can fetch siblings in the same video.
+            "chunk_index": c.get("chunk_index", 0),
         }
         for c in raw_chunks
     ]
@@ -228,9 +231,14 @@ _CANONICAL_CHUNK_KEYS = (
     "start_seconds",
     "end_seconds",
     "snippet",
+    # chunk_index is required by rag/expansion.py to fetch in-video neighbors;
+    # dropping it here causes expansion to silently KeyError-fallback to
+    # unexpanded chunks (validator regression on PR #148).
+    "chunk_index",
 )
 
 _FLOAT_CHUNK_KEYS = frozenset(("start_seconds", "end_seconds"))
+_INT_CHUNK_KEYS = frozenset(("chunk_index",))
 
 
 def _normalize_chunk_shape(chunk: dict) -> dict:
@@ -242,10 +250,36 @@ def _normalize_chunk_shape(chunk: dict) -> dict:
     merge in ``routes/messages.py`` keeps the ``sources`` SSE payload
     consistent regardless of which tool the model called.
     """
-    return {
-        key: chunk.get(key, 0.0 if key in _FLOAT_CHUNK_KEYS else "")
-        for key in _CANONICAL_CHUNK_KEYS
-    }
+
+    def _default(key: str) -> object:
+        if key in _FLOAT_CHUNK_KEYS:
+            return 0.0
+        if key in _INT_CHUNK_KEYS:
+            return 0
+        return ""
+
+    return {key: chunk.get(key, _default(key)) for key in _CANONICAL_CHUNK_KEYS}
+
+
+async def _expand_with_neighbors(chunks: list[dict]) -> list[dict]:
+    """Apply small-to-big neighbor expansion to already-normalized chunks.
+
+    Wrapper that imports lazily (expansion.py pulls asyncio.gather over a DB
+    query), catches failures so a broken expansion path never poisons a whole
+    tool result, and is a no-op when the window is 0 (tests, or disabled).
+    """
+    from backend.config import RETRIEVAL_EXPANSION_WINDOW
+    from backend.rag.expansion import expand_and_merge
+
+    if RETRIEVAL_EXPANSION_WINDOW <= 0 or not chunks:
+        return chunks
+    try:
+        return await expand_and_merge(chunks, window=RETRIEVAL_EXPANSION_WINDOW)
+    except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as exc:
+        logger.warning("chunk expansion failed, using unexpanded chunks: %s", exc, exc_info=True)
+        return chunks
 
 
 def _apply_per_video_cap(chunks: list[dict], max_per_video: int) -> list[dict]:
@@ -362,6 +396,7 @@ async def execute_search_hybrid(
 
     chunks = _apply_per_video_cap(chunks, RETRIEVAL_MAX_PER_VIDEO)
     chunks = [_normalize_chunk_shape(c) for c in chunks]
+    chunks = await _expand_with_neighbors(chunks)
     return {"ok": True, "text": _format_search_results(chunks), "chunks": chunks}
 
 
@@ -385,6 +420,8 @@ async def execute_search_keyword(raw_arguments: str | dict) -> dict[str, Any]:
         return {"ok": False, "error": f"search failed: {exc}"}
 
     chunks = _apply_per_video_cap(chunks, RETRIEVAL_MAX_PER_VIDEO)
+    chunks = [_normalize_chunk_shape(c) for c in chunks]
+    chunks = await _expand_with_neighbors(chunks)
     return {"ok": True, "text": _format_search_results(chunks), "chunks": chunks}
 
 
@@ -412,6 +449,8 @@ async def execute_search_semantic(
         return {"ok": False, "error": f"search failed: {exc}"}
 
     chunks = _apply_per_video_cap(chunks, RETRIEVAL_MAX_PER_VIDEO)
+    chunks = [_normalize_chunk_shape(c) for c in chunks]
+    chunks = await _expand_with_neighbors(chunks)
     return {"ok": True, "text": _format_search_results(chunks), "chunks": chunks}
 
 
