@@ -63,9 +63,10 @@ SYSTEM_PROMPT_TEMPLATE = _BASE_SYSTEM_PROMPT
 def build_system_prompt(max_tool_calls: int = 0) -> str:
     """Build the system prompt. Appends tool-use guidance when a positive cap
     is supplied; returns just the base prompt otherwise (diagnostic rollback)."""
+    prompt = _BASE_SYSTEM_PROMPT
     if max_tool_calls > 0:
-        return _BASE_SYSTEM_PROMPT + _TOOL_GUIDANCE.format(max_per_turn=max_tool_calls)
-    return _BASE_SYSTEM_PROMPT
+        prompt += _TOOL_GUIDANCE.format(max_per_turn=max_tool_calls)
+    return prompt
 
 
 ToolExecutor = Callable[[str, str], Awaitable[str]]
