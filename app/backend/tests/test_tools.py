@@ -201,6 +201,123 @@ def test_apply_per_video_cap_large_value_is_noop() -> None:
     assert _apply_per_video_cap(chunks, max_per_video=999) == chunks
 
 
+def test_apply_per_video_cap_zero_is_noop() -> None:
+    from backend.rag.tools import _apply_per_video_cap
+
+    chunks = [{"video_id": "v1", "chunk_id": f"c{i}"} for i in range(5)]
+    assert _apply_per_video_cap(chunks, max_per_video=0) == chunks
+
+
+def test_apply_per_video_cap_missing_video_id_passes_through() -> None:
+    from backend.rag.tools import _apply_per_video_cap
+
+    # Chunks without a video_id should not be grouped or capped.
+    chunks = [
+        {"chunk_id": "c1"},  # no video_id
+        {"chunk_id": "c2"},  # no video_id
+        {"video_id": "v1", "chunk_id": "c3"},
+        {"video_id": "v1", "chunk_id": "c4"},
+    ]
+    result = _apply_per_video_cap(chunks, max_per_video=1)
+    # Both no-id chunks pass through; v1 is capped at 1 → c4 dropped.
+    assert [c["chunk_id"] for c in result] == ["c1", "c2", "c3"]
+
+
+# --- Executor-level per-video-cap enforcement tests ------------------------
+
+
+@pytest.mark.asyncio
+async def test_execute_search_hybrid_respects_per_video_cap(monkeypatch) -> None:
+    """Cap must be enforced end-to-end inside execute_search_hybrid."""
+    # 6 chunks all from the same video; default RETRIEVAL_MAX_PER_VIDEO is 3.
+    many_chunks = [
+        {
+            "chunk_id": f"c{i}",
+            "content": "text",
+            "video_id": "v1",
+            "video_title": "T",
+            "video_url": "u",
+            "start_seconds": float(i),
+            "end_seconds": float(i + 1),
+            "snippet": "x",
+            "score": 0.9,
+        }
+        for i in range(6)
+    ]
+
+    async def fake_retrieve(_q, _emb, top_k=10):
+        return many_chunks
+
+    monkeypatch.setattr("backend.rag.retriever_hybrid.retrieve_hybrid", fake_retrieve)
+    monkeypatch.setattr("backend.rag.embeddings.embed_text", lambda _s: [0.0] * 1536)
+
+    result = await execute_search_hybrid({"query": "broad question"})
+    assert result["ok"] is True
+    v1_chunks = [c for c in result["chunks"] if c["video_id"] == "v1"]
+    assert len(v1_chunks) <= 3  # RETRIEVAL_MAX_PER_VIDEO default
+
+
+@pytest.mark.asyncio
+async def test_execute_search_keyword_respects_per_video_cap(monkeypatch) -> None:
+    """Cap must be enforced end-to-end inside execute_search_keyword."""
+
+    async def fake_keyword(_q, top_k=10, language="english"):
+        return [
+            {
+                "id": f"c{i}",
+                "video_id": "v1",
+                "content": "text",
+                "chunk_index": i,
+                "start_seconds": float(i),
+                "end_seconds": float(i + 1),
+                "snippet": "x",
+            }
+            for i in range(6)
+        ]
+
+    async def fake_get_video(_v):
+        return {"id": "v1", "title": "Kw Video", "url": "https://youtu.be/k"}
+
+    monkeypatch.setattr(tools_module.repository, "keyword_search", fake_keyword)
+    monkeypatch.setattr(tools_module.repository, "get_video", fake_get_video)
+
+    result = await execute_search_keyword({"query": "broad question"})
+    assert result["ok"] is True
+    v1_chunks = [c for c in result["chunks"] if c["video_id"] == "v1"]
+    assert len(v1_chunks) <= 3  # RETRIEVAL_MAX_PER_VIDEO default
+
+
+@pytest.mark.asyncio
+async def test_execute_search_semantic_respects_per_video_cap(monkeypatch) -> None:
+    """Cap must be enforced end-to-end inside execute_search_semantic."""
+
+    async def fake_vector(_emb, top_k=10):
+        return [
+            {
+                "id": f"c{i}",
+                "video_id": "v1",
+                "content": "text",
+                "chunk_index": i,
+                "start_seconds": float(i),
+                "end_seconds": float(i + 1),
+                "snippet": "x",
+            }
+            for i in range(6)
+        ]
+
+    async def fake_get_video(_v):
+        return {"id": "v1", "title": "Sem Video", "url": "https://youtu.be/s"}
+
+    monkeypatch.setattr(tools_module.repository, "vector_search_pg", fake_vector)
+    monkeypatch.setattr(tools_module.repository, "get_video", fake_get_video)
+    monkeypatch.setattr("backend.rag.embeddings.embed_text", lambda _s: [0.0] * 1536)
+
+    result = await execute_search_semantic({"query": "broad question"})
+    assert result["ok"] is True
+    v1_chunks = [c for c in result["chunks"] if c["video_id"] == "v1"]
+    assert len(v1_chunks) <= 3  # RETRIEVAL_MAX_PER_VIDEO default
+
+
 # --- Transcript size cap ---------------------------------------------------
 
 
