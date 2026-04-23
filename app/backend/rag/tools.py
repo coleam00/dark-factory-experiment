@@ -217,16 +217,19 @@ def _format_search_results(chunks: list[dict]) -> str:
     return "\n\n---\n\n".join(parts)
 
 
-_CANONICAL_CHUNK_KEYS = (
-    "chunk_id",
-    "content",
-    "video_id",
-    "video_title",
-    "video_url",
-    "start_seconds",
-    "end_seconds",
-    "snippet",
+_CANONICAL_CHUNK_KEYS = frozenset(
+    {
+        "chunk_id",
+        "content",
+        "video_id",
+        "video_title",
+        "video_url",
+        "start_seconds",
+        "end_seconds",
+        "snippet",
+    }
 )
+_TIME_KEYS = frozenset({"start_seconds", "end_seconds"})
 
 
 def _normalize_chunk_shape(chunk: dict) -> dict:
@@ -239,7 +242,7 @@ def _normalize_chunk_shape(chunk: dict) -> dict:
     consistent regardless of which tool the model called.
     """
     return {
-        key: chunk.get(key, "" if key != "start_seconds" and key != "end_seconds" else 0.0)
+        key: chunk.get(key, 0.0 if key in _TIME_KEYS else "")
         for key in _CANONICAL_CHUNK_KEYS
     }
 
