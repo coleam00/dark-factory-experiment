@@ -28,7 +28,6 @@ def reset_catalog_cache() -> Generator[None, None, None]:
 
 
 async def test_get_catalog_populates_cache() -> None:
-    catalog._catalog_cache = None
     fake = [{"id": "1", "title": "T", "url": "https://youtube.com/watch?v=abc"}]
     with patch("backend.rag.catalog.repository.list_videos", new_callable=AsyncMock) as mock_lv:
         mock_lv.return_value = fake
@@ -44,7 +43,6 @@ async def test_get_catalog_uses_cache() -> None:
         result = await catalog.get_catalog()
         mock_lv.assert_not_called()
         assert result is fake
-    catalog._catalog_cache = None  # cleanup
 
 
 def test_invalidate_catalog_clears_cache() -> None:

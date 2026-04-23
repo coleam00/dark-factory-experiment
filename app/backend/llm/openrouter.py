@@ -84,12 +84,10 @@ async def build_system_prompt(max_tool_calls: int = 0) -> list[dict]:
         videos = await catalog.get_catalog()
         if videos:
             blocks.append(catalog.build_catalog_block(videos, CATALOG_TIER))
-        else:
-            # No videos — anchor cache on the base block instead
-            blocks[0]["cache_control"] = {"type": "ephemeral"}
-    else:
-        blocks[0]["cache_control"] = {"type": "ephemeral"}
+            return blocks
 
+    # No catalog block — anchor cache on the base block instead
+    blocks[0]["cache_control"] = {"type": "ephemeral"}
     return blocks
 
 
