@@ -8,7 +8,14 @@ Pin two behaviors the factory rules care about:
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from backend.llm.openrouter import SYSTEM_PROMPT_TEMPLATE, build_system_prompt
+
+
+def _blocks_text(blocks: list[dict]) -> str:
+    """Concatenate all text blocks into a single string for easy assertions."""
+    return "\n".join(b["text"] for b in blocks)
 
 
 class TestSystemPromptForbidsRawIds:
@@ -16,21 +23,26 @@ class TestSystemPromptForbidsRawIds:
         assert "video IDs" in SYSTEM_PROMPT_TEMPLATE or "video id" in SYSTEM_PROMPT_TEMPLATE.lower()
         assert "title only" in SYSTEM_PROMPT_TEMPLATE.lower()
 
-    def test_built_prompt_contains_rule(self) -> None:
-        prompt = build_system_prompt(max_tool_calls=6).lower()
+    async def test_built_prompt_contains_rule(self) -> None:
+        with patch("backend.llm.openrouter.CATALOG_ENABLED", False):
+            blocks = await build_system_prompt(max_tool_calls=6)
+        prompt = _blocks_text(blocks).lower()
         assert "never write youtube video ids" in prompt
         assert "title only" in prompt
 
 
 class TestSystemPromptToolBased:
-    def test_prompt_has_no_context_placeholder(self) -> None:
-        # Retrieval is tool-driven; no pre-retrieved context is injected.
-        prompt = build_system_prompt(max_tool_calls=0)
+    async def test_prompt_has_no_context_placeholder(self) -> None:
+        with patch("backend.llm.openrouter.CATALOG_ENABLED", False):
+            blocks = await build_system_prompt(max_tool_calls=0)
+        prompt = _blocks_text(blocks)
         assert "{context}" not in prompt
         assert "Context:" not in prompt
 
-    def test_prompt_mentions_all_tools_when_enabled(self) -> None:
-        prompt = build_system_prompt(max_tool_calls=6)
+    async def test_prompt_mentions_all_tools_when_enabled(self) -> None:
+        with patch("backend.llm.openrouter.CATALOG_ENABLED", False):
+            blocks = await build_system_prompt(max_tool_calls=6)
+        prompt = _blocks_text(blocks)
         for tool_name in (
             "search_videos",
             "keyword_search_videos",
@@ -40,6 +52,8 @@ class TestSystemPromptToolBased:
             assert tool_name in prompt
         assert "6 tool calls" in prompt or "6 " in prompt  # cap echoed in guidance
 
-    def test_prompt_omits_tool_guidance_when_cap_zero(self) -> None:
-        prompt = build_system_prompt(max_tool_calls=0)
+    async def test_prompt_omits_tool_guidance_when_cap_zero(self) -> None:
+        with patch("backend.llm.openrouter.CATALOG_ENABLED", False):
+            blocks = await build_system_prompt(max_tool_calls=0)
+        prompt = _blocks_text(blocks)
         assert "search_videos" not in prompt

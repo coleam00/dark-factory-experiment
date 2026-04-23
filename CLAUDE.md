@@ -62,6 +62,7 @@ rag-youtube-chat/
 │   │   ├── llm/
 │   │   │   └── openrouter.py # stream_chat() async generator, SSE-formatted output
 │   │   ├── rag/
+│   │   │   ├── catalog.py      # In-process video catalog cache; builds cache_control block for system prompt
 │   │   │   ├── chunker.py      # Docling HybridChunker wrapper
 │   │   │   ├── embeddings.py  # embed_text / embed_batch via OpenRouter
 │   │   │   ├── retriever.py    # NumPy cosine similarity top-k (legacy)
@@ -280,6 +281,8 @@ All env var reads happen in `app/backend/config.py`. Add new variables there and
 | `CHANNEL_SYNC_TYPE` | prod (channel sync) | Content type filter for channel sync: `all`, `video`, `short`, `live`. Default: `video` |
 | `DATABASE_URL` | **yes** (prod + dev) | Postgres connection string. Shape: `postgresql://dynachat:<pw>@127.0.0.1:5433/dynachat`. The app refuses to start if this is unset (no SQLite fallback). |
 | `CORS_ORIGINS` | No (dev default) | Comma-separated list of allowed CORS origins. Defaults to `http://localhost:{FRONTEND_PORT},http://127.0.0.1:{FRONTEND_PORT}`. Used in `app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS)` in `main.py`. |
+| `CATALOG_ENABLED` | No (default: `false`) | Injects a video-catalog block into the system prompt to enable Anthropic prompt caching. Accepted values: `1`, `true`, `yes`, `on`. Adds input tokens on every request (even cache hits). |
+| `CATALOG_TIER` | No (default: `standard`) | Cache tier: `standard` = ~5-min ephemeral; `extended` = 1-hour TTL (3600 s). Ignored when `CATALOG_ENABLED` is false. |
 
 Everything else is currently hardcoded in `config.py` (model names, ports, chunk size, top-k). When adding configurability, add the constant to `config.py` with a sensible default:
 

@@ -120,6 +120,21 @@ LLM_TOOLS_ENABLED: bool = os.environ.get("LLM_TOOLS_ENABLED", "true").strip().lo
 )
 LLM_TOOLS_MAX_PER_TURN: int = int(os.environ.get("LLM_TOOLS_MAX_PER_TURN", "6"))
 
+# Prompt-caching: inject a video catalog block into the system prompt so
+# Anthropic can cache the static content between requests.  Opt-in because
+# the catalog adds tokens (even on cache hits the input tokens are counted).
+CATALOG_ENABLED: bool = os.environ.get("CATALOG_ENABLED", "false").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+CATALOG_TIER: str = (
+    os.environ.get("CATALOG_TIER", "standard").strip().lower()
+)  # "standard" or "extended"
+# TTL in seconds for the extended prompt-cache tier (Anthropic API requires an integer).
+CATALOG_CACHE_TTL_SECONDS: int = int(os.environ.get("CATALOG_CACHE_TTL_SECONDS", "3600"))
+
 # Cap on how many characters the get_video_transcript tool returns to the
 # model. Long videos can produce 40K+ tokens of transcript; beyond ~30K
 # tokens the cost per call gets uncomfortable even on Sonnet's 200K window.

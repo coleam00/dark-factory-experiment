@@ -19,7 +19,14 @@ from typing import Any, cast
 from openai import APIConnectionError, APIError, APIStatusError, AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
-from backend.config import CHAT_MODEL, OPENROUTER_API_KEY, OPENROUTER_BASE_URL
+from backend.config import (
+    CATALOG_ENABLED,
+    CATALOG_TIER,
+    CHAT_MODEL,
+    OPENROUTER_API_KEY,
+    OPENROUTER_BASE_URL,
+)
+from backend.rag import catalog
 
 logger = logging.getLogger(__name__)
 
@@ -60,13 +67,28 @@ Strategy:
 SYSTEM_PROMPT_TEMPLATE = _BASE_SYSTEM_PROMPT
 
 
-def build_system_prompt(max_tool_calls: int = 0) -> str:
-    """Build the system prompt. Appends tool-use guidance when a positive cap
-    is supplied; returns just the base prompt otherwise (diagnostic rollback)."""
-    prompt = _BASE_SYSTEM_PROMPT
+async def build_system_prompt(max_tool_calls: int = 0) -> list[dict]:
+    """Build the system prompt as a list of content blocks.
+
+    Returns a multi-block array suitable for ``{"role": "system", "content": [...]}``.
+    When ``CATALOG_ENABLED`` is true and videos exist, a catalog block with
+    ``cache_control`` is appended so Anthropic can cache the static content.
+    """
+    text = _BASE_SYSTEM_PROMPT
     if max_tool_calls > 0:
-        prompt += _TOOL_GUIDANCE.format(max_per_turn=max_tool_calls)
-    return prompt
+        text += _TOOL_GUIDANCE.format(max_per_turn=max_tool_calls)
+
+    blocks: list[dict] = [{"type": "text", "text": text}]
+
+    if CATALOG_ENABLED:
+        videos = await catalog.get_catalog()
+        if videos:
+            blocks.append(catalog.build_catalog_block(videos, CATALOG_TIER))
+            return blocks
+
+    # No catalog block — anchor cache on the base block instead
+    blocks[0]["cache_control"] = {"type": "ephemeral"}
+    return blocks
 
 
 ToolExecutor = Callable[[str, str], Awaitable[str]]
@@ -95,10 +117,11 @@ async def stream_chat(
     """
     client = _get_async_client()
     tools_active = bool(tools) and tool_executor is not None and max_tool_calls > 0
-    system_prompt = build_system_prompt(max_tool_calls=max_tool_calls if tools_active else 0)
+    system_blocks = await build_system_prompt(max_tool_calls=max_tool_calls if tools_active else 0)
 
     full_messages: list[ChatCompletionMessageParam] = [
-        {"role": "system", "content": system_prompt},
+        # openai stubs don't model list-content system messages; runtime accepts it.
+        {"role": "system", "content": system_blocks},  # type: ignore[misc,list-item]
         *cast(list[ChatCompletionMessageParam], messages),
     ]
     base_kwargs: dict[str, Any] = {"model": CHAT_MODEL, "stream": True}

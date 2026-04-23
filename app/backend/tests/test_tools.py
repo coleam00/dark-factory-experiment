@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import patch
 
 import pytest
 
@@ -480,8 +481,10 @@ def test_serialize_malformed_returns_generic_error() -> None:
 # --- System prompt tool guidance ------------------------------------------
 
 
-def test_prompt_includes_all_tools_when_cap_positive() -> None:
-    prompt = build_system_prompt(max_tool_calls=6)
+async def test_prompt_includes_all_tools_when_cap_positive() -> None:
+    with patch("backend.llm.openrouter.CATALOG_ENABLED", False):
+        blocks = await build_system_prompt(max_tool_calls=6)
+    prompt = "\n".join(b["text"] for b in blocks)
     for name in (
         "search_videos",
         "keyword_search_videos",
@@ -491,6 +494,8 @@ def test_prompt_includes_all_tools_when_cap_positive() -> None:
         assert name in prompt
 
 
-def test_prompt_omits_tool_guidance_when_cap_zero() -> None:
-    prompt = build_system_prompt(max_tool_calls=0)
+async def test_prompt_omits_tool_guidance_when_cap_zero() -> None:
+    with patch("backend.llm.openrouter.CATALOG_ENABLED", False):
+        blocks = await build_system_prompt(max_tool_calls=0)
+    prompt = "\n".join(b["text"] for b in blocks)
     assert "search_videos" not in prompt

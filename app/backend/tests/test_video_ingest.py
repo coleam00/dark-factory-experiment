@@ -278,6 +278,7 @@ async def test_ingest_from_url_happy_path():
             new_callable=AsyncMock,
         ) as mock_create_chunk,
         patch("backend.routes.ingest.retriever_hybrid.invalidate_cache") as mock_invalidate,
+        patch("backend.routes.ingest.catalog.invalidate_catalog") as mock_cat_invalidate,
     ):
         async with AsyncClient(
             transport=ASGITransport(app=app),
@@ -300,6 +301,7 @@ async def test_ingest_from_url_happy_path():
     mock_embed.assert_called_once()
     mock_create_chunk.assert_awaited_once()
     mock_invalidate.assert_called_once()
+    mock_cat_invalidate.assert_called_once()
 
 
 async def test_ingest_from_url_invalid_url_returns_400():
