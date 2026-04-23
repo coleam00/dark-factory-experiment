@@ -112,31 +112,18 @@ async def run_case(case: dict) -> dict:
 
     try:
         query_embedding = embed_text(query_text)
+    except ValueError:
+        # Malformed test case — re-raise so the developer fixes the fixture
+        raise
     except Exception as exc:
         logger.warning("Case %s: embedding failed (%s) — counting as miss", case_id, exc)
-        return {
-            "id": case_id,
-            "category": category,
-            "expected_video_ids": expected_video_ids,
-            "retrieved_video_ids": [],
-            "recall5": 0.0,
-            "recall20": 0.0,
-            "mrr10": 0.0,
-        }
+        return _miss_result(case_id, category, expected_video_ids)
 
     try:
         results = await retrieve_hybrid(query_text, query_embedding, top_k=RETRIEVE_TOP_K)
     except Exception as exc:
         logger.warning("Case %s: retrieval failed (%s) — counting as miss", case_id, exc)
-        return {
-            "id": case_id,
-            "category": category,
-            "expected_video_ids": expected_video_ids,
-            "retrieved_video_ids": [],
-            "recall5": 0.0,
-            "recall20": 0.0,
-            "mrr10": 0.0,
-        }
+        return _miss_result(case_id, category, expected_video_ids)
 
     retrieved_video_ids = [r["video_id"] for r in results]
 
@@ -148,6 +135,19 @@ async def run_case(case: dict) -> dict:
         "recall5": recall_at_k(retrieved_video_ids, expected_video_ids, k=5),
         "recall20": recall_at_k(retrieved_video_ids, expected_video_ids, k=20),
         "mrr10": mean_reciprocal_rank(retrieved_video_ids, expected_video_ids, k=10),
+    }
+
+
+def _miss_result(case_id: str, category: str, expected_video_ids: list[str]) -> dict:
+    """Return a 'miss' result dict for a case that could not be evaluated."""
+    return {
+        "id": case_id,
+        "category": category,
+        "expected_video_ids": expected_video_ids,
+        "retrieved_video_ids": [],
+        "recall5": 0.0,
+        "recall20": 0.0,
+        "mrr10": 0.0,
     }
 
 
