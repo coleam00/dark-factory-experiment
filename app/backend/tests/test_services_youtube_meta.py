@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, Mock, patch
 
+import httpx
 import pytest
 
 
@@ -30,15 +31,6 @@ class TestGetVideoDescription:
             ]
         }
 
-        async def fake_get(*args, **kwargs):
-            class FakeResp:
-                status_code = 200
-
-                def json(self):
-                    return mock_response
-
-            return FakeResp()
-
         with (
             patch(
                 "backend.config.YOUTUBE_API_KEY",
@@ -47,7 +39,9 @@ class TestGetVideoDescription:
             patch("httpx.AsyncClient") as mock_client,
         ):
             instance = mock_client.return_value.__aenter__.return_value
-            instance.get = AsyncMock(side_effect=fake_get)
+            instance.get = AsyncMock(
+                return_value=Mock(status_code=200, json=Mock(return_value=mock_response))
+            )
 
             from backend.services.youtube_meta import get_video_description
 
@@ -60,15 +54,6 @@ class TestGetVideoDescription:
         """YouTube API returns empty description string → return None."""
         mock_response = {"items": [{"snippet": {"description": ""}}]}
 
-        async def fake_get(*args, **kwargs):
-            class FakeResp:
-                status_code = 200
-
-                def json(self):
-                    return mock_response
-
-            return FakeResp()
-
         with (
             patch(
                 "backend.config.YOUTUBE_API_KEY",
@@ -77,7 +62,9 @@ class TestGetVideoDescription:
             patch("httpx.AsyncClient") as mock_client,
         ):
             instance = mock_client.return_value.__aenter__.return_value
-            instance.get = AsyncMock(side_effect=fake_get)
+            instance.get = AsyncMock(
+                return_value=Mock(status_code=200, json=Mock(return_value=mock_response))
+            )
 
             from backend.services.youtube_meta import get_video_description
 
@@ -89,16 +76,6 @@ class TestGetVideoDescription:
     async def test_returns_none_on_403_invalid_key(self):
         """YouTube API returns 403 (invalid key) → return None (log warning)."""
 
-        async def fake_get(*args, **kwargs):
-            class FakeResp:
-                status_code = 403
-
-                @property
-                def text(self):
-                    return "API key not valid"
-
-            return FakeResp()
-
         with (
             patch(
                 "backend.config.YOUTUBE_API_KEY",
@@ -107,7 +84,7 @@ class TestGetVideoDescription:
             patch("httpx.AsyncClient") as mock_client,
         ):
             instance = mock_client.return_value.__aenter__.return_value
-            instance.get = AsyncMock(side_effect=fake_get)
+            instance.get = AsyncMock(return_value=Mock(status_code=403, text="API key not valid"))
 
             from backend.services.youtube_meta import get_video_description
 
@@ -119,16 +96,6 @@ class TestGetVideoDescription:
     async def test_returns_none_on_429_quota_exceeded(self):
         """YouTube API returns 429 (quota exceeded) → return None (log warning)."""
 
-        async def fake_get(*args, **kwargs):
-            class FakeResp:
-                status_code = 429
-
-                @property
-                def text(self):
-                    return "Quota exceeded"
-
-            return FakeResp()
-
         with (
             patch(
                 "backend.config.YOUTUBE_API_KEY",
@@ -137,7 +104,7 @@ class TestGetVideoDescription:
             patch("httpx.AsyncClient") as mock_client,
         ):
             instance = mock_client.return_value.__aenter__.return_value
-            instance.get = AsyncMock(side_effect=fake_get)
+            instance.get = AsyncMock(return_value=Mock(status_code=429, text="Quota exceeded"))
 
             from backend.services.youtube_meta import get_video_description
 
@@ -149,16 +116,6 @@ class TestGetVideoDescription:
     async def test_returns_none_on_500_internal_error(self):
         """YouTube API returns 500 (internal server error) → return None (log warning)."""
 
-        async def fake_get(*args, **kwargs):
-            class FakeResp:
-                status_code = 500
-
-                @property
-                def text(self):
-                    return "Internal server error"
-
-            return FakeResp()
-
         with (
             patch(
                 "backend.config.YOUTUBE_API_KEY",
@@ -167,7 +124,9 @@ class TestGetVideoDescription:
             patch("httpx.AsyncClient") as mock_client,
         ):
             instance = mock_client.return_value.__aenter__.return_value
-            instance.get = AsyncMock(side_effect=fake_get)
+            instance.get = AsyncMock(
+                return_value=Mock(status_code=500, text="Internal server error")
+            )
 
             from backend.services.youtube_meta import get_video_description
 
@@ -179,9 +138,6 @@ class TestGetVideoDescription:
     async def test_returns_none_on_network_timeout(self):
         """Network timeout → return None (log warning)."""
 
-        async def fake_get(*args, **kwargs):
-            raise TimeoutError("Connection timed out")
-
         with (
             patch(
                 "backend.config.YOUTUBE_API_KEY",
@@ -190,7 +146,7 @@ class TestGetVideoDescription:
             patch("httpx.AsyncClient") as mock_client,
         ):
             instance = mock_client.return_value.__aenter__.return_value
-            instance.get = AsyncMock(side_effect=fake_get)
+            instance.get = AsyncMock(side_effect=TimeoutError("Connection timed out"))
 
             from backend.services.youtube_meta import get_video_description
 
@@ -229,15 +185,6 @@ class TestGetVideoDescription:
         """Video doesn't exist or is private → API returns empty items list → return None."""
         mock_response = {"items": []}
 
-        async def fake_get(*args, **kwargs):
-            class FakeResp:
-                status_code = 200
-
-                def json(self):
-                    return mock_response
-
-            return FakeResp()
-
         with (
             patch(
                 "backend.config.YOUTUBE_API_KEY",
@@ -246,7 +193,9 @@ class TestGetVideoDescription:
             patch("httpx.AsyncClient") as mock_client,
         ):
             instance = mock_client.return_value.__aenter__.return_value
-            instance.get = AsyncMock(side_effect=fake_get)
+            instance.get = AsyncMock(
+                return_value=Mock(status_code=200, json=Mock(return_value=mock_response))
+            )
 
             from backend.services.youtube_meta import get_video_description
 
@@ -263,18 +212,11 @@ class TestGetVideoTitle:
         """oEmbed returns both title and author_name → return (title, channel_title)."""
         mock_response = {"title": "My Video Title", "author_name": "My Channel"}
 
-        async def fake_get(*args, **kwargs):
-            class FakeResp:
-                status_code = 200
-
-                def json(self):
-                    return mock_response
-
-            return FakeResp()
-
         with patch("httpx.AsyncClient") as mock_client:
             instance = mock_client.return_value.__aenter__.return_value
-            instance.get = AsyncMock(side_effect=fake_get)
+            instance.get = AsyncMock(
+                return_value=Mock(status_code=200, json=Mock(return_value=mock_response))
+            )
 
             from backend.services.youtube_meta import get_video_title
 
@@ -287,18 +229,11 @@ class TestGetVideoTitle:
         """oEmbed returns title but no author_name → channel_title is None."""
         mock_response = {"title": "My Video Title"}
 
-        async def fake_get(*args, **kwargs):
-            class FakeResp:
-                status_code = 200
-
-                def json(self):
-                    return mock_response
-
-            return FakeResp()
-
         with patch("httpx.AsyncClient") as mock_client:
             instance = mock_client.return_value.__aenter__.return_value
-            instance.get = AsyncMock(side_effect=fake_get)
+            instance.get = AsyncMock(
+                return_value=Mock(status_code=200, json=Mock(return_value=mock_response))
+            )
 
             from backend.services.youtube_meta import get_video_title
 
@@ -309,20 +244,9 @@ class TestGetVideoTitle:
     @pytest.mark.asyncio
     async def test_returns_none_tuple_when_neither_present(self):
         """oEmbed returns empty response → (None, None)."""
-        mock_response = {}
-
-        async def fake_get(*args, **kwargs):
-            class FakeResp:
-                status_code = 200
-
-                def json(self):
-                    return mock_response
-
-            return FakeResp()
-
         with patch("httpx.AsyncClient") as mock_client:
             instance = mock_client.return_value.__aenter__.return_value
-            instance.get = AsyncMock(side_effect=fake_get)
+            instance.get = AsyncMock(return_value=Mock(status_code=200, json=Mock(return_value={})))
 
             from backend.services.youtube_meta import get_video_title
 
@@ -334,19 +258,9 @@ class TestGetVideoTitle:
     async def test_returns_none_tuple_on_404(self):
         """oEmbed returns 404 → (None, None)."""
 
-        async def fake_get(*args, **kwargs):
-            class FakeResp:
-                status_code = 404
-
-                @property
-                def text(self):
-                    return "Video not found"
-
-            return FakeResp()
-
         with patch("httpx.AsyncClient") as mock_client:
             instance = mock_client.return_value.__aenter__.return_value
-            instance.get = AsyncMock(side_effect=fake_get)
+            instance.get = AsyncMock(return_value=Mock(status_code=404, text="Video not found"))
 
             from backend.services.youtube_meta import get_video_title
 
@@ -357,14 +271,9 @@ class TestGetVideoTitle:
     @pytest.mark.asyncio
     async def test_returns_none_tuple_on_timeout(self):
         """oEmbed timeout → (None, None)."""
-        import httpx
-
-        async def fake_get(*args, **kwargs):
-            raise httpx.TimeoutException("Connection timed out")
-
         with patch("httpx.AsyncClient") as mock_client:
             instance = mock_client.return_value.__aenter__.return_value
-            instance.get = AsyncMock(side_effect=fake_get)
+            instance.get = AsyncMock(side_effect=httpx.TimeoutException("Connection timed out"))
 
             from backend.services.youtube_meta import get_video_title
 
@@ -375,14 +284,9 @@ class TestGetVideoTitle:
     @pytest.mark.asyncio
     async def test_returns_none_tuple_on_network_error(self):
         """oEmbed network error → (None, None)."""
-        import httpx
-
-        async def fake_get(*args, **kwargs):
-            raise httpx.NetworkError("Connection failed")
-
         with patch("httpx.AsyncClient") as mock_client:
             instance = mock_client.return_value.__aenter__.return_value
-            instance.get = AsyncMock(side_effect=fake_get)
+            instance.get = AsyncMock(side_effect=httpx.NetworkError("Connection failed"))
 
             from backend.services.youtube_meta import get_video_title
 

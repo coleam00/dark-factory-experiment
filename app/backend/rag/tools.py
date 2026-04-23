@@ -181,9 +181,10 @@ async def _hydrate_chunks(raw_chunks: list[dict]) -> list[dict]:
         except Exception as exc:
             logger.warning("hydrate: get_video failed for %s: %s", vid, exc, exc_info=True)
             video = None
+        info = video or {}
         return vid, {
-            "title": video.get("title", "Unknown Video") if video else "Unknown Video",
-            "url": video.get("url", "") if video else "",
+            "title": info.get("title", "Unknown Video"),
+            "url": info.get("url", ""),
         }
 
     video_cache: dict[str, dict[str, str]] = dict(
@@ -229,6 +230,8 @@ _CANONICAL_CHUNK_KEYS = (
     "snippet",
 )
 
+_FLOAT_CHUNK_KEYS = frozenset(("start_seconds", "end_seconds"))
+
 
 def _normalize_chunk_shape(chunk: dict) -> dict:
     """Project a chunk dict onto the canonical citation shape.
@@ -240,7 +243,7 @@ def _normalize_chunk_shape(chunk: dict) -> dict:
     consistent regardless of which tool the model called.
     """
     return {
-        key: chunk.get(key, "" if key != "start_seconds" and key != "end_seconds" else 0.0)
+        key: chunk.get(key, 0.0 if key in _FLOAT_CHUNK_KEYS else "")
         for key in _CANONICAL_CHUNK_KEYS
     }
 
