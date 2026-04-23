@@ -131,8 +131,8 @@ export function useStreamingResponse() {
               let errMsg = 'Stream error from server';
               try {
                 errMsg = JSON.parse(data).error || errMsg;
-              } catch {
-                // Use default message
+              } catch (e) {
+                console.warn('[useStreamingResponse] Failed to parse error payload:', e);
               }
               streamError = new Error(errMsg);
               break;

@@ -280,8 +280,9 @@ All env var reads happen in `app/backend/config.py`. Add new variables there and
 | `CHANNEL_SYNC_TYPE` | prod (channel sync) | Content type filter for channel sync: `all`, `video`, `short`, `live`. Default: `video` |
 | `DATABASE_URL` | **yes** (prod + dev) | Postgres connection string. Shape: `postgresql://dynachat:<pw>@127.0.0.1:5433/dynachat`. The app refuses to start if this is unset (no SQLite fallback). |
 | `CORS_ORIGINS` | No (dev default) | Comma-separated list of allowed CORS origins. Defaults to `http://localhost:{FRONTEND_PORT},http://127.0.0.1:{FRONTEND_PORT}`. Used in `app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS)` in `main.py`. |
+| `RETRIEVAL_MAX_PER_VIDEO` | No (dev default: 3) | Maximum chunks to include per video in the final RAG context, applied after hybrid retrieval but before context packing. Set to 999 to disable the cap. |
 
-Everything else is currently hardcoded in `config.py` (model names, ports, chunk size, top-k). When adding configurability, add the constant to `config.py` with a sensible default:
+Everything else is currently hardcoded in `config.py` (model names, ports, chunk size, top-k, per-video cap). When adding configurability, add the constant to `config.py` with a sensible default:
 
 ```python
 NEW_CONSTANT: int = int(os.environ.get("NEW_CONSTANT", "42"))

@@ -112,7 +112,7 @@ async def create_message(
     all_messages = await repository.list_messages(conv_id, user_id=user_id)
     llm_messages = [{"role": m["role"], "content": m["content"]} for m in all_messages]
 
-    # 5. Embed the user query and retrieve relevant chunks
+    # 5. Embed the user query, retrieve relevant chunks, and cap per-video
     context = ""
     chunks: list[dict] = []
     retrieval_failed = False
@@ -125,7 +125,10 @@ async def create_message(
     except asyncio.CancelledError:
         raise  # Must propagate to FastAPI for proper cancellation handling
     except Exception as exc:
-        logger.warning("RAG retrieval failed (continuing without context): %s", exc)
+        logger.warning(
+            "RAG retrieval failed for user_id=%s query=%r (continuing without context): %s",
+            user_id, user_content[:50], exc
+        )
         retrieval_failed = True
 
     # Build citation objects for the SSE sources event

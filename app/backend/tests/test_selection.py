@@ -50,3 +50,14 @@ class TestApplyPerVideoCap:
         result = apply_per_video_cap(chunks, max_per_video=3)
         assert len(result) == 1
         assert result[0]["chunk_id"] == "c0"
+
+    def test_missing_video_id_skipped(self):
+        """Chunk with no video_id is silently skipped (not an error)."""
+        chunks = [
+            {"chunk_id": "c0", "video_id": "v1"},  # valid
+            {"chunk_id": "c1"},                      # missing video_id
+            {"chunk_id": "c2", "video_id": "v1"},  # valid
+        ]
+        result = apply_per_video_cap(chunks, max_per_video=3)
+        # c0 and c2 kept; c1 skipped silently
+        assert [c["chunk_id"] for c in result] == ["c0", "c2"]

@@ -1,6 +1,9 @@
 """Selection helpers for post-retrieval processing."""
 
+import logging
 from collections import defaultdict
+
+logger = logging.getLogger(__name__)
 
 
 def apply_per_video_cap(chunks: list[dict], max_per_video: int) -> list[dict]:

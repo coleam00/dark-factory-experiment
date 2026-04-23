@@ -92,9 +92,9 @@ if not JWT_SECRET and DATABASE_URL:
 JWT_ALGORITHM: str = "HS256"
 JWT_EXPIRY_SECONDS: int = 7 * 24 * 60 * 60  # 7 days
 
-# RAG settings
-RETRIEVAL_TOP_K: int = int(os.environ.get("RETRIEVAL_TOP_K", "5"))
-RETRIEVAL_MAX_PER_VIDEO: int = int(os.environ.get("RETRIEVAL_MAX_PER_VIDEO", "3"))
+# RAG retrieval settings
+RETRIEVAL_TOP_K: int = int(os.environ.get("RETRIEVAL_TOP_K", "5"))  # total chunks returned
+RETRIEVAL_MAX_PER_VIDEO: int = int(os.environ.get("RETRIEVAL_MAX_PER_VIDEO", "3"))  # per-video cap to prevent one video monopolizing context
 HYBRID_CHUNKER_MAX_TOKENS: int = 512
 
 # Hybrid retrieval (RRF) constants
