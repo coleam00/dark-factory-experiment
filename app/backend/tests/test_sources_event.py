@@ -8,6 +8,8 @@ test_tools.py. This file now only covers citation-object shape, SSE format,
 and persistence round-trip.
 """
 
+import pytest
+
 
 class TestCitationObjectShape:
     """Tests that verify citation objects have all required SSE fields."""
@@ -579,8 +581,15 @@ class TestRefusalSourcesSuppressionIntegration:
     suppresses sources event → response contains [DONE] but no 'event: sources'.
     """
 
-    async def test_sources_event_suppressed_on_refusal(self) -> None:
-        """When LLM refuses, the sources SSE event must not be emitted."""
+    @pytest.mark.parametrize("refusal_text", [
+        "Those topics are not covered in any of the videos.",
+        "I searched through the video library, but I couldn't find an actual recipe for chocolate chip cookies.",
+        "I could not find any videos about that topic in the library.",
+        "If you're looking for a recipe, check elsewhere.",
+        "I can only find information about topics covered in the videos, not recipes.",
+    ])
+    async def test_sources_event_suppressed_on_refusal(self, refusal_text: str) -> None:
+        """When LLM refuses (any pattern), the sources SSE event must not be emitted."""
         import json
         from unittest.mock import patch
 
@@ -588,8 +597,6 @@ class TestRefusalSourcesSuppressionIntegration:
 
         from backend.auth.tokens import encode_token
         from backend.main import app
-
-        refusal_text = "Those topics are not covered in any of the videos."
         refusal_token = json.dumps(refusal_text)
         refusal_chunk = f"data: {refusal_token}\n\n"
         done_chunk = "data: [DONE]\n\n"
