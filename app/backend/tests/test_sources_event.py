@@ -453,6 +453,20 @@ class TestRefusalSourcesSuppression:
         )
         assert _is_refusal(text) is True
 
+    def test_is_refusal_detects_other_contractions(self) -> None:
+        """Other common contraction-form refusals the LLM may emit."""
+        from backend.routes.messages import _is_refusal
+
+        contraction_refusals = [
+            "That topic isn't covered in the source videos.",
+            "These concepts aren't part of the material I was given.",
+            "This isn't part of the context I have access to.",
+            "Those details aren't available in the videos provided.",
+            "That subject isn't discussed in any of the videos.",
+        ]
+        for text in contraction_refusals:
+            assert _is_refusal(text) is True, f"Failed on: {text}"
+
 
 class TestRefusalSourcesSuppressionKimi:
     """Kimi K2.6 phrasings (issue #158).
@@ -636,20 +650,6 @@ class TestRefusalSourcesSuppressionNegative:
             "before adding re-ranking or query expansion."
         )
         assert _is_refusal(text) is False
-
-    def test_is_refusal_detects_other_contractions(self) -> None:
-        """Other common contraction-form refusals the LLM may emit."""
-        from backend.routes.messages import _is_refusal
-
-        contraction_refusals = [
-            "That topic isn't covered in the source videos.",
-            "These concepts aren't part of the material I was given.",
-            "This isn't part of the context I have access to.",
-            "Those details aren't available in the videos provided.",
-            "That subject isn't discussed in any of the videos.",
-        ]
-        for text in contraction_refusals:
-            assert _is_refusal(text) is True, f"Failed on: {text}"
 
 
 class TestExtractTextFromSse:
