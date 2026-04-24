@@ -6,10 +6,16 @@ export interface StreamResult {
   sources: Citation[];
 }
 
+export interface StreamingStatus {
+  tool: string;
+  subject: string;
+}
+
 export function useStreamingResponse() {
   const [streamingContent, setStreamingContent] = useState<string>('');
   const [streamingSources, setStreamingSources] = useState<Citation[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [streamingStatus, setStreamingStatus] = useState<StreamingStatus | null>(null);
 
   const streamAbortRef = useRef<AbortController | null>(null);
 
@@ -29,6 +35,7 @@ export function useStreamingResponse() {
       setIsStreaming(true);
       setStreamingContent('');
       setStreamingSources([]);
+      setStreamingStatus(null);
 
       let fullText = '';
       let sources: Citation[] = [];
@@ -124,6 +131,22 @@ export function useStreamingResponse() {
               } catch (e) {
                 console.warn('[useStreamingResponse] Failed to parse sources event:', e);
               }
+            } else if (eventType === 'status') {
+              try {
+                const parsed = JSON.parse(data);
+                if (parsed && typeof parsed === 'object' && 'type' in parsed) {
+                  if (parsed.type === 'tool_call_start') {
+                    setStreamingStatus({
+                      tool: String(parsed.tool ?? ''),
+                      subject: String(parsed.subject ?? ''),
+                    });
+                  } else if (parsed.type === 'tool_call_done') {
+                    setStreamingStatus(null);
+                  }
+                }
+              } catch (e) {
+                console.warn('[useStreamingResponse] Failed to parse status event:', e);
+              }
             } else if (data === '[DONE]') {
               // Stream complete — no action needed here
             } else if (data.startsWith('{"error"')) {
@@ -147,6 +170,7 @@ export function useStreamingResponse() {
               } catch {
                 // Not JSON-encoded — use raw data (backward compat)
               }
+              setStreamingStatus(null);
               fullText += token;
               setStreamingContent(fullText);
             }
@@ -161,11 +185,19 @@ export function useStreamingResponse() {
         setIsStreaming(false);
         setStreamingContent('');
         setStreamingSources([]);
+        setStreamingStatus(null);
       }
       if (streamError) throw streamError;
     },
     [],
   );
 
-  return { streamingContent, streamingSources, isStreaming, startStream, abortStream };
+  return {
+    streamingContent,
+    streamingSources,
+    streamingStatus,
+    isStreaming,
+    startStream,
+    abortStream,
+  };
 }

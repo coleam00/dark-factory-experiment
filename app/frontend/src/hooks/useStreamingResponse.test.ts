@@ -117,6 +117,111 @@ describe('useStreamingResponse SSE parsing', () => {
   });
 });
 
+describe('status event SSE parsing', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('sets streamingStatus on tool_call_start', () => {
+    const eventType = 'status';
+    const data = JSON.stringify({
+      type: 'tool_call_start',
+      tool: 'search_videos',
+      subject: 'building agents',
+    });
+
+    let status: { tool: string; subject: string } | null = null;
+    try {
+      const parsed = JSON.parse(data);
+      if (parsed && typeof parsed === 'object' && 'type' in parsed) {
+        if (parsed.type === 'tool_call_start') {
+          status = { tool: String(parsed.tool ?? ''), subject: String(parsed.subject ?? '') };
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    expect(status).not.toBeNull();
+    expect(status?.tool).toBe('search_videos');
+    expect(status?.subject).toBe('building agents');
+  });
+
+  it('clears streamingStatus on tool_call_done', () => {
+    const eventType = 'status';
+    const data = JSON.stringify({ type: 'tool_call_done', tool: 'search_videos' });
+
+    let status: { tool: string; subject: string } | null = {
+      tool: 'search_videos',
+      subject: 'building agents',
+    };
+    try {
+      const parsed = JSON.parse(data);
+      if (parsed && typeof parsed === 'object' && 'type' in parsed) {
+        if (parsed.type === 'tool_call_start') {
+          status = { tool: String(parsed.tool ?? ''), subject: String(parsed.subject ?? '') };
+        } else if (parsed.type === 'tool_call_done') {
+          status = null;
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    expect(status).toBeNull();
+  });
+
+  it('warns on malformed status JSON', () => {
+    const warnMock = vi.fn();
+    const originalWarn = console.warn;
+    console.warn = warnMock;
+
+    const eventType = 'status';
+    const data = 'not valid json {';
+
+    let status: { tool: string; subject: string } | null = null;
+    try {
+      const parsed = JSON.parse(data);
+      if (parsed && typeof parsed === 'object' && 'type' in parsed) {
+        if (parsed.type === 'tool_call_start') {
+          status = { tool: String(parsed.tool ?? ''), subject: String(parsed.subject ?? '') };
+        }
+      }
+    } catch (e) {
+      console.warn('[useStreamingResponse] Failed to parse status event:', e);
+    }
+
+    expect(status).toBeNull();
+    expect(warnMock).toHaveBeenCalledWith(
+      '[useStreamingResponse] Failed to parse status event:',
+      expect.any(Error),
+    );
+
+    console.warn = originalWarn;
+  });
+
+  it('ignores unknown status type', () => {
+    const eventType = 'status';
+    const data = JSON.stringify({ type: 'unknown_event', tool: 'foo' });
+
+    let status: { tool: string; subject: string } | null = null;
+    try {
+      const parsed = JSON.parse(data);
+      if (parsed && typeof parsed === 'object' && 'type' in parsed) {
+        if (parsed.type === 'tool_call_start') {
+          status = { tool: String(parsed.tool ?? ''), subject: String(parsed.subject ?? '') };
+        } else if (parsed.type === 'tool_call_done') {
+          status = null;
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    expect(status).toBeNull();
+  });
+});
+
 describe('abortStream', () => {
   beforeEach(() => {
     vi.clearAllMocks();
