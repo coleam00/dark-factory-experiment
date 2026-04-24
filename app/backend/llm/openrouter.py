@@ -125,12 +125,23 @@ async def stream_chat(
         {"role": "system", "content": system_blocks},  # type: ignore[misc,list-item]
         *cast(list[ChatCompletionMessageParam], messages),
     ]
-    base_kwargs: dict[str, Any] = {"model": CHAT_MODEL, "stream": True}
+    base_kwargs: dict[str, Any] = {
+        "model": CHAT_MODEL,
+        "stream": True,
+        # Explicit output cap. Without this, OpenRouter applies its own default
+        # (historically 4096 for Anthropic via the OpenAI-compat shim), which
+        # broad queries can exhaust: many tool_call rounds each serialize JSON
+        # args into the output budget, and on the final round the model has
+        # nothing left, returning finish_reason=length with zero visible
+        # content. Silent ~10%/24h failures in prod traced back to this.
+        "max_tokens": 8192,
+    }
     if tools_active:
         base_kwargs["tools"] = tools
 
     tool_calls_made = 0
     tokens_yielded = 0
+    round_num = 0
     # Heartbeat cadence: Kimi K2.6 regularly goes 60-140s of silent tool-call
     # streaming + tool execution before emitting the first user-visible text
     # token. Browsers and reverse proxies idle-timeout SSE connections after
@@ -145,6 +156,7 @@ async def stream_chat(
 
     try:
         while True:
+            round_num += 1
             # Once the per-turn cap has been reached, stop declaring tools on
             # subsequent completions so the model can't keep burning round-trips
             # on tool calls that will all be capped. The final round answers
@@ -154,6 +166,7 @@ async def stream_chat(
                 kwargs.pop("tools", None)
             stream = await client.chat.completions.create(messages=full_messages, **kwargs)
             assistant_text_parts: list[str] = []
+            round_content_deltas = 0
             # Tool call deltas arrive as fragments keyed by index; accumulate.
             pending: dict[int, dict[str, Any]] = {}
             finish_reason: str | None = None
@@ -168,6 +181,7 @@ async def stream_chat(
                 if delta and delta.content:
                     assistant_text_parts.append(delta.content)
                     tokens_yielded += 1
+                    round_content_deltas += 1
                     yield f"data: {json.dumps(delta.content)}\n\n"
                     last_heartbeat_at = time.monotonic()
                 if delta and delta.tool_calls:
@@ -196,6 +210,15 @@ async def stream_chat(
                     if _heartbeat_due():
                         yield ": keepalive\n\n"
                         last_heartbeat_at = time.monotonic()
+
+            logger.info(
+                "stream_chat round=%d finish_reason=%s content_deltas=%d tool_calls_pending=%d tool_calls_made=%d",
+                round_num,
+                finish_reason,
+                round_content_deltas,
+                len(pending),
+                tool_calls_made,
+            )
 
             if finish_reason == "tool_calls" and pending and tool_executor:
                 assistant_text = "".join(assistant_text_parts)
@@ -244,6 +267,15 @@ async def stream_chat(
             # refusal check.
             if final_text_out is not None:
                 final_text_out.append("".join(assistant_text_parts))
+            if round_content_deltas == 0:
+                logger.warning(
+                    "stream_chat final round emitted zero content tokens "
+                    "(round=%d finish_reason=%s tool_calls_made=%d). "
+                    "Caller will persist nothing; user will see empty answer.",
+                    round_num,
+                    finish_reason,
+                    tool_calls_made,
+                )
             break
 
         yield "data: [DONE]\n\n"
