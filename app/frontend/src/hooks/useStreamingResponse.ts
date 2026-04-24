@@ -138,6 +138,7 @@ export function useStreamingResponse() {
                 setStreamingStatus(parsed);
               } catch (e) {
                 console.warn('[useStreamingResponse] Failed to parse status event:', e);
+                setStreamingStatus(null);
               }
             } else if (data === '[DONE]') {
               // Stream complete — no action needed here
@@ -185,5 +186,12 @@ export function useStreamingResponse() {
     [],
   );
 
-  return { streamingContent, streamingSources, streamingStatus, isStreaming, startStream, abortStream };
+  return {
+    streamingContent,
+    streamingSources,
+    streamingStatus,
+    isStreaming,
+    startStream,
+    abortStream,
+  };
 }

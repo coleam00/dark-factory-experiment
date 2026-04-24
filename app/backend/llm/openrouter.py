@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from typing import Any, cast
@@ -107,8 +108,6 @@ def _extract_tool_subject(tool_name: str, tool_args_raw: str) -> str:
     model streaming causes argument fragments to be duplicated/accumulated,
     resulting in invalid JSON that would fail json.loads().
     """
-    import re
-
     search_tools = {"search_videos", "keyword_search_videos", "semantic_search_videos"}
     if tool_name in search_tools:
         m = re.search(r'"query"\s*:\s*"([^"]*)"', tool_args_raw)
@@ -286,7 +285,7 @@ async def stream_chat(
                             payload = await tool_executor(tool_name, tool_args_raw)
                         except Exception as exc:
                             logger.warning("tool executor raised: %s", exc)
-                            payload = f"Error: tool execution failed: {exc}"
+                            raise
                     tool_calls_made += 1
                     # Signal tool-call done so frontend can update/clear progress.
                     yield (

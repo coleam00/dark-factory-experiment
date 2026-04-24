@@ -78,9 +78,15 @@ class TestSseStatusEventsDuringToolCalls:
                 tool_calls=[_FakeToolCallDelta(0, call_id="call_1", name="search_videos")]
             ),
         ]
-        for i in range(6):
+        for _i in range(6):
             round1_chunks.append(
-                _FakeDeltaChunk(tool_calls=[_FakeToolCallDelta(0, arguments='{"query": "Cole agent approach", "top_k": 5}')])
+                _FakeDeltaChunk(
+                    tool_calls=[
+                        _FakeToolCallDelta(
+                            0, arguments='{"query": "Cole agent approach", "top_k": 5}'
+                        )
+                    ]
+                )
             )
         round1_chunks.append(_FakeDeltaChunk(finish_reason="tool_calls"))
 
@@ -137,7 +143,7 @@ class TestSseStatusEventsDuringToolCalls:
             (
                 i
                 for i, c in enumerate(emitted)
-                if c.startswith("event: status\n") and 'tool_call_start' in c
+                if c.startswith("event: status\n") and "tool_call_start" in c
             ),
             -1,
         )
@@ -150,7 +156,7 @@ class TestSseStatusEventsDuringToolCalls:
             (
                 i
                 for i, c in enumerate(emitted)
-                if c.startswith("event: status\n") and 'tool_call_done' in c
+                if c.startswith("event: status\n") and "tool_call_done" in c
             ),
             -1,
         )
@@ -170,7 +176,7 @@ class TestSseStatusEventsDuringToolCalls:
             (
                 i
                 for i, c in enumerate(emitted)
-                if c.startswith("event: status\n") and 'tool_call_done' in c
+                if c.startswith("event: status\n") and "tool_call_done" in c
             ),
             -1,
         )
@@ -194,17 +200,15 @@ class TestSseStatusEventsDuringToolCalls:
 
         chunks = [
             ": keepalive\n\n",
-            "event: status\ndata: {\"type\": \"tool_call_start\", \"tool\": \"search_videos\", \"subject\": \"Cole agent approach\"}\n\n",
+            'event: status\ndata: {"type": "tool_call_start", "tool": "search_videos", "subject": "Cole agent approach"}\n\n',
             'data: "Hello"\n\n',
-            "event: status\ndata: {\"type\": \"tool_call_done\", \"tool\": \"search_videos\"}\n\n",
+            'event: status\ndata: {"type": "tool_call_done", "tool": "search_videos"}\n\n',
             'data: " world"\n\n',
             "data: [DONE]\n\n",
         ]
         text = _extract_text_from_sse(chunks)
         # Status events are silently skipped (event: prefix != data: prefix).
-        assert text == "Hello world", (
-            f"status events leaked into extracted text: {text!r}"
-        )
+        assert text == "Hello world", f"status events leaked into extracted text: {text!r}"
         # Confirm no 'tool_call_start/done' strings leak through.
         assert "tool_call" not in text
 
@@ -232,10 +236,14 @@ class TestSseStatusEventsDuringToolCalls:
 
         # First: tool_call_start with subject.
         start_payload = status_payloads[0]
-        assert start_payload["type"] == "tool_call_start", f"expected tool_call_start; got {start_payload}"
+        assert start_payload["type"] == "tool_call_start", (
+            f"expected tool_call_start; got {start_payload}"
+        )
         assert start_payload["tool"] == "search_videos"
         assert "subject" in start_payload, f"search tool must have subject; got {start_payload}"
-        assert "Cole agent" in start_payload["subject"], f"subject should contain query; got {start_payload}"
+        assert "Cole agent" in start_payload["subject"], (
+            f"subject should contain query; got {start_payload}"
+        )
 
         # Second: tool_call_done (no subject required).
         done_payload = status_payloads[1]
@@ -254,7 +262,7 @@ class TestSseStatusEventsDuringToolCalls:
                 tool_calls=[_FakeToolCallDelta(0, call_id="call_1", name="get_video_transcript")]
             ),
         ]
-        for i in range(4):
+        for _i in range(4):
             round1_chunks.append(
                 _FakeDeltaChunk(
                     tool_calls=[_FakeToolCallDelta(0, arguments='{"video_id": "dQw4w9WgXcQ"}')]
@@ -308,3 +316,62 @@ class TestSseStatusEventsDuringToolCalls:
                     f"get_video_transcript subject should be video_id; got {payload}"
                 )
                 break
+
+
+class TestExtractToolSubject:
+    """Edge-case tests for _extract_tool_subject helper."""
+
+    async def test_unknown_tool_returns_empty_string(self) -> None:
+        """Unknown tools should return empty string subject."""
+        from backend.llm.openrouter import _extract_tool_subject
+
+        subject = _extract_tool_subject("future_tool", '{"query": "something"}')
+        assert subject == "", f"unknown tool should return empty string; got {subject!r}"
+
+    async def test_with_duplicated_args_from_streaming(self) -> None:
+        """Streaming can duplicate/accumulate argument fragments. Regex returns first match."""
+        from backend.llm.openrouter import _extract_tool_subject
+
+        # Simulates streaming artifact: arguments written twice
+        duplicated = '{"query": "Cole agent approach"}{"query": "Cole agent approach"}'
+        subject = _extract_tool_subject("search_videos", duplicated)
+        assert subject == "Cole agent approach", f"regex should return first match; got {subject!r}"
+
+    async def test_keyword_search_videos(self) -> None:
+        """keyword_search_videos should also extract subject (same regex as search_videos)."""
+        from backend.llm.openrouter import _extract_tool_subject
+
+        subject = _extract_tool_subject("keyword_search_videos", '{"query": "test"}')
+        assert subject == "test", f"keyword_search_videos should extract query; got {subject!r}"
+
+    async def test_semantic_search_videos(self) -> None:
+        """semantic_search_videos should also extract subject."""
+        from backend.llm.openrouter import _extract_tool_subject
+
+        subject = _extract_tool_subject("semantic_search_videos", '{"query": "test"}')
+        assert subject == "test", f"semantic_search_videos should extract query; got {subject!r}"
+
+    async def test_malformed_json_still_matches_via_regex(self) -> None:
+        """Malformed JSON that would fail json.loads should still yield subject via regex."""
+        from backend.llm.openrouter import _extract_tool_subject
+
+        # truncated JSON that would fail json.loads()
+        malformed = '{"query": "incomplete", '
+        subject = _extract_tool_subject("search_videos", malformed)
+        # Regex should still find the partial match
+        assert subject == "incomplete", f"malformed JSON should still match; got {subject!r}"
+
+    async def test_get_video_transcript_unknown_tool(self) -> None:
+        """get_video_transcript with unknown args still extracts video_id correctly."""
+        from backend.llm.openrouter import _extract_tool_subject
+
+        subject = _extract_tool_subject("get_video_transcript", '{"video_id": "abc123"}')
+        assert subject == "abc123", f"get_video_transcript should extract video_id; got {subject!r}"
+
+    async def test_get_video_transcript_malformed(self) -> None:
+        """Malformed JSON for transcript tool should return empty string."""
+        from backend.llm.openrouter import _extract_tool_subject
+
+        malformed = '{"video_id": "'
+        subject = _extract_tool_subject("get_video_transcript", malformed)
+        assert subject == "", f"malformed JSON should return empty; got {subject!r}"
