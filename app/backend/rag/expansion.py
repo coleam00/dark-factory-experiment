@@ -75,7 +75,6 @@ async def expand_and_merge(
                 logger.warning("Neighbor fetch failed for video %s: %s", video_id, task_result)
                 continue
             for n in task_result:
-                n = dict(n)
                 n["video_id"] = video_id
                 all_chunks.append(n)
 

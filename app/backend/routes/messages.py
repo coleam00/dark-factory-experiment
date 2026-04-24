@@ -327,10 +327,10 @@ def _is_refusal(text: str) -> bool:
         "only mentioned as examples",
         "can only find information about",
     )
-    matched = any(pattern.lower() in text.lower() for pattern in refusal_patterns)
-    if matched:
+    if any(pattern.lower() in text.lower() for pattern in refusal_patterns):
         logger.debug("Refusal detected in assistant response")
-    return matched
+        return True
+    return False
 
 
 async def _maybe_set_conversation_title(
