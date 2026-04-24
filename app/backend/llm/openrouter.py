@@ -66,9 +66,6 @@ Strategy:
 - You have {max_per_turn} tool calls total per user turn. Spend them deliberately."""
 
 
-SYSTEM_PROMPT_TEMPLATE = _BASE_SYSTEM_PROMPT
-
-
 async def build_system_prompt(max_tool_calls: int = 0) -> list[dict]:
     """Build the system prompt as a list of content blocks.
 
