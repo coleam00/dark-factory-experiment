@@ -467,6 +467,48 @@ class TestRefusalSourcesSuppression:
         for text in contraction_refusals:
             assert _is_refusal(text) is True, f"Failed on: {text}"
 
+    def test_is_refusal_detects_kimi_refusal_phrases(self) -> None:
+        """Kimi K2.6 refusal phrases that don't match Sonnet patterns.
+
+        Regression guard for issue #158: Kimi phrases refusals differently
+        from Sonnet, e.g. "couldn't find", "I searched through", "not an actual".
+        Without these patterns, _is_refusal() returns False and the sources event
+        emits a misleading "Sources (N)" chip.
+        """
+        from backend.routes.messages import _is_refusal
+
+        kimi_refusals = [
+            "I searched through the video library, but I couldn't find an actual recipe for chocolate chip cookies.",
+            "I could not find any videos about that topic in the library.",
+            "This is not an actual recipe from the video content.",
+            "There are no actual recipes for chocolate chip cookies in these videos.",
+            "I searched through the video library, but I couldn't find what you're looking for.",
+            "The videos that mention 'cookies' are only using them as examples in AI agent demos.",
+            "If you're looking for a recipe, check elsewhere.",
+            "I couldn't find the information you're looking for in the provided videos.",
+            "I can only find information about topics covered in the videos, not recipes.",
+        ]
+        for text in kimi_refusals:
+            assert _is_refusal(text) is True, f"Failed on Kimi phrase: {text}"
+
+    def test_is_refusal_kimi_patterns_no_false_positives(self) -> None:
+        """Kimi-added patterns don't cause false positives on normal text.
+
+        Some patterns like "not an actual" or "I searched" could appear in
+        non-refusal contexts. Verify they only match in refusal contexts.
+        """
+        from backend.routes.messages import _is_refusal
+
+        # These should NOT be detected as refusals
+        normal_texts = [
+            "I searched through my notes and found the answer.",
+            "This is a real recipe that I found in the video.",
+            "Check other videos for more information.",
+            "The examples only mentioned as reference, not as the main topic.",
+        ]
+        for text in normal_texts:
+            assert _is_refusal(text) is False, f"False positive on: {text}"
+
 
 class TestExtractTextFromSse:
     """Tests for _extract_text_from_sse helper."""

@@ -316,6 +316,16 @@ def _is_refusal(text: str) -> bool:
         "not available in",
         "cannot answer questions about",
         "not able to help",
+        # Kimi K2.6 refusal phrases (issue #158)
+        "couldn't find",
+        "could not find",
+        "not an actual",
+        "no actual",
+        "check elsewhere",
+        "check other sources",
+        "only using them as examples",
+        "only mentioned as examples",
+        "can only find information about",
     )
     matched = any(pattern.lower() in text.lower() for pattern in refusal_patterns)
     if matched:
