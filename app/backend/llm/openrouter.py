@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from typing import Any, cast
 
@@ -130,6 +131,18 @@ async def stream_chat(
 
     tool_calls_made = 0
     tokens_yielded = 0
+    # Heartbeat cadence: Kimi K2.6 regularly goes 60-140s of silent tool-call
+    # streaming + tool execution before emitting the first user-visible text
+    # token. Browsers and reverse proxies idle-timeout SSE connections after
+    # ~60s of no bytes. Emitting SSE comment lines (`: <text>\n\n`) every few
+    # seconds keeps the socket warm. Comments are spec-valid SSE that clients
+    # ignore, so the frontend is unaffected.
+    HEARTBEAT_INTERVAL_SECONDS = 5.0
+    last_heartbeat_at = time.monotonic()
+
+    def _heartbeat_due() -> bool:
+        return (time.monotonic() - last_heartbeat_at) >= HEARTBEAT_INTERVAL_SECONDS
+
     try:
         while True:
             # Once the per-turn cap has been reached, stop declaring tools on
@@ -156,6 +169,7 @@ async def stream_chat(
                     assistant_text_parts.append(delta.content)
                     tokens_yielded += 1
                     yield f"data: {json.dumps(delta.content)}\n\n"
+                    last_heartbeat_at = time.monotonic()
                 if delta and delta.tool_calls:
                     for tc in delta.tool_calls:
                         slot = pending.setdefault(
@@ -175,6 +189,13 @@ async def stream_chat(
                                 slot["function"]["name"] = tc.function.name
                             if tc.function.arguments:
                                 slot["function"]["arguments"] += tc.function.arguments
+                    # Emit a keepalive while the model streams tool_call args.
+                    # No content token is arriving during this phase, so
+                    # without this the socket can go silent for 30+ seconds
+                    # on long tool-call sequences.
+                    if _heartbeat_due():
+                        yield ": keepalive\n\n"
+                        last_heartbeat_at = time.monotonic()
 
             if finish_reason == "tool_calls" and pending and tool_executor:
                 assistant_text = "".join(assistant_text_parts)
@@ -190,6 +211,12 @@ async def stream_chat(
                     )
                 )
                 for tc in ordered:
+                    # Tool execution (embedding + DB queries) can take a few
+                    # seconds per call. Emit a keepalive right before we
+                    # await it so browsers/proxies don't idle-timeout the
+                    # socket while the coroutine is suspended.
+                    yield ": keepalive\n\n"
+                    last_heartbeat_at = time.monotonic()
                     if tool_calls_made >= max_tool_calls:
                         payload = (
                             f"Error: per-turn tool call cap ({max_tool_calls}) reached. "
