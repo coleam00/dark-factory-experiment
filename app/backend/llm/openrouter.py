@@ -174,6 +174,7 @@ async def stream_chat(
     def _heartbeat_due() -> bool:
         return (time.monotonic() - last_heartbeat_at) >= HEARTBEAT_INTERVAL_SECONDS
 
+    cap_reached_continuation_appended = False
     try:
         while True:
             round_num += 1
@@ -183,12 +184,36 @@ async def stream_chat(
             # already contains tool_use/tool_result blocks, and Anthropic's
             # API (via OpenRouter) returns finish_reason=stop with zero
             # content tokens when it sees tool-use context but no declared
-            # tools. Instead, keep tools declared and set tool_choice="none"
-            # — that tells the model tools exist but may not be called, so
-            # it answers using the context it already has.
+            # tools. So we keep tools declared and set tool_choice="none".
+            #
+            # Empirically, tool_choice="none" alone is *necessary but not
+            # sufficient* — Sonnet 4.6 still sometimes returns
+            # finish_reason=stop with zero content on long tool histories.
+            # The bulletproof fix is to also append a synthetic user message
+            # explicitly asking for the final answer once the cap is hit.
+            # This nudges the model out of "I'll keep gathering" mode into
+            # "compose now" mode. The synthetic message is only appended
+            # once per turn so we don't loop adding more.
             kwargs = dict(base_kwargs)
             if tools_active and tool_calls_made >= max_tool_calls:
                 kwargs["tool_choice"] = "none"
+                if not cap_reached_continuation_appended:
+                    full_messages.append(
+                        cast(
+                            ChatCompletionMessageParam,
+                            {
+                                "role": "user",
+                                "content": (
+                                    "You have reached your tool-call budget for this turn "
+                                    "and may not call any more tools. Please answer my original "
+                                    "question now using only the search results above. Do not "
+                                    "ask me follow-up questions and do not announce that you are "
+                                    "answering — just produce the final answer."
+                                ),
+                            },
+                        )
+                    )
+                    cap_reached_continuation_appended = True
             stream = await client.chat.completions.create(messages=full_messages, **kwargs)
             assistant_text_parts: list[str] = []
             round_content_deltas = 0

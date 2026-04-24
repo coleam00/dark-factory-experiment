@@ -180,6 +180,118 @@ class TestToolChoiceNoneOnCapReached:
             f"model composes an answer; got {final_kwargs.get('tool_choice')!r}"
         )
 
+    async def test_synthetic_continuation_user_message_appended_when_cap_hit(
+        self,
+    ) -> None:
+        """Anthropic Sonnet 4.6 still sometimes returns finish_reason=stop
+        with zero content tokens on long tool histories even with
+        tool_choice="none". Fix: append a synthetic user message asking
+        for the final answer when the cap is hit. Verify the second-round
+        request's messages payload includes a trailing user message that
+        explicitly asks for the final answer.
+        """
+        from backend.llm.openrouter import stream_chat
+
+        round1 = _FakeStream(
+            [
+                _FakeDeltaChunk(
+                    tool_calls=[_FakeToolCallDelta(0, call_id="c1", name="search_videos")]
+                ),
+                _FakeDeltaChunk(tool_calls=[_FakeToolCallDelta(0, arguments='{"query":"x"}')]),
+                _FakeDeltaChunk(finish_reason="tool_calls"),
+            ]
+        )
+        round2 = _FakeStream(
+            [
+                _FakeDeltaChunk(content="Final answer"),
+                _FakeDeltaChunk(finish_reason="stop"),
+            ]
+        )
+        create_mock = AsyncMock(side_effect=[round1, round2])
+        fake_client = SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create_mock))
+        )
+
+        async def exec_tool(name: str, raw_args: str) -> str:
+            return "tool result payload"
+
+        with (
+            patch("backend.llm.openrouter._get_async_client", return_value=fake_client),
+            patch(
+                "backend.llm.openrouter.build_system_prompt",
+                new=AsyncMock(return_value=[{"type": "text", "text": "sys"}]),
+            ),
+        ):
+            async for _ in stream_chat(
+                messages=[{"role": "user", "content": "original question"}],
+                tools=[{"type": "function", "function": {"name": "search_videos"}}],
+                tool_executor=exec_tool,
+                max_tool_calls=1,
+            ):
+                pass
+
+        # Round 2's request must contain a synthetic user message at the
+        # end of `messages` asking for a final answer. The original user
+        # message + tool call + tool result must still precede it.
+        _, kwargs2 = create_mock.call_args_list[1]
+        msgs2 = kwargs2["messages"]
+        assert msgs2[-1]["role"] == "user", (
+            f"last message on cap-reached round must be a user prompt; "
+            f"got role={msgs2[-1].get('role')!r}"
+        )
+        last_content = msgs2[-1]["content"]
+        assert isinstance(last_content, str) and "final answer" in last_content.lower(), (
+            f"synthetic continuation must explicitly ask for a final answer; got {last_content!r}"
+        )
+        # Original user message must still be present (we appended, didn't replace).
+        roles = [m.get("role") for m in msgs2]
+        assert roles.count("user") >= 2, (
+            f"both original user message and synthetic continuation must be present; "
+            f"got roles={roles!r}"
+        )
+
+    async def test_no_synthetic_continuation_on_pre_cap_rounds(self) -> None:
+        """Pre-cap rounds must not get the synthetic continuation —
+        only inject it when tool_choice='none' kicks in."""
+        from backend.llm.openrouter import stream_chat
+
+        # Single-round flow that doesn't hit the cap.
+        stream = _FakeStream(
+            [
+                _FakeDeltaChunk(content="direct answer"),
+                _FakeDeltaChunk(finish_reason="stop"),
+            ]
+        )
+        create_mock = AsyncMock(return_value=stream)
+        fake_client = SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create_mock))
+        )
+
+        async def exec_tool(name: str, raw_args: str) -> str:
+            return "tool result"
+
+        with (
+            patch("backend.llm.openrouter._get_async_client", return_value=fake_client),
+            patch(
+                "backend.llm.openrouter.build_system_prompt",
+                new=AsyncMock(return_value=[{"type": "text", "text": "sys"}]),
+            ),
+        ):
+            async for _ in stream_chat(
+                messages=[{"role": "user", "content": "original question"}],
+                tools=[{"type": "function", "function": {"name": "search_videos"}}],
+                tool_executor=exec_tool,
+                max_tool_calls=5,
+            ):
+                pass
+
+        _, kwargs = create_mock.call_args_list[0]
+        msgs = kwargs["messages"]
+        # Should be just system + original user — no synthetic continuation.
+        assert sum(1 for m in msgs if m.get("role") == "user") == 1, (
+            f"pre-cap round must have exactly one user message; got {msgs!r}"
+        )
+
     async def test_no_tool_choice_on_pre_cap_rounds(self) -> None:
         """Rounds below the cap must not set tool_choice — default
         'auto' must be used so the model can decide whether to call tools
