@@ -96,6 +96,26 @@ ToolExecutor = Callable[[str, str], Awaitable[str]]
 """(tool_name, raw_arguments_json) -> tool result string (role: tool content)."""
 
 
+def _extract_tool_subject(tool_name: str, tool_args_raw: str) -> str:
+    """Extract a human-readable subject from tool arguments for status events.
+
+    Returns a short string suitable for display in a "Searching: ..." indicator.
+    Returns "" on parse failure or unknown tool — callers always get a safe value.
+    """
+    try:
+        args = json.loads(tool_args_raw)
+    except (json.JSONDecodeError, TypeError) as exc:
+        logger.debug("_extract_tool_subject: parse error for %r: %s", tool_args_raw, exc)
+        return ""
+    if not isinstance(args, dict):
+        return ""
+    if tool_name in ("search_videos", "keyword_search_videos", "semantic_search_videos"):
+        return str(args.get("query", ""))
+    if tool_name == "get_video_transcript":
+        return str(args.get("video_id", ""))
+    return ""
+
+
 async def stream_chat(
     messages: list[dict],
     tools: list[dict] | None = None,
@@ -245,19 +265,28 @@ async def stream_chat(
                     # socket while the coroutine is suspended.
                     yield ": keepalive\n\n"
                     last_heartbeat_at = time.monotonic()
-                    if tool_calls_made >= max_tool_calls:
+                    tool_name = tc["function"]["name"]
+                    tool_args_raw = tc["function"]["arguments"]
+                    if tool_calls_made < max_tool_calls:
+                        subject = _extract_tool_subject(tool_name, tool_args_raw)
+                        yield (
+                            "event: status\n"
+                            f"data: {json.dumps({'type': 'tool_call_start', 'tool': tool_name, 'subject': subject})}\n\n"
+                        )
+                        try:
+                            payload = await tool_executor(tool_name, tool_args_raw)
+                        except Exception as exc:
+                            logger.warning("tool executor raised: %s", exc, exc_info=True)
+                            payload = f"Error: tool execution failed: {exc}"
+                        yield (
+                            "event: status\n"
+                            f"data: {json.dumps({'type': 'tool_call_done', 'tool': tool_name})}\n\n"
+                        )
+                    else:
                         payload = (
                             f"Error: per-turn tool call cap ({max_tool_calls}) reached. "
                             "No more tool calls will be executed for this user turn."
                         )
-                    else:
-                        try:
-                            payload = await tool_executor(
-                                tc["function"]["name"], tc["function"]["arguments"]
-                            )
-                        except Exception as exc:
-                            logger.warning("tool executor raised: %s", exc)
-                            payload = f"Error: tool execution failed: {exc}"
                     tool_calls_made += 1
                     full_messages.append(
                         cast(

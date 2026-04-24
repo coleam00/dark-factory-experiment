@@ -11,6 +11,8 @@ interface MessageProps {
   sources?: Citation[];
   /** Called when the user clicks a citation chip */
   onCitationClick?: (citation: Citation) => void;
+  /** Current tool-call status during streaming (ephemeral progress indicator) */
+  streamingStatus?: { tool: string; subject: string } | null;
 }
 
 // ── Typing indicator (3 pulsing dots) ────────────────────────────
@@ -118,7 +120,14 @@ function SourceCitations({
 }
 
 // ── Main message component ────────────────────────────────────────
-export function Message({ role, content, isStreaming, sources, onCitationClick }: MessageProps) {
+export function Message({
+  role,
+  content,
+  isStreaming,
+  sources,
+  onCitationClick,
+  streamingStatus,
+}: MessageProps) {
   const isUser = role === 'user';
   const hasSources = !isUser && Array.isArray(sources) && sources.length > 0;
 
@@ -143,7 +152,13 @@ export function Message({ role, content, isStreaming, sources, onCitationClick }
         }}
       >
         {isStreaming && !content ? (
-          <TypingIndicator />
+          streamingStatus ? (
+            <div className="text-slate-400 text-[13px] italic">
+              {streamingStatus.subject ? `Searching: ${streamingStatus.subject}…` : 'Working…'}
+            </div>
+          ) : (
+            <TypingIndicator />
+          )
         ) : isUser ? (
           <span style={{ whiteSpace: 'pre-wrap' }}>{content}</span>
         ) : (

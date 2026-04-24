@@ -213,6 +213,27 @@ class TestSseKeepaliveDuringToolCalls:
                     f"malformed keepalive: {chunk!r} — must be exactly ': keepalive\\n\\n'"
                 )
 
+    async def test_status_events_and_keepalives_coexist(self) -> None:
+        """Status events are additive — keepalives must still be emitted
+        alongside them. Verify both event types appear and that the first
+        status event precedes the first content token."""
+        emitted = await self._collect(delay_per_chunk=1.0, tool_exec_delay=0.0)
+
+        keepalive_count = sum(1 for c in emitted if c.startswith(": keepalive"))
+        status_count = sum(1 for c in emitted if c.startswith("event: status\n"))
+        first_status_idx = next(
+            (i for i, c in enumerate(emitted) if c.startswith("event: status\n")), -1
+        )
+        first_content_idx = next(
+            (i for i, c in enumerate(emitted) if c.startswith('data: "Answer')), -1
+        )
+
+        assert keepalive_count >= 1, f"expected keepalives; got 0. emitted={emitted!r}"
+        assert status_count >= 1, f"expected status events; got 0. emitted={emitted!r}"
+        assert first_status_idx < first_content_idx, (
+            "first status event must precede first content token"
+        )
+
 
 class TestBackendSseChunkHandling:
     """The route wrapper in `routes/messages.py` stores every yielded chunk
