@@ -267,28 +267,25 @@ async def stream_chat(
                     last_heartbeat_at = time.monotonic()
                     tool_name = tc["function"]["name"]
                     tool_args_raw = tc["function"]["arguments"]
-                    will_execute = tool_calls_made < max_tool_calls
-                    if will_execute:
+                    if tool_calls_made < max_tool_calls:
                         subject = _extract_tool_subject(tool_name, tool_args_raw)
                         yield (
                             "event: status\n"
                             f"data: {json.dumps({'type': 'tool_call_start', 'tool': tool_name, 'subject': subject})}\n\n"
                         )
-                    if not will_execute:
-                        payload = (
-                            f"Error: per-turn tool call cap ({max_tool_calls}) reached. "
-                            "No more tool calls will be executed for this user turn."
-                        )
-                    else:
                         try:
                             payload = await tool_executor(tool_name, tool_args_raw)
                         except Exception as exc:
                             logger.warning("tool executor raised: %s", exc, exc_info=True)
                             payload = f"Error: tool execution failed: {exc}"
-                    if will_execute:
                         yield (
                             "event: status\n"
                             f"data: {json.dumps({'type': 'tool_call_done', 'tool': tool_name})}\n\n"
+                        )
+                    else:
+                        payload = (
+                            f"Error: per-turn tool call cap ({max_tool_calls}) reached. "
+                            "No more tool calls will be executed for this user turn."
                         )
                     tool_calls_made += 1
                     full_messages.append(

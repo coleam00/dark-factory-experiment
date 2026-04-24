@@ -41,7 +41,6 @@ describe('useStreamingResponse SSE parsing', () => {
     console.warn = warnMock;
 
     // Simulate SSE parsing logic from the hook
-    const eventType = 'sources';
     const data = JSON.stringify([mockCitation]);
     let sources: unknown[] = [];
     try {
@@ -65,7 +64,6 @@ describe('useStreamingResponse SSE parsing', () => {
     const originalWarn = console.warn;
     console.warn = warnMock;
 
-    const eventType = 'sources';
     const data = 'not valid json {';
 
     let sources: unknown[] = [];
