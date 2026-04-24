@@ -157,13 +157,18 @@ async def stream_chat(
     try:
         while True:
             round_num += 1
-            # Once the per-turn cap has been reached, stop declaring tools on
-            # subsequent completions so the model can't keep burning round-trips
-            # on tool calls that will all be capped. The final round answers
-            # using whatever context the already-executed tools returned.
+            # Once the per-turn cap has been reached, force the model to
+            # compose a final answer instead of calling more tools. We must
+            # NOT strip `tools` from the request: the conversation history
+            # already contains tool_use/tool_result blocks, and Anthropic's
+            # API (via OpenRouter) returns finish_reason=stop with zero
+            # content tokens when it sees tool-use context but no declared
+            # tools. Instead, keep tools declared and set tool_choice="none"
+            # — that tells the model tools exist but may not be called, so
+            # it answers using the context it already has.
             kwargs = dict(base_kwargs)
             if tools_active and tool_calls_made >= max_tool_calls:
-                kwargs.pop("tools", None)
+                kwargs["tool_choice"] = "none"
             stream = await client.chat.completions.create(messages=full_messages, **kwargs)
             assistant_text_parts: list[str] = []
             round_content_deltas = 0
