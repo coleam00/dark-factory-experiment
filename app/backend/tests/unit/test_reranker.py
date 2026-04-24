@@ -95,7 +95,7 @@ async def test_rerank_empty_chunks(monkeypatch):
 
 
 async def test_rerank_fewer_chunks_than_top_n(monkeypatch):
-    """Returns all chunks when fewer than top_n available."""
+    """Returns all chunks when fewer than top_n available, in LLM-reranked order."""
     from backend.rag import reranker
 
     chunks = _make_chunks(2)
@@ -107,6 +107,7 @@ async def test_rerank_fewer_chunks_than_top_n(monkeypatch):
     result = await reranker.rerank_chunks("test query", chunks, top_n=5)
 
     assert len(result) == 2
+    assert [c["chunk_id"] for c in result] == ["c1", "c0"]
 
 
 async def test_rerank_out_of_range_indices_ignored(monkeypatch):
@@ -124,3 +125,32 @@ async def test_rerank_out_of_range_indices_ignored(monkeypatch):
 
     # Valid indices [2, 0], then remainder [1]
     assert [c["chunk_id"] for c in result] == ["c2", "c0", "c1"]
+
+
+async def test_rerank_single_chunk_skips_llm(monkeypatch):
+    """Single-chunk input returns immediately without calling LLM."""
+    from backend.rag import reranker
+
+    chunks = _make_chunks(1)
+    mock_client = MagicMock()
+    monkeypatch.setattr(reranker, "_async_client", mock_client)
+
+    result = await reranker.rerank_chunks("test query", chunks, top_n=5)
+
+    assert result == chunks
+    mock_client.chat.completions.create.assert_not_called()
+
+
+async def test_rerank_all_out_of_range_falls_back(monkeypatch):
+    """Falls back to original order when LLM returns only out-of-range indices."""
+    from backend.rag import reranker
+
+    chunks = _make_chunks(3)
+    mock_create = AsyncMock(return_value=_mock_response([99, 100, 200]))
+    mock_client = MagicMock()
+    mock_client.chat.completions.create = mock_create
+    monkeypatch.setattr(reranker, "_async_client", mock_client)
+
+    result = await reranker.rerank_chunks("test query", chunks, top_n=3)
+
+    assert [c["chunk_id"] for c in result] == ["c0", "c1", "c2"]

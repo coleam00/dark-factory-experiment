@@ -117,7 +117,8 @@ RERANKER_ENABLED: bool = os.environ.get("RERANKER_ENABLED", "true").strip().lowe
 )
 # Model used for reranking; must be an OpenRouter chat model ID.
 RERANKER_MODEL: str = os.environ.get("RERANKER_MODEL", "anthropic/claude-haiku-4-5")
-# How many top chunks the reranker returns to the LLM (should equal RETRIEVAL_TOP_K).
+# Number of top chunks the reranker returns to the chat model. Callers typically
+# pass top_n explicitly; this default applies only to direct calls without top_n.
 RERANKER_TOP_N: int = int(os.environ.get("RERANKER_TOP_N", "5"))
 # Retriever over-fetch multiplier when reranker is enabled; gives the reranker
 # a larger candidate pool. retrieve_hybrid is called with top_k * RERANKER_FETCH_FACTOR.

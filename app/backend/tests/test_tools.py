@@ -105,6 +105,35 @@ async def test_execute_search_hybrid_happy_path(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_execute_search_hybrid_reranker_disabled(monkeypatch) -> None:
+    """When RERANKER_ENABLED=False, retrieve_hybrid uses plain top_k and reranker is skipped."""
+    captured_top_k: list[int] = []
+
+    async def fake_retrieve(_q, _emb, top_k: int = 5) -> list[dict]:
+        captured_top_k.append(top_k)
+        return _FAKE_CHUNKS
+
+    rerank_called = False
+
+    async def fake_rerank(_query: str, chunks: list[dict], top_n: int | None = None) -> list[dict]:
+        nonlocal rerank_called
+        rerank_called = True
+        return chunks
+
+    monkeypatch.setattr("backend.rag.retriever_hybrid.retrieve_hybrid", fake_retrieve)
+    monkeypatch.setattr("backend.rag.embeddings.embed_text", lambda _s: [0.0] * 1536)
+    monkeypatch.setattr("backend.rag.reranker.rerank_chunks", fake_rerank)
+    # RERANKER_ENABLED is a lazy local import from backend.config inside the function;
+    # patch the source module so the local re-binding picks up False.
+    monkeypatch.setattr("backend.config.RERANKER_ENABLED", False)
+
+    result = await execute_search_hybrid(json.dumps({"query": "rag pipelines"}))
+    assert result["ok"] is True
+    assert captured_top_k == [10]  # no over-fetch multiplier
+    assert not rerank_called
+
+
+@pytest.mark.asyncio
 async def test_execute_search_keyword_hydrates_raw_chunks(monkeypatch) -> None:
     async def fake_keyword(_q, top_k=10, language="english"):
         return [

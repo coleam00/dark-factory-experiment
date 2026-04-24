@@ -7,6 +7,7 @@ Falls back to the original RRF order on any error so retrieval always succeeds.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 
@@ -26,7 +27,9 @@ def _get_async_client() -> AsyncOpenAI:
     return _async_client
 
 
-def _build_rerank_prompt(query: str, chunks: list[dict]) -> str:
+def _build_rerank_prompt(query: str, chunks: list[dict], top_n: int) -> str:
+    """Build the listwise ranking prompt.  Each chunk must have ``video_title``
+    and at least one of ``content`` / ``snippet``; missing keys produce empty lines."""
     lines = [
         "Rank these transcript chunks by relevance to the query.",
         "Pay special attention to chunks where the author expresses a",
@@ -43,7 +46,7 @@ def _build_rerank_prompt(query: str, chunks: list[dict]) -> str:
     lines.extend(
         [
             "",
-            f"Return ONLY a JSON array of the top {RERANKER_TOP_N} chunk indices"
+            f"Return ONLY a JSON array of the top {top_n} chunk indices"
             " ordered from most to least relevant. Example: [2, 0, 4]",
             "Do not include any other text.",
         ]
@@ -65,11 +68,11 @@ async def rerank_chunks(
     if not chunks:
         return chunks
     n = top_n if top_n is not None else RERANKER_TOP_N
-    # Nothing to rerank if already at or below target size.
+    # Skip the LLM call for trivially small inputs — nothing to reorder.
     if len(chunks) <= 1:
         return chunks[:n]
 
-    prompt = _build_rerank_prompt(query, chunks)
+    prompt = _build_rerank_prompt(query, chunks, n)
     try:
         client = _get_async_client()
         response = await client.chat.completions.create(
@@ -91,6 +94,8 @@ async def rerank_chunks(
         remainder = [i for i in range(len(chunks)) if i not in seen]
         ordered_indices = valid + remainder
         return [chunks[i] for i in ordered_indices[:n]]
+    except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
+        raise
     except Exception as exc:
         logger.warning("rerank_chunks failed (falling back to RRF order): %s", exc, exc_info=True)
         return chunks[:n]

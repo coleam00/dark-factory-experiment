@@ -65,6 +65,7 @@ rag-youtube-chat/
 │   │   │   ├── catalog.py      # In-process video catalog cache; builds cache_control block for system prompt
 │   │   │   ├── chunker.py      # Docling HybridChunker wrapper
 │   │   │   ├── embeddings.py  # embed_text / embed_batch via OpenRouter
+│   │   │   ├── reranker.py     # Post-retrieval listwise LLM reranker; re-scores hybrid candidates via a single cheap LLM call; falls back to RRF order on error
 │   │   │   ├── retriever.py    # NumPy cosine similarity top-k (legacy)
 │   │   │   └── retriever_hybrid.py  # RRF hybrid (tsvector + pgvector, replaces retriever.py for message retrieval)
 │   │   ├── routes/
@@ -283,6 +284,10 @@ All env var reads happen in `app/backend/config.py`. Add new variables there and
 | `CORS_ORIGINS` | No (dev default) | Comma-separated list of allowed CORS origins. Defaults to `http://localhost:{FRONTEND_PORT},http://127.0.0.1:{FRONTEND_PORT}`. Used in `app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS)` in `main.py`. |
 | `CATALOG_ENABLED` | No (default: `false`) | Injects a video-catalog block into the system prompt to enable Anthropic prompt caching. Accepted values: `1`, `true`, `yes`, `on`. Adds input tokens on every request (even cache hits). |
 | `CATALOG_TIER` | No (default: `standard`) | Cache tier: `standard` = ~5-min ephemeral; `extended` = 1-hour TTL (3600 s). Ignored when `CATALOG_ENABLED` is false. |
+| `RERANKER_ENABLED` | No (default: `true`) | Enables post-retrieval LLM reranker on hybrid search results. Default on. Set to `false` to skip reranking and save ~200-400ms per query. |
+| `RERANKER_MODEL` | No (default: `anthropic/claude-haiku-4-5`) | OpenRouter model ID used for reranking. Must be a chat model; haiku-4-5 balances quality and cost. |
+| `RERANKER_TOP_N` | No (default: `5`) | Number of top-ranked chunks the reranker returns to the chat model. Callers typically pass `top_n` explicitly; this default applies only to direct calls without `top_n`. |
+| `RERANKER_FETCH_FACTOR` | No (default: `4`) | Over-fetch multiplier applied to `top_k` when reranker is enabled, giving it a larger candidate pool before trimming. |
 
 Everything else is currently hardcoded in `config.py` (model names, ports, chunk size, top-k). When adding configurability, add the constant to `config.py` with a sensible default:
 

@@ -376,7 +376,8 @@ async def execute_search_hybrid(
     embedding_cache: dict[str, list[float]] | None = None,
 ) -> dict[str, Any]:
     """Hybrid (keyword + semantic via RRF) search."""
-    from backend.config import RETRIEVAL_MAX_PER_VIDEO
+    from backend.config import RERANKER_ENABLED, RERANKER_FETCH_FACTOR, RETRIEVAL_MAX_PER_VIDEO
+    from backend.rag.reranker import rerank_chunks
     from backend.rag.retriever_hybrid import retrieve_hybrid
 
     args = _parse_args(raw_arguments)
@@ -388,9 +389,6 @@ async def execute_search_hybrid(
     top_k = _clamp_top_k(args.get("top_k"))
 
     try:
-        from backend.config import RERANKER_ENABLED, RERANKER_FETCH_FACTOR
-        from backend.rag.reranker import rerank_chunks
-
         embedding = await _embed_query(query, embedding_cache)
         # Over-fetch when reranker is on so it has a larger candidate pool.
         retrieval_k = top_k * RERANKER_FETCH_FACTOR if RERANKER_ENABLED else top_k
