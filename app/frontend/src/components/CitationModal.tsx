@@ -15,21 +15,21 @@ export function formatTimestamp(seconds: number): string {
 
 export function CitationModal({ citation, onClose }: CitationModalProps) {
   // Extract YouTube video ID from URL (format: https://www.youtube.com/watch?v=<id>)
-  const videoId = (() => {
-    try {
-      return new URL(citation.video_url).searchParams.get('v') ?? '';
-    } catch {
-      console.warn('[CitationModal] Could not parse video URL:', citation.video_url);
-      return '';
-    }
-  })();
+  let videoId = '';
+  try {
+    videoId = new URL(citation.video_url).searchParams.get('v') ?? '';
+  } catch {
+    console.warn('[CitationModal] Could not parse video URL:', citation.video_url);
+  }
+
+  const startSeconds = Math.floor(citation.start_seconds);
 
   const embedUrl = videoId
-    ? `https://www.youtube.com/embed/${videoId}?start=${Math.floor(citation.start_seconds)}&autoplay=1`
+    ? `https://www.youtube.com/embed/${videoId}?start=${startSeconds}&autoplay=1`
     : '';
 
   const externalUrl = videoId
-    ? `https://www.youtube.com/watch?v=${videoId}&t=${Math.floor(citation.start_seconds)}s`
+    ? `https://www.youtube.com/watch?v=${videoId}&t=${startSeconds}s`
     : '';
 
   // Close on ESC key

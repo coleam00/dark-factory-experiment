@@ -14,10 +14,6 @@ const mockCitation: Citation = {
 };
 
 describe('CitationModal', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
   it('renders the modal with citation data', () => {
     const onClose = vi.fn();
     render(<CitationModal citation={mockCitation} onClose={onClose} />);
@@ -71,9 +67,8 @@ describe('CitationModal', () => {
 
     // Click on the backdrop (outer div with fixed inset-0)
     const backdrop = document.querySelector('.fixed.inset-0.bg-black\\/60');
-    if (backdrop) {
-      fireEvent.click(backdrop);
-    }
+    expect(backdrop).toBeTruthy();
+    fireEvent.click(backdrop as Element);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
