@@ -1,9 +1,11 @@
+import type React from 'react';
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { type Video, getVideos, ingestVideo } from '../lib/api';
 
 // ── Highlight matched substring in a video title ─────────────────
-function highlightMatch(title: string, query: string) {
+function highlightMatch(title: string, query: string): string | React.ReactElement {
+  if (!title) return title;
   const q = query.trim();
   if (!q) return title;
   const idx = title.toLowerCase().indexOf(q.toLowerCase());
@@ -11,7 +13,14 @@ function highlightMatch(title: string, query: string) {
   return (
     <>
       {title.slice(0, idx)}
-      <mark style={{ background: 'rgba(59,130,246,0.35)', color: 'inherit' }}>
+      <mark
+        style={{
+          background: 'rgba(59,130,246,0.35)',
+          color: 'inherit',
+          padding: 0,
+          borderRadius: 2,
+        }}
+      >
         {title.slice(idx, idx + q.length)}
       </mark>
       {title.slice(idx + q.length)}
@@ -178,6 +187,14 @@ export function VideoExplorer({ isOpen, onClose }: VideoExplorerProps) {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
+  // Reset search state when panel closes
+  useEffect(() => {
+    if (!isOpen) {
+      setSearchQuery('');
+      setDebouncedQuery('');
+    }
+  }, [isOpen]);
+
   // Close on Escape key
   useEffect(() => {
     if (!isOpen) return;
@@ -189,7 +206,9 @@ export function VideoExplorer({ isOpen, onClose }: VideoExplorerProps) {
   }, [isOpen, onClose]);
 
   const filteredVideos = debouncedQuery.trim()
-    ? videos.filter((v) => v.title.toLowerCase().includes(debouncedQuery.trim().toLowerCase()))
+    ? videos.filter((v) =>
+        (v.title ?? '').toLowerCase().includes(debouncedQuery.trim().toLowerCase()),
+      )
     : videos;
 
   return (

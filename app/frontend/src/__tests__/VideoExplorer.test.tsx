@@ -402,4 +402,107 @@ describe('VideoExplorer', () => {
       expect(screen.getByText('A'.repeat(117) + '…')).toBeInTheDocument();
     });
   });
+
+  describe('search / filter', () => {
+    it('renders search input when videos are present', async () => {
+      vi.spyOn(api, 'getVideos').mockResolvedValueOnce([
+        {
+          id: '1',
+          title: 'React Hooks Deep Dive',
+          description: '',
+          url: 'https://yt.be/1',
+          created_at: '',
+        },
+      ]);
+      render(<VideoExplorer isOpen={true} onClose={vi.fn()} />);
+      await waitFor(() => expect(screen.getByLabelText('Search videos')).toBeInTheDocument());
+    });
+
+    it('does not render search input when library is empty', async () => {
+      vi.spyOn(api, 'getVideos').mockResolvedValueOnce([]);
+      render(<VideoExplorer isOpen={true} onClose={vi.fn()} />);
+      await waitFor(() =>
+        expect(screen.getByText('No videos in the knowledge base yet.')).toBeInTheDocument(),
+      );
+      expect(screen.queryByLabelText('Search videos')).not.toBeInTheDocument();
+    });
+
+    it('filters video list by title after debounce', async () => {
+      vi.spyOn(api, 'getVideos').mockResolvedValueOnce([
+        { id: '1', title: 'React Hooks Deep Dive', description: '', url: '', created_at: '' },
+        { id: '2', title: 'TypeScript Tips', description: '', url: '', created_at: '' },
+      ]);
+      render(<VideoExplorer isOpen={true} onClose={vi.fn()} />);
+      await waitFor(() => expect(screen.getByText('React Hooks Deep Dive')).toBeInTheDocument());
+
+      fireEvent.change(screen.getByLabelText('Search videos'), { target: { value: 'typescript' } });
+      // Wait for the debounce (250ms) to fire — React Hooks should be gone
+      await waitFor(
+        () => expect(screen.queryByText('React Hooks Deep Dive')).not.toBeInTheDocument(),
+        { timeout: 1000 },
+      );
+      // TypeScript Tips is still shown (title text is split by <mark> highlight)
+      expect(screen.getByText('TypeScript')).toBeInTheDocument();
+    });
+
+    it('restores all videos when search is cleared', async () => {
+      vi.spyOn(api, 'getVideos').mockResolvedValueOnce([
+        { id: '1', title: 'React Hooks Deep Dive', description: '', url: '', created_at: '' },
+        { id: '2', title: 'TypeScript Tips', description: '', url: '', created_at: '' },
+      ]);
+      render(<VideoExplorer isOpen={true} onClose={vi.fn()} />);
+      await waitFor(() => expect(screen.getByText('React Hooks Deep Dive')).toBeInTheDocument());
+
+      const input = screen.getByLabelText('Search videos');
+      fireEvent.change(input, { target: { value: 'typescript' } });
+      await waitFor(
+        () => expect(screen.queryByText('React Hooks Deep Dive')).not.toBeInTheDocument(),
+        { timeout: 1000 },
+      );
+
+      fireEvent.change(input, { target: { value: '' } });
+      await waitFor(() => expect(screen.getByText('React Hooks Deep Dive')).toBeInTheDocument(), {
+        timeout: 1000,
+      });
+    });
+
+    it('shows "no match" empty state and echoes the query', async () => {
+      vi.spyOn(api, 'getVideos').mockResolvedValueOnce([
+        { id: '1', title: 'React Hooks Deep Dive', description: '', url: '', created_at: '' },
+      ]);
+      render(<VideoExplorer isOpen={true} onClose={vi.fn()} />);
+      await waitFor(() => expect(screen.getByText('React Hooks Deep Dive')).toBeInTheDocument());
+
+      fireEvent.change(screen.getByLabelText('Search videos'), { target: { value: 'Python' } });
+      await waitFor(() => expect(screen.getByText(/No videos match/)).toBeInTheDocument(), {
+        timeout: 1000,
+      });
+      expect(screen.queryByText('React Hooks Deep Dive')).not.toBeInTheDocument();
+    });
+
+    it('resets search state when panel closes and reopens', async () => {
+      vi.spyOn(api, 'getVideos').mockResolvedValue([
+        { id: '1', title: 'React Hooks Deep Dive', description: '', url: '', created_at: '' },
+      ]);
+      const { rerender } = render(<VideoExplorer isOpen={true} onClose={vi.fn()} />);
+      await waitFor(() => expect(screen.getByText('React Hooks Deep Dive')).toBeInTheDocument());
+
+      // Type a search query and wait for debounce
+      fireEvent.change(screen.getByLabelText('Search videos'), { target: { value: 'Python' } });
+      await waitFor(() => expect(screen.getByText(/No videos match/)).toBeInTheDocument(), {
+        timeout: 1000,
+      });
+
+      // Close the panel
+      rerender(<VideoExplorer isOpen={false} onClose={vi.fn()} />);
+
+      // Reopen the panel
+      rerender(<VideoExplorer isOpen={true} onClose={vi.fn()} />);
+      await waitFor(() => expect(screen.getByLabelText('Search videos')).toBeInTheDocument());
+
+      // Search input should be cleared
+      expect((screen.getByLabelText('Search videos') as HTMLInputElement).value).toBe('');
+      expect(screen.queryByText(/No videos match/)).not.toBeInTheDocument();
+    });
+  });
 });
