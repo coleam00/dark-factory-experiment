@@ -13,14 +13,7 @@ function highlightMatch(title: string, query: string): string | React.ReactEleme
   return (
     <>
       {title.slice(0, idx)}
-      <mark
-        style={{
-          background: 'rgba(59,130,246,0.35)',
-          color: 'inherit',
-          padding: 0,
-          borderRadius: 2,
-        }}
-      >
+      <mark className="bg-blue-500/35 text-inherit p-0 rounded-sm">
         {title.slice(idx, idx + q.length)}
       </mark>
       {title.slice(idx + q.length)}
@@ -205,10 +198,9 @@ export function VideoExplorer({ isOpen, onClose }: VideoExplorerProps) {
     return () => document.removeEventListener('keydown', handler);
   }, [isOpen, onClose]);
 
-  const filteredVideos = debouncedQuery.trim()
-    ? videos.filter((v) =>
-        (v.title ?? '').toLowerCase().includes(debouncedQuery.trim().toLowerCase()),
-      )
+  const q = debouncedQuery.trim().toLowerCase();
+  const filteredVideos = q
+    ? videos.filter((v) => (v.title ?? '').toLowerCase().includes(q))
     : videos;
 
   return (
