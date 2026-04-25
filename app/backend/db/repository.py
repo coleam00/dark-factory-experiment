@@ -237,7 +237,12 @@ async def count_chunks() -> int:
 # ---------------------------------------------------------------------------
 
 
-async def keyword_search(query: str, top_k: int, language: str = "english") -> list[dict]:
+async def keyword_search(
+    query: str,
+    top_k: int,
+    language: str = "english",
+    allowed_source_types: list[str] | None = None,
+) -> list[dict]:
     """
     Return top-K chunks matching a full-text query using tsvector.
 
@@ -245,11 +250,17 @@ async def keyword_search(query: str, top_k: int, language: str = "english") -> l
         query: Raw user query string (plainto_tsquery handles escaping)
         top_k: Maximum results to return
         language: tsvector language config (default 'english')
+        allowed_source_types: ACL filter — chunks whose source_type is not in
+            this list are excluded. Defaults to ['youtube'] which is the
+            backwards-compatible behavior for callers that don't yet know
+            about Dynamous content (issue #147).
 
     Returns:
         List of chunk dicts with keys: id, video_id, content, chunk_index,
         start_seconds, end_seconds, snippet, rank (ts_rank score)
     """
+    if allowed_source_types is None:
+        allowed_source_types = ["youtube"]
     async with _acquire() as conn:
         rows = await conn.fetch(
             """
@@ -257,16 +268,22 @@ async def keyword_search(query: str, top_k: int, language: str = "english") -> l
                    ts_rank(search_vector, plainto_tsquery($1)) AS rank
             FROM chunks
             WHERE search_vector @@ plainto_tsquery($1)
+              AND source_type = ANY($3::text[])
             ORDER BY rank DESC
             LIMIT $2
             """,
             query,
             top_k,
+            allowed_source_types,
         )
     return [dict(r) for r in rows]
 
 
-async def vector_search_pg(query_embedding: list[float], top_k: int) -> list[dict]:
+async def vector_search_pg(
+    query_embedding: list[float],
+    top_k: int,
+    allowed_source_types: list[str] | None = None,
+) -> list[dict]:
     """
     Return top-K chunks by pgvector cosine similarity.
 
@@ -278,11 +295,18 @@ async def vector_search_pg(query_embedding: list[float], top_k: int) -> list[dic
     Args:
         query_embedding: List of 1536 floats (text-embedding-3-small dimensions)
         top_k: Maximum results to return
+        allowed_source_types: ACL filter — chunks whose source_type is not in
+            this list are excluded. Defaults to ['youtube'] for backwards
+            compatibility (issue #147). The pool's `hnsw.iterative_scan =
+            relaxed_order` setting (see db/postgres.py) keeps the HNSW index
+            usable under this filter.
 
     Returns:
         List of chunk dicts with keys: id, video_id, content, chunk_index,
         start_seconds, end_seconds, snippet, distance (cosine distance)
     """
+    if allowed_source_types is None:
+        allowed_source_types = ["youtube"]
     embedding_json = json.dumps(query_embedding)
     async with _acquire() as conn:
         rows = await conn.fetch(
@@ -290,11 +314,13 @@ async def vector_search_pg(query_embedding: list[float], top_k: int) -> list[dic
             SELECT id, video_id, content, chunk_index, start_seconds, end_seconds, snippet,
                    embedding::vector <=> $1::vector AS distance
             FROM chunks
+            WHERE source_type = ANY($3::text[])
             ORDER BY distance
             LIMIT $2
             """,
             embedding_json,
             top_k,
+            allowed_source_types,
         )
     return [dict(r) for r in rows]
 

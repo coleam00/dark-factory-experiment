@@ -1,0 +1,26 @@
+# Standalone deps for the one-shot Phase 3 transcription runner.
+# Independent of app/backend/ — the runner is operator-side, not deployed.
+#
+# Install + run:
+#   cd scripts && uv sync
+#   uv run python transcribe_all.py --help
+
+[project]
+name = "dynachat-scripts"
+version = "0.1.0"
+description = "One-shot operator scripts for issue #147 (Dynamous content)"
+requires-python = ">=3.11"
+dependencies = [
+    "openai>=1.50",
+    "google-api-python-client>=2.140",
+    "google-auth>=2.30",
+    "google-auth-oauthlib>=1.2",
+    "python-dotenv>=1.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]

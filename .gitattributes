@@ -1,0 +1,6 @@
+# Force LF on shell scripts and Dockerfile so they work on Linux when this
+# repo is checked out on Windows. Without this rule, Windows' default CRLF
+# would break `bash` on the VPS.
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.dockerfile text eol=lf

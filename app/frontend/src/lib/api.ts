@@ -56,6 +56,19 @@ export interface Citation {
    * with messages persisted before the two-tier system shipped.
    */
   is_cited?: boolean;
+  /**
+   * Discriminator for the citation rendering split. 'youtube' (default)
+   * gets the embedded player + ?t= deep link. 'dynamous' (paid course /
+   * workshop content) gets a static link to `lesson_url` because Circle
+   * doesn't support timestamp deep links. Optional for backward
+   * compatibility with messages persisted before issue #147.
+   */
+  source_type?: 'youtube' | 'dynamous' | string;
+  /**
+   * Circle lesson/workshop URL — populated for `source_type === 'dynamous'`,
+   * empty for YouTube citations.
+   */
+  lesson_url?: string;
 }
 
 export interface Message {

@@ -39,6 +39,7 @@ async def retrieve_hybrid(
     query_text: str,
     query_embedding: list[float],
     top_k: int = 5,
+    is_member: bool = False,
 ) -> list[dict]:
     """
     Hybrid retrieval via Reciprocal Rank Fusion (RRF).
@@ -47,6 +48,10 @@ async def retrieve_hybrid(
         query_text: Original user query string (used for keyword search)
         query_embedding: Query embedding from embed_text() (used for vector search)
         top_k: Maximum number of results to return (default 5)
+        is_member: If True, paid Dynamous course/workshop content (`source_type
+            = 'dynamous'`) is included alongside the default YouTube content.
+            Non-members see YouTube chunks only. The filter is applied at the
+            SQL layer — non-member retrieval never touches Dynamous chunks.
 
     Returns:
         A list of dicts (length <= top_k), each containing:
@@ -72,12 +77,23 @@ async def retrieve_hybrid(
             "Use the VPS snapshot database via SSH tunnel for local dev."
         )
 
+    allowed_source_types = ["youtube", "dynamous"] if is_member else ["youtube"]
+
     # Over-fetch factor — each method returns 2*top_k before merging
     fetch_k = top_k * HYBRID_OVERFETCH_FACTOR
 
     # Run keyword and vector searches concurrently
-    keyword_task = repository.keyword_search(query_text, top_k=fetch_k, language=KEYWORD_LANGUAGE)
-    vector_task = repository.vector_search_pg(query_embedding, top_k=fetch_k)
+    keyword_task = repository.keyword_search(
+        query_text,
+        top_k=fetch_k,
+        language=KEYWORD_LANGUAGE,
+        allowed_source_types=allowed_source_types,
+    )
+    vector_task = repository.vector_search_pg(
+        query_embedding,
+        top_k=fetch_k,
+        allowed_source_types=allowed_source_types,
+    )
 
     keyword_hits, vector_hits = await keyword_task, await vector_task
 
@@ -94,7 +110,9 @@ async def retrieve_hybrid(
     # RRF merge
     merged = _rrf_merge(keyword_hits, vector_hits, k=HYBRID_K_CONSTANT, top_k=top_k)
 
-    # Hydrate with video metadata (title, url) via cached lookups
+    # Hydrate with video metadata (title, url, source_type, lesson_url) via
+    # cached lookups. source_type + lesson_url drive the frontend citation
+    # rendering split — YouTube uses url+timestamp, Dynamous uses lesson_url.
     results: list[dict] = []
     for chunk in merged:
         video_id = chunk["video_id"]
@@ -102,8 +120,10 @@ async def retrieve_hybrid(
             video = await repository.get_video(video_id)
             if video:
                 _video_cache[video_id] = {
-                    "title": video["title"],
-                    "url": video["url"],
+                    "title": video.get("title", ""),
+                    "url": video.get("url", "") or "",
+                    "source_type": video.get("source_type", "youtube") or "youtube",
+                    "lesson_url": video.get("lesson_url", "") or "",
                 }
             else:
                 logger.warning(
@@ -111,7 +131,12 @@ async def retrieve_hybrid(
                     video_id,
                     chunk.get("id", "?"),
                 )
-                _video_cache[video_id] = {"title": "Unknown Video", "url": ""}
+                _video_cache[video_id] = {
+                    "title": "Unknown Video",
+                    "url": "",
+                    "source_type": "youtube",
+                    "lesson_url": "",
+                }
 
         video_meta = _video_cache[video_id]
         results.append(
@@ -121,6 +146,8 @@ async def retrieve_hybrid(
                 "video_id": video_id,
                 "video_title": video_meta["title"],
                 "video_url": video_meta["url"],
+                "source_type": video_meta["source_type"],
+                "lesson_url": video_meta["lesson_url"],
                 "start_seconds": chunk.get("start_seconds", 0.0),
                 "end_seconds": chunk.get("end_seconds", 0.0),
                 "snippet": chunk.get("snippet", ""),

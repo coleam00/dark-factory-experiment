@@ -14,12 +14,19 @@ export function formatTimestamp(seconds: number): string {
 }
 
 export function CitationModal({ citation, onClose }: CitationModalProps) {
+  // Issue #147: paid Dynamous course / workshop citations render without an
+  // embedded player. Circle doesn't support timestamp deep-links, so we link
+  // straight to the lesson URL with the (MM:SS) shown as text in the header.
+  const isDynamous = citation.source_type === 'dynamous';
+
   // Extract YouTube video ID from URL (format: https://www.youtube.com/watch?v=<id>)
   let videoId = '';
-  try {
-    videoId = new URL(citation.video_url).searchParams.get('v') ?? '';
-  } catch {
-    console.warn('[CitationModal] Could not parse video URL:', citation.video_url);
+  if (!isDynamous) {
+    try {
+      videoId = new URL(citation.video_url).searchParams.get('v') ?? '';
+    } catch {
+      console.warn('[CitationModal] Could not parse video URL:', citation.video_url);
+    }
   }
 
   const startSeconds = Math.floor(citation.start_seconds);
@@ -28,9 +35,13 @@ export function CitationModal({ citation, onClose }: CitationModalProps) {
     ? `https://www.youtube.com/embed/${videoId}?start=${startSeconds}&autoplay=1`
     : '';
 
-  const externalUrl = videoId
+  const externalUrl = isDynamous
+    ? citation.lesson_url ?? ''
+    : videoId
     ? `https://www.youtube.com/watch?v=${videoId}&t=${startSeconds}s`
     : '';
+
+  const externalLabel = isDynamous ? 'Open on Dynamous' : 'Open on YouTube';
 
   // Close on ESC key
   useEffect(() => {
@@ -85,24 +96,27 @@ export function CitationModal({ citation, onClose }: CitationModalProps) {
           </button>
         </div>
 
-        {/* Content: YouTube iframe (top) + transcript (bottom) */}
+        {/* Content: YouTube iframe (top) + transcript (bottom).
+            Dynamous citations skip the iframe — Circle has no embed/deep-link
+            support, so the snippet + external link is all we render. */}
         <div className="flex-1 min-h-0 flex flex-col gap-4 mb-4 overflow-y-auto">
-          {/* YouTube iframe — 16:9 aspect ratio container */}
-          <div className="w-full aspect-video">
-            {embedUrl ? (
-              <iframe
-                src={embedUrl}
-                allow="autoplay; encrypted-media"
-                allowFullScreen
-                title="YouTube video player"
-                className="w-full h-full rounded-lg"
-              />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center bg-slate-900 rounded-lg text-slate-500 text-sm">
-                Video unavailable
-              </div>
-            )}
-          </div>
+          {!isDynamous && (
+            <div className="w-full aspect-video">
+              {embedUrl ? (
+                <iframe
+                  src={embedUrl}
+                  allow="autoplay; encrypted-media"
+                  allowFullScreen
+                  title="YouTube video player"
+                  className="w-full h-full rounded-lg"
+                />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center bg-slate-900 rounded-lg text-slate-500 text-sm">
+                  Video unavailable
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Transcript snippet */}
           <div>
@@ -115,26 +129,28 @@ export function CitationModal({ citation, onClose }: CitationModalProps) {
 
         {/* Footer: external link */}
         <div className="flex justify-end">
-          <a
-            href={externalUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-slate-400 hover:text-slate-200 text-xs flex items-center gap-1 transition-colors"
-          >
-            Open on YouTube
-            <svg
-              width="10"
-              height="10"
-              viewBox="0 0 10 10"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
+          {externalUrl ? (
+            <a
+              href={externalUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-slate-400 hover:text-slate-200 text-xs flex items-center gap-1 transition-colors"
             >
-              <path d="M1 9L9 1M9 1H3M9 1v6" />
-            </svg>
-          </a>
+              {externalLabel}
+              <svg
+                width="10"
+                height="10"
+                viewBox="0 0 10 10"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M1 9L9 1M9 1H3M9 1v6" />
+              </svg>
+            </a>
+          ) : null}
         </div>
       </div>
     </div>
