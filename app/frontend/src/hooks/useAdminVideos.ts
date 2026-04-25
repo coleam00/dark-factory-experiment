@@ -3,7 +3,7 @@ import { type AdminVideo, listAdminVideos, searchAdminVideos } from '../lib/api'
 
 export function useAdminVideos(searchQuery?: string, enabled = true) {
   const [videos, setVideos] = useState<AdminVideo[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Per-fetch ID so a stale response can't overwrite fresher results
   // when the user types faster than the network replies.
