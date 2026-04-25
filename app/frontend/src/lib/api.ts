@@ -49,6 +49,13 @@ export interface Citation {
   start_seconds: number;
   end_seconds: number;
   snippet: string;
+  /**
+   * True when the LLM emitted a `[c:<chunk_id>]` marker referencing this
+   * chunk in its final answer. Drives the two-tier "Sources cited" /
+   * "All sources consulted" render. Optional for backward compatibility
+   * with messages persisted before the two-tier system shipped.
+   */
+  is_cited?: boolean;
 }
 
 export interface Message {

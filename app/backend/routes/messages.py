@@ -31,6 +31,10 @@ from backend.auth.dependencies import get_current_user
 from backend.config import LLM_TOOLS_ENABLED, LLM_TOOLS_MAX_PER_TURN
 from backend.db import repository
 from backend.llm.openrouter import stream_chat
+from backend.rag.citations import (
+    CitationMarkerStripper,
+    extract_cited_chunk_ids,
+)
 from backend.rag.tools import TOOL_SCHEMAS, execute_tool, serialize_tool_result
 
 logger = logging.getLogger(__name__)
@@ -161,6 +165,9 @@ async def create_message(
     async def event_generator() -> AsyncGenerator[str, None]:
         full_response: list[str] = []
         final_text_buf: list[str] = []
+        # Two-tier citations (issue #176): strip `[c:<id>]` markers from the
+        # stream; use them at [DONE] to flag is_cited on retrieved chunks.
+        marker_stripper = CitationMarkerStripper()
         try:
             async for sse_chunk in stream_chat(
                 llm_messages,
@@ -169,12 +176,14 @@ async def create_message(
                 max_tool_calls=max_tool_calls,
                 final_text_out=final_text_buf,
             ):
-                # Intercept [DONE] to inject the sources event first.
                 if sse_chunk == "data: [DONE]\n\n":
-                    # Merge tool-loaded chunks into source_citations (deduped).
-                    # Expansion now runs inside each rag/tools.py executor
-                    # (after per-video cap), so chunks here are already
-                    # expanded where enabled — no extra call needed.
+                    # Flush any text held back as a partial marker.
+                    tail = marker_stripper.flush()
+                    if tail:
+                        tail_chunk = f"data: {json.dumps(tail)}\n\n"
+                        full_response.append(tail_chunk)
+                        yield tail_chunk
+                    # Dedup tool-loaded chunks into source_citations (existing).
                     if tool_chunks_acc:
                         seen: set[str] = set()
                         for tc in tool_chunks_acc:
@@ -182,11 +191,15 @@ async def create_message(
                             if tc_id and tc_id not in seen:
                                 source_citations.append(tc)
                                 seen.add(tc_id)
-                    # Only emit sources if we have any AND the model didn't refuse.
-                    # Suppressing on refusal prevents misleading "Sources (N)" chips
-                    # when the LLM correctly declined to use retrieved chunks.
-                    # Use only the final-round text so inter-round commentary
-                    # doesn't trigger false refusal matches.
+                    # Mark is_cited from markers in the raw final-round text.
+                    # Marker IDs that don't match any retrieved chunk are
+                    # silently dropped (hallucinations).
+                    if source_citations:
+                        final_text_raw = final_text_buf[0] if final_text_buf else ""
+                        cited_ids = extract_cited_chunk_ids(final_text_raw)
+                        for chunk in source_citations:
+                            chunk["is_cited"] = chunk.get("chunk_id") in cited_ids
+                    # Suppress sources on refusal (existing behaviour).
                     if source_citations:
                         final_text = (
                             final_text_buf[0]
@@ -196,8 +209,16 @@ async def create_message(
                         if not _is_refusal(final_text):
                             sources_json = json.dumps(source_citations)
                             yield f"event: sources\ndata: {sources_json}\n\n"
-                full_response.append(sse_chunk)
-                yield sse_chunk
+                    full_response.append(sse_chunk)
+                    yield sse_chunk
+                    continue
+
+                stripped = _strip_markers_from_sse_chunk(sse_chunk, marker_stripper)
+                if stripped is None:
+                    # Whole token held back as a partial marker.
+                    continue
+                full_response.append(stripped)
+                yield stripped
         finally:
             # 7. Persist the complete assistant message.
             #
@@ -269,6 +290,30 @@ async def create_message(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _strip_markers_from_sse_chunk(
+    sse_chunk: str, stripper: CitationMarkerStripper
+) -> str | None:
+    """Run an SSE token chunk through ``stripper``; return a rewritten chunk
+    or ``None`` if the entire token content was held back. Non-token chunks
+    (events, heartbeats, error payloads) pass through unchanged.
+    """
+    if not sse_chunk.startswith("data: "):
+        return sse_chunk
+    payload = sse_chunk[len("data: ") :].rstrip("\n")
+    if not payload or payload == "[DONE]" or payload.startswith('{"error"'):
+        return sse_chunk
+    try:
+        decoded = json.loads(payload)
+    except ValueError:
+        decoded = payload
+    if not isinstance(decoded, str):
+        return sse_chunk
+    safe = stripper.feed(decoded)
+    if not safe:
+        return None
+    return f"data: {json.dumps(safe)}\n\n"
 
 
 def _extract_text_from_sse(sse_chunks: list[str]) -> str:

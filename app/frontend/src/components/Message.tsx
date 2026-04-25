@@ -34,6 +34,46 @@ function formatTimestamp(seconds: number): string {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
+// Citation chip; ``dimmed`` styles non-cited entries inside the consulted tier.
+function CitationChip({
+  citation,
+  onClick,
+  dimmed,
+}: {
+  citation: Citation;
+  onClick?: (citation: Citation) => void;
+  dimmed?: boolean;
+}) {
+  return (
+    <button
+      key={citation.chunk_id}
+      onClick={() => onClick?.(citation)}
+      title={`${citation.video_title} at ${formatTimestamp(citation.start_seconds)}\n${citation.snippet}`}
+      style={{
+        display: 'inline-block',
+        padding: '3px 10px',
+        border: dimmed ? '1px solid rgba(148,163,184,0.4)' : '1px solid #3b82f6',
+        borderRadius: 20,
+        fontSize: 12,
+        color: dimmed ? '#94a3b8' : '#f1f5f9',
+        background: dimmed ? 'rgba(148,163,184,0.06)' : 'rgba(59,130,246,0.1)',
+        maxWidth: 220,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+        cursor: 'pointer',
+        fontFamily: 'inherit',
+      }}
+    >
+      {formatTimestamp(citation.start_seconds)} — {citation.video_title}
+    </button>
+  );
+}
+
+// Two-tier source render (issue #176): chunks the LLM cited via `[c:<id>]`
+// markers in Tier 1; full retrieval (collapsed) in Tier 2. Falls back to a
+// single flat list when no `is_cited` flags are present (legacy messages or
+// when the model forgot to emit markers).
 function SourceCitations({
   sources,
   onCitationClick,
@@ -41,77 +81,92 @@ function SourceCitations({
   sources: Citation[];
   onCitationClick?: (citation: Citation) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [showConsulted, setShowConsulted] = useState(false);
 
   if (!sources || sources.length === 0) return null;
 
+  const hasIsCitedField = sources.some((s) => typeof s.is_cited === 'boolean');
+  const cited = sources.filter((s) => s.is_cited === true);
+  const consulted = sources.filter((s) => s.is_cited !== true);
+  const showTwoTier = hasIsCitedField && cited.length > 0;
+
   return (
     <div style={{ marginTop: 10, borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 8 }}>
-      {/* Toggle button */}
-      <button
-        onClick={() => setExpanded((v) => !v)}
-        style={{
-          background: 'transparent',
-          border: 'none',
-          cursor: 'pointer',
-          color: '#94a3b8',
-          fontSize: 12,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 5,
-          padding: 0,
-          transition: 'color 0.15s',
-        }}
-        onMouseEnter={(e) => (e.currentTarget.style.color = '#f1f5f9')}
-        onMouseLeave={(e) => (e.currentTarget.style.color = '#94a3b8')}
-        aria-expanded={expanded}
-        aria-label={expanded ? 'Collapse sources' : 'Expand sources'}
-      >
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 12 12"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.8"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          style={{
-            transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
-            transition: 'transform 0.2s',
-          }}
-        >
-          <polyline points="4,2 8,6 4,10" />
-        </svg>
-        Sources ({sources.length})
-      </button>
+      {/* Tier 1: Sources cited (visible by default when present) */}
+      {showTwoTier && (
+        <>
+          <div
+            style={{
+              color: '#94a3b8',
+              fontSize: 12,
+              marginBottom: 6,
+              fontWeight: 500,
+            }}
+          >
+            Sources cited ({cited.length})
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+            {cited.map((citation) => (
+              <CitationChip key={citation.chunk_id} citation={citation} onClick={onCitationClick} />
+            ))}
+          </div>
+        </>
+      )}
 
-      {/* Citation chips */}
-      {expanded && (
+      {/* Tier 2: All sources consulted (collapsed by default).
+          When two-tier active and there's nothing extra beyond cited, skip
+          the toggle entirely — Tier 1 already covers it. */}
+      {(!showTwoTier || consulted.length > 0) && (
+        <button
+          onClick={() => setShowConsulted((v) => !v)}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            cursor: 'pointer',
+            color: '#94a3b8',
+            fontSize: 12,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+            padding: 0,
+            transition: 'color 0.15s',
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.color = '#f1f5f9')}
+          onMouseLeave={(e) => (e.currentTarget.style.color = '#94a3b8')}
+          aria-expanded={showConsulted}
+          aria-label={showConsulted ? 'Collapse sources' : 'Expand sources'}
+        >
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 12 12"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{
+              transform: showConsulted ? 'rotate(90deg)' : 'rotate(0deg)',
+              transition: 'transform 0.2s',
+            }}
+          >
+            <polyline points="4,2 8,6 4,10" />
+          </svg>
+          {showTwoTier
+            ? `All sources consulted (${sources.length})`
+            : `Sources (${sources.length})`}
+        </button>
+      )}
+
+      {showConsulted && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-          {sources.map((citation, i) => (
-            <button
-              key={`${citation.chunk_id}-${i}`}
-              onClick={() => onCitationClick?.(citation)}
-              title={`${citation.video_title} at ${formatTimestamp(citation.start_seconds)}\n${citation.snippet}`}
-              style={{
-                display: 'inline-block',
-                padding: '3px 10px',
-                border: '1px solid #3b82f6',
-                borderRadius: 20,
-                fontSize: 12,
-                color: '#f1f5f9',
-                background: 'rgba(59,130,246,0.1)',
-                maxWidth: 220,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-              }}
-            >
-              {formatTimestamp(citation.start_seconds)} — {citation.video_title}
-            </button>
+          {(showTwoTier ? consulted : sources).map((citation) => (
+            <CitationChip
+              key={citation.chunk_id}
+              citation={citation}
+              onClick={onCitationClick}
+              dimmed={showTwoTier}
+            />
           ))}
         </div>
       )}

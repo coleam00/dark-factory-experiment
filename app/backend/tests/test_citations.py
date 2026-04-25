@@ -1,0 +1,171 @@
+"""Tests for the two-tier citation marker module (issue #176)."""
+
+from __future__ import annotations
+
+import json
+from unittest.mock import patch
+from uuid import uuid4
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from backend.auth.tokens import encode_token
+from backend.main import app
+from backend.rag.citations import (
+    CitationMarkerStripper,
+    extract_cited_chunk_ids,
+    strip_citation_markers,
+)
+
+# Pure parsing -----------------------------------------------------------
+
+
+class TestParsing:
+    def test_extracts_dedupes_dashes_and_ignores_malformed(self) -> None:
+        text = "[c:abc] [c:550e8400-e29b-41d4] [c:abc] [c:] [c:open  see [docs](url)"
+        assert extract_cited_chunk_ids(text) == {"abc", "550e8400-e29b-41d4"}
+
+    def test_strip_removes_markers_preserves_other_brackets(self) -> None:
+        assert strip_citation_markers("see [docs](url) [c:a][c:b] end") == (
+            "see [docs](url)  end"
+        )
+
+
+# Stream-safe stripping --------------------------------------------------
+
+
+class TestStreamStripper:
+    def _run(self, tokens: list[str]) -> str:
+        s = CitationMarkerStripper()
+        return "".join(s.feed(t) for t in tokens) + s.flush()
+
+    @pytest.mark.parametrize(
+        ("tokens", "expected"),
+        [
+            (["A ", "B ", "C"], "A B C"),
+            (["Hi [c:abc] there."], "Hi  there."),
+            (["start [c:a", "bc] tail"], "start  tail"),
+            (["end [", "c:", "xyz", "]", " tail"], "end  tail"),
+            (["x [c:a][c:b] y"], "x  y"),
+        ],
+    )
+    def test_round_trip(self, tokens: list[str], expected: str) -> None:
+        assert self._run(tokens) == expected
+
+    def test_partial_at_eof_emits_as_plain(self) -> None:
+        # Stream ended mid-marker → user sees the literal text;
+        # extract_cited_chunk_ids() won't match it, so is_cited stays False.
+        assert self._run(["end [c:abc"]) == "end [c:abc"
+
+
+# Full SSE integration through the messages route -----------------------
+
+
+async def _post_message(
+    *, answer_tokens: list[str], retrieved_chunks: list[dict]
+) -> str:
+    """Post one chat message and return the SSE body. Mocks LLM + DB."""
+    test_user_id = str(uuid4())
+    test_conv_id = str(uuid4())
+    valid_token = encode_token(test_user_id)
+
+    async def mock_stream_chat(
+        messages,
+        tools=None,
+        tool_executor=None,
+        max_tool_calls=0,
+        final_text_out=None,
+    ):
+        if tool_executor is not None:
+            await tool_executor("search_videos", json.dumps({"query": "t"}))
+        for tok in answer_tokens:
+            yield f"data: {json.dumps(tok)}\n\n"
+        if final_text_out is not None:
+            final_text_out.append("".join(answer_tokens))
+        yield "data: [DONE]\n\n"
+
+    async def mock_execute_tool(name, raw_args, video_id_whitelist=None, embedding_cache=None):
+        return {"ok": True, "text": "ctx", "chunks": retrieved_chunks}
+
+    async def get_user(*a, **kw):
+        return {"id": test_user_id, "email": "t@e.com", "password_hash": "h", "created_at": "x"}
+
+    async def get_conv(*a, **kw):
+        return {"id": test_conv_id, "user_id": test_user_id, "title": "T", "created_at": "x"}
+
+    async def create_msg(**kw):
+        return {"id": str(uuid4()), **kw}
+
+    async def list_msgs(*a, **kw):
+        return []
+
+    async def list_vids(*a, **kw):
+        return [{"id": "v1", "title": "T", "url": "u"}]
+
+    with (
+        patch("backend.auth.dependencies.users_repo.get_user_by_id", get_user),
+        patch("backend.db.repository.get_conversation", get_conv),
+        patch("backend.db.repository.create_message", create_msg),
+        patch("backend.db.repository.list_messages", list_msgs),
+        patch("backend.db.repository.list_videos", list_vids),
+        patch("backend.routes.messages.stream_chat", mock_stream_chat),
+        patch("backend.routes.messages.execute_tool", mock_execute_tool),
+    ):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                f"/api/conversations/{test_conv_id}/messages",
+                json={"content": "test"},
+                headers={"Cookie": f"session={valid_token}"},
+            )
+    return resp.text
+
+
+def _parse_sources(body: str) -> list[dict]:
+    idx = body.index("event: sources")
+    return json.loads(body[idx:].split("\n", 2)[1][len("data: ") :])
+
+
+def _chunk(cid: str, vid: str = "v1") -> dict:
+    return {
+        "chunk_id": cid,
+        "video_id": vid,
+        "video_title": "T",
+        "video_url": "u",
+        "start_seconds": 0.0,
+        "end_seconds": 1.0,
+        "snippet": "s",
+    }
+
+
+class TestSseIntegration:
+    async def test_markers_stripped_and_is_cited_set(self) -> None:
+        """Markers never reach the wire; is_cited reflects the marker set."""
+        body = await _post_message(
+            answer_tokens=["The framework is X [c:cit", "ed1]."],
+            retrieved_chunks=[_chunk("cited1"), _chunk("consulted1", "v2")],
+        )
+        assert "[c:" not in body
+        flags = {c["chunk_id"]: c["is_cited"] for c in _parse_sources(body)}
+        assert flags == {"cited1": True, "consulted1": False}
+
+    async def test_hallucinated_marker_id_silently_dropped(self) -> None:
+        body = await _post_message(
+            answer_tokens=["Cited [c:real1] hallucinated [c:fake]."],
+            retrieved_chunks=[_chunk("real1")],
+        )
+        payload = _parse_sources(body)
+        assert len(payload) == 1
+        assert payload[0]["chunk_id"] == "real1"
+        assert payload[0]["is_cited"] is True
+
+    async def test_no_markers_emitted_falls_back_with_all_uncited(self) -> None:
+        """LLM forgot markers → every chunk is_cited=false; frontend renders
+        the legacy single-tier list."""
+        body = await _post_message(
+            answer_tokens=["Plain answer."],
+            retrieved_chunks=[_chunk("c1"), _chunk("c2", "v2")],
+        )
+        payload = _parse_sources(body)
+        assert all(c["is_cited"] is False for c in payload)
+        assert len(payload) == 2
