@@ -34,6 +34,41 @@ class TestParsing:
 # Stream-safe stripping --------------------------------------------------
 
 
+class TestFormatterMarkerRoundTrip:
+    """The LLM-facing tool result must contain `[c:<chunk_id>]` markers in the
+    same form the citation parser extracts — that contract is what makes
+    marker emission possible at all (issue #176 follow-up).
+    """
+
+    def test_search_format_emits_marker_extractable_by_parser(self) -> None:
+        from backend.rag.tools import _format_search_results
+
+        chunks = [
+            {
+                "chunk_id": "abc-123",
+                "video_title": "T",
+                "start_seconds": 0.0,
+                "content": "x",
+            },
+            {
+                "chunk_id": "def_456",
+                "video_title": "T",
+                "start_seconds": 60.0,
+                "content": "y",
+            },
+        ]
+        text = _format_search_results(chunks)
+        assert extract_cited_chunk_ids(text) == {"abc-123", "def_456"}
+
+    def test_transcript_format_emits_marker_extractable_by_parser(self) -> None:
+        from backend.rag.tools import _format_transcript
+
+        # Transcript path uses raw chunks where the id field is "id" not "chunk_id".
+        chunks = [{"id": "raw-id-1", "start_seconds": 0.0, "content": "hello"}]
+        text = _format_transcript({"title": "Demo"}, chunks, max_chars=None)
+        assert extract_cited_chunk_ids(text) == {"raw-id-1"}
+
+
 class TestStreamStripper:
     def _run(self, tokens: list[str]) -> str:
         s = CitationMarkerStripper()

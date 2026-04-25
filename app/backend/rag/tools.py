@@ -210,15 +210,25 @@ async def _hydrate_chunks(raw_chunks: list[dict]) -> list[dict]:
 
 
 def _format_search_results(chunks: list[dict]) -> str:
-    """Format chunks as the LLM-facing tool result text with [mm:ss] markers."""
+    """Format chunks as the LLM-facing tool result text.
+
+    Each chunk is prefixed with a literal ``[c:<chunk_id>]`` marker — the same
+    form the model is instructed to emit when citing the chunk in its answer.
+    Putting the marker directly in the LLM's input gives it the exact token
+    to copy back: see issue #176 for why this is required (the prior format
+    omitted chunk_id entirely, leaving the model unable to follow the citation
+    instruction even when it tried).
+    """
     if not chunks:
         return "No relevant chunks found. Try a different query or strategy."
     parts = []
     for c in chunks:
         title = c.get("video_title") or "Unknown Video"
+        chunk_id = c.get("chunk_id") or ""
         start = int(c.get("start_seconds") or 0.0)
         mins, secs = divmod(start, 60)
-        parts.append(f"[Source: {title} at {mins:02d}:{secs:02d}]\n{c.get('content', '')}")
+        marker = f"[c:{chunk_id}] " if chunk_id else ""
+        parts.append(f"{marker}{title} at {mins:02d}:{secs:02d}\n{c.get('content', '')}")
     return "\n\n---\n\n".join(parts)
 
 
@@ -327,12 +337,21 @@ def _format_transcript(video: dict, chunks: list[dict], max_chars: int | None = 
     total_chunks = 0
     for c in chunks:
         total_chunks += 1
+        # Raw chunks from list_chunks_for_video use ``id``; canonical chunks
+        # (constructed for the citations payload) use ``chunk_id``. Accept
+        # either so the LLM-facing text always carries a [c:<id>] marker.
+        chunk_id = c.get("chunk_id") or c.get("id") or ""
         start = int(c.get("start_seconds") or 0.0)
         mins, secs = divmod(start, 60)
         content = (c.get("content") or "").strip()
         if not content:
             continue
-        piece = f"[{mins:02d}:{secs:02d}] {content}"
+        # Keep `[c:<id>]` and `[mm:ss]` as separate brackets so the marker
+        # regex (which only matches `[A-Za-z0-9_-]+` inside the brackets)
+        # still parses cleanly. Order: marker first, then the existing
+        # timestamp prefix the LLM has already been trained against.
+        marker_prefix = f"[c:{chunk_id}] " if chunk_id else ""
+        piece = f"{marker_prefix}[{mins:02d}:{secs:02d}] {content}"
         # Account for the "\n\n" separator we will join with.
         addition = len(piece) + 2
         if max_chars is not None and char_count + addition > max_chars:
