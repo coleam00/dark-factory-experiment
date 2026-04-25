@@ -138,25 +138,13 @@ export function AdminVideos() {
           </button>
         </div>
 
-        <div style={{ marginBottom: 12 }}>
+        <div className="mb-3">
           <input
             type="text"
             placeholder="Search videos..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            style={{
-              width: '100%',
-              padding: '8px 12px',
-              borderRadius: 8,
-              background: '#1e293b',
-              border: '1px solid #334155',
-              color: '#f1f5f9',
-              fontSize: 13,
-              outline: 'none',
-              transition: 'border-color 0.15s',
-            }}
-            onFocus={(e) => (e.currentTarget.style.borderColor = '#3b82f6')}
-            onBlur={(e) => (e.currentTarget.style.borderColor = '#334155')}
+            className="w-full px-3 py-2 rounded-lg bg-[var(--surface-1)] border border-[var(--border)] text-[var(--text-primary)] text-[13px] outline-none transition-colors focus:border-blue-500"
           />
         </div>
 
