@@ -296,9 +296,7 @@ async def create_message(
 # ---------------------------------------------------------------------------
 
 
-def _strip_markers_from_sse_chunk(
-    sse_chunk: str, stripper: CitationMarkerStripper
-) -> str | None:
+def _strip_markers_from_sse_chunk(sse_chunk: str, stripper: CitationMarkerStripper) -> str | None:
     """Run an SSE token chunk through ``stripper``; return a rewritten chunk
     or ``None`` if the entire token content was held back. Non-token chunks
     (events, heartbeats, error payloads) pass through unchanged.
