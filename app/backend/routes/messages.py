@@ -319,30 +319,20 @@ def _strip_markers_from_sse_chunk(sse_chunk: str, stripper: CitationMarkerStripp
 
 
 def _extract_text_from_sse(sse_chunks: list[str]) -> str:
-    """
-    Reconstruct the full assistant text from a list of SSE event strings.
-    Each chunk looks like "data: <json-encoded-token>\n\n".
-    Tokens are JSON-encoded strings to safely handle newlines and special characters.
-    """
+    """Reconstruct assistant text from a list of SSE event strings."""
     tokens = []
     for chunk in sse_chunks:
         if not chunk.startswith("data: "):
             logger.debug("Skipping non-data SSE chunk: %r", chunk[:100])
             continue
         content = chunk[len("data: ") :].rstrip("\n")
-        if not content or content == "[DONE]":
+        if not content or content == "[DONE]" or content.startswith('{"error"'):
             continue
-        # Skip JSON error payloads
-        if content.startswith('{"error"'):
-            continue
-        # Try to decode JSON-encoded token (new format)
         try:
             decoded = json.loads(content)
             if isinstance(decoded, str):
                 tokens.append(decoded)
-            # If it's something else (shouldn't happen), skip it
         except ValueError:
-            # Fallback: treat as raw text (backward compat with unencoded tokens)
             tokens.append(content)
     return "".join(tokens)
 
@@ -436,10 +426,10 @@ def _is_refusal(text: str) -> bool:
         "i can only answer based on",
         "i can only answer using content",
     )
-    matched = any(pattern.lower() in text.lower() for pattern in refusal_patterns)
-    if matched:
+    is_refusal = any(pattern.lower() in text.lower() for pattern in refusal_patterns)
+    if is_refusal:
         logger.debug("Refusal detected in assistant response")
-    return matched
+    return is_refusal
 
 
 async def _maybe_set_conversation_title(
