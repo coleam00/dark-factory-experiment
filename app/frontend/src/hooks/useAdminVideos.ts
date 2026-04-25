@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { type AdminVideo, listAdminVideos, searchAdminVideos } from '../lib/api';
 
-export function useAdminVideos(searchQuery?: string) {
+export function useAdminVideos(searchQuery?: string, enabled = true) {
   const [videos, setVideos] = useState<AdminVideo[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Per-fetch ID so a stale response can't overwrite fresher results
   // when the user types faster than the network replies.
   const fetchIdRef = useRef(0);
 
   const load = useCallback(async () => {
+    if (!enabled) return;
     const trimmed = (searchQuery ?? '').trim();
     const myId = ++fetchIdRef.current;
     try {
@@ -23,7 +24,7 @@ export function useAdminVideos(searchQuery?: string) {
     } finally {
       if (myId === fetchIdRef.current) setLoading(false);
     }
-  }, [searchQuery]);
+  }, [searchQuery, enabled]);
 
   useEffect(() => {
     load();

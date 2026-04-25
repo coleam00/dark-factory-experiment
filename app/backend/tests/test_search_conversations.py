@@ -132,7 +132,8 @@ async def test_search_videos_admin_empty_query():
     )
 
     results = await search_videos_admin("")
-    assert isinstance(results, list)
+    assert len(results) == 1
+    assert results[0]["title"] == "Test Video"
 
 
 async def test_search_videos_admin_limit():
@@ -160,6 +161,32 @@ async def test_search_videos_admin_no_matches():
 
     results = await search_videos_admin("javascript")
     assert results == []
+
+
+async def test_search_videos_admin_wildcard_chars_passthrough():
+    """Lock in the decision to NOT escape % and _ in user input.
+
+    ILIKE treats _ as a single-char wildcard. We leave it un-escaped, so
+    'rust_lang' matches 'rustAlang basics' as well as 'rust_lang basics'.
+    If escaping is added, only the literal-underscore title matches and
+    this assertion fails — by design.
+    """
+    await create_video(
+        title="rust_lang basics",
+        description="Rust underscore test",
+        url="https://youtube.com/watch?v=rust_underscore",
+        transcript="rust",
+    )
+    await create_video(
+        title="rustAlang basics",
+        description="Rust wildcard test",
+        url="https://youtube.com/watch?v=rust_wildcard",
+        transcript="rust",
+    )
+    results = await search_videos_admin("rust_lang")
+    assert len(results) == 2
+    titles = {r["title"] for r in results}
+    assert titles == {"rust_lang basics", "rustAlang basics"}
 
 
 async def test_search_videos_admin_matches_description_and_channel_title():

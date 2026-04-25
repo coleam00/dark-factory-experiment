@@ -19,7 +19,10 @@ export function AdminVideos() {
   const { addToast } = useToast();
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
-  const { videos, loading, refetch } = useAdminVideos(debouncedQuery);
+  const { videos, loading, refetch } = useAdminVideos(
+    debouncedQuery,
+    status === 'authed' && Boolean(user?.is_admin),
+  );
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [addModalOpen, setAddModalOpen] = useState(false);
