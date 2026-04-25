@@ -98,7 +98,7 @@ export function AdminVideos() {
 
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--text-primary)] p-6">
-      <div className="max-w-5xl mx-auto">
+      <div className="max-w-6xl mx-auto">
         <header className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-2xl font-semibold">Library admin</h1>
@@ -198,23 +198,25 @@ export function AdminVideos() {
                       <td className="px-4 py-2 text-[var(--text-secondary)]">
                         {v.created_at.slice(0, 10)}
                       </td>
-                      <td className="px-4 py-2 text-right">
-                        <button
-                          type="button"
-                          onClick={() => handleResync(v)}
-                          disabled={isPending || syncing}
-                          className="px-2 py-1 text-xs rounded border border-[var(--border)] hover:bg-[var(--surface-2)] disabled:opacity-50 mr-2"
-                        >
-                          {isPending ? '…' : 'Re-sync'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(v)}
-                          disabled={isPending || syncing}
-                          className="px-2 py-1 text-xs rounded border border-[var(--danger)] text-[var(--danger)] hover:bg-[var(--surface-2)] disabled:opacity-50"
-                        >
-                          Delete
-                        </button>
+                      <td className="px-4 py-2">
+                        <div className="flex items-center gap-3 whitespace-nowrap justify-end">
+                          <button
+                            type="button"
+                            onClick={() => handleResync(v)}
+                            disabled={isPending || syncing}
+                            className="px-3 py-1.5 text-xs rounded border border-[var(--border)] hover:bg-[var(--surface-2)] disabled:opacity-50"
+                          >
+                            {isPending ? '…' : 'Re-sync'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(v)}
+                            disabled={isPending || syncing}
+                            className="px-3 py-1.5 text-xs rounded border border-[var(--danger)] text-[var(--danger)] hover:bg-[var(--surface-2)] disabled:opacity-50"
+                          >
+                            Delete
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
