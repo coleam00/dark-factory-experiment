@@ -6,7 +6,7 @@
  * rows at once. Authoritative list is cheaper than local bookkeeping.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import { AddVideoModal } from '../components/AddVideoModal';
 import { useAdminVideos } from '../hooks/useAdminVideos';
@@ -143,7 +143,7 @@ export function AdminVideos() {
           placeholder="Search videos..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full px-3 py-2 mb-3 rounded-lg bg-[var(--surface-1)] border border-[var(--border)] text-[var(--text-primary)] text-[13px] outline-none transition-colors focus:border-blue-500"
+          className="w-full px-3 py-2 mb-3 rounded-lg bg-[var(--surface-1)] border border-[var(--border)] text-[var(--text-primary)] text-[13px] outline-none transition-colors focus:border-[var(--accent)]"
         />
 
         <div className="bg-[var(--surface-1)] border border-[var(--border)] rounded-lg overflow-hidden">
