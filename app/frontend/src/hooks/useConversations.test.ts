@@ -106,7 +106,13 @@ describe('useConversations', () => {
     it('excludes empty conversations from search results', async () => {
       const conversations = [
         { id: '1', title: 'New Conversation', created_at: '', updated_at: '', preview: null },
-        { id: '2', title: 'New Conversation', created_at: '', updated_at: '', preview: 'Has messages' },
+        {
+          id: '2',
+          title: 'New Conversation',
+          created_at: '',
+          updated_at: '',
+          preview: 'Has messages',
+        },
       ];
       vi.spyOn(api, 'getConversations').mockResolvedValue(conversations as api.Conversation[]);
 

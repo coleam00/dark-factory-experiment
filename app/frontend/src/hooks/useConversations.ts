@@ -1,9 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  type Conversation,
-  getConversations,
-  renameConversation,
-} from '../lib/api';
+import { type Conversation, getConversations, renameConversation } from '../lib/api';
 
 export function useConversations(searchQuery?: string) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
