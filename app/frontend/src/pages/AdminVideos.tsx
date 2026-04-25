@@ -9,16 +9,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import { AddVideoModal } from '../components/AddVideoModal';
+import { useAdminVideos } from '../hooks/useAdminVideos';
 import { useAuth } from '../hooks/useAuth';
 import { useToast } from '../hooks/useToast';
-import { useAdminVideos } from '../hooks/useAdminVideos';
-import {
-  type AdminVideo,
-  addVideoByUrl,
-  deleteVideo,
-  resyncVideo,
-  syncChannel,
-} from '../lib/api';
+import { type AdminVideo, addVideoByUrl, deleteVideo, resyncVideo, syncChannel } from '../lib/api';
 
 export function AdminVideos() {
   const { status, user } = useAuth();

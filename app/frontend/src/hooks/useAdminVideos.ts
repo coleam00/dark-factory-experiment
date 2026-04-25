@@ -1,9 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  type AdminVideo,
-  listAdminVideos,
-  searchAdminVideos,
-} from '../lib/api';
+import { type AdminVideo, listAdminVideos, searchAdminVideos } from '../lib/api';
 
 export function useAdminVideos(searchQuery?: string) {
   const [videos, setVideos] = useState<AdminVideo[]>([]);
