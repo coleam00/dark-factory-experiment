@@ -120,6 +120,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
           <button
             onClick={onStop}
             aria-label="Stop response"
+            className="focus-ring"
             style={{
               background: '#dc2626',
               border: 'none',
@@ -134,6 +135,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
               width: 34,
               transition: 'background 0.15s',
             }}
+            onMouseDown={(e) => (e.currentTarget.style.filter = 'brightness(0.9)')}
+            onMouseUp={(e) => (e.currentTarget.style.filter = '')}
           >
             <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
               <rect x="1" y="1" width="10" height="10" rx="1" />
@@ -144,6 +147,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
             onClick={handleSend}
             disabled={isDisabled}
             aria-label="Send message"
+            className="focus-ring"
             style={{
               background: isDisabled ? '#1e293b' : '#3b82f6',
               border: 'none',
@@ -163,6 +167,12 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
             }}
             onMouseLeave={(e) => {
               if (!isDisabled) e.currentTarget.style.background = '#3b82f6';
+            }}
+            onMouseDown={(e) => {
+              if (!isDisabled) e.currentTarget.style.filter = 'brightness(0.9)';
+            }}
+            onMouseUp={(e) => {
+              if (!isDisabled) e.currentTarget.style.filter = '';
             }}
           >
             <svg

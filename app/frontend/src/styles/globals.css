@@ -187,7 +187,19 @@ body,
 
 /* Focus ring is on the parent wrapper via :focus-within */
 .chat-input-wrapper:focus-within {
-  box-shadow: 0 0 0 2px #3b82f6;
+  box-shadow: 0 0 0 2px var(--accent), 0 0 8px var(--accent-glow);
+}
+
+/* Reusable focus-visible ring for inline-style buttons */
+.focus-ring:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+/* New Chat button: accent glow on focus */
+.new-chat-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent), 0 0 8px var(--accent-glow);
 }
 
 @keyframes spin {

@@ -304,6 +304,7 @@ function ConfirmDialog({ onConfirm, onCancel, deleting, error }: ConfirmDialogPr
           padding: 24,
           width: 320,
           maxWidth: 'calc(100vw - 48px)',
+          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
         }}
       >
         <p style={{ margin: '0 0 8px', fontWeight: 600, color: '#f1f5f9' }}>Delete conversation?</p>
@@ -524,6 +525,7 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
           <button
             onClick={handleNewChat}
             disabled={creatingNew}
+            className="new-chat-btn"
             style={{
               width: '100%',
               background: '#3b82f6',

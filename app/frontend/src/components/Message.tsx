@@ -183,6 +183,7 @@ export function Message({
           padding: '12px 16px',
           lineHeight: 1.7,
           wordBreak: 'break-word',
+          borderLeft: isUser ? '2px solid var(--text-tertiary)' : '2px solid var(--accent)',
         }}
       >
         {isStreaming && !content ? (
