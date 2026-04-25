@@ -61,4 +61,62 @@ describe('ChatInput', () => {
       expect(() => fireEvent.click(stopBtn)).not.toThrow();
     });
   });
+
+  describe('button press-state filter', () => {
+    it('applies brightness filter to Stop button on mousedown and clears on mouseup', () => {
+      render(<ChatInput onSend={vi.fn()} isStreaming={true} />);
+      const stopBtn = screen.getByRole('button', { name: /stop/i });
+
+      fireEvent.mouseDown(stopBtn);
+      expect(stopBtn.style.filter).toBe('brightness(0.9)');
+
+      fireEvent.mouseUp(stopBtn);
+      expect(stopBtn.style.filter).toBe('');
+    });
+
+    it('clears brightness filter on Stop button on mouseleave', () => {
+      render(<ChatInput onSend={vi.fn()} isStreaming={true} />);
+      const stopBtn = screen.getByRole('button', { name: /stop/i });
+
+      fireEvent.mouseDown(stopBtn);
+      expect(stopBtn.style.filter).toBe('brightness(0.9)');
+
+      fireEvent.mouseLeave(stopBtn);
+      expect(stopBtn.style.filter).toBe('');
+    });
+
+    it('does not apply brightness filter to Send button when disabled prop is true on mousedown', () => {
+      render(<ChatInput onSend={vi.fn()} isStreaming={false} disabled={true} />);
+      // Button is disabled via prop, so filter should NOT apply
+      const sendBtn = screen.getByRole('button', { name: /send/i });
+      fireEvent.mouseDown(sendBtn);
+      expect(sendBtn.style.filter).toBe('');
+    });
+
+    it('applies brightness filter to enabled Send button on mousedown and clears on mouseup', () => {
+      render(<ChatInput onSend={vi.fn()} isStreaming={false} />);
+      const input = screen.getByRole('textbox');
+      fireEvent.change(input, { target: { value: 'Hello' } });
+
+      const sendBtn = screen.getByRole('button', { name: /send/i });
+      fireEvent.mouseDown(sendBtn);
+      expect(sendBtn.style.filter).toBe('brightness(0.9)');
+
+      fireEvent.mouseUp(sendBtn);
+      expect(sendBtn.style.filter).toBe('');
+    });
+
+    it('clears brightness filter on Send button on mouseleave', () => {
+      render(<ChatInput onSend={vi.fn()} isStreaming={false} />);
+      const input = screen.getByRole('textbox');
+      fireEvent.change(input, { target: { value: 'Hello' } });
+
+      const sendBtn = screen.getByRole('button', { name: /send/i });
+      fireEvent.mouseDown(sendBtn);
+      expect(sendBtn.style.filter).toBe('brightness(0.9)');
+
+      fireEvent.mouseLeave(sendBtn);
+      expect(sendBtn.style.filter).toBe('');
+    });
+  });
 });

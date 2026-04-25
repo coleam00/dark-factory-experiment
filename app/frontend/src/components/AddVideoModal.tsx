@@ -90,7 +90,7 @@ export function AddVideoModal({ open, onClose, onSubmit }: AddVideoModalProps) {
           <button
             type="submit"
             disabled={submitting || !url.trim()}
-            className="px-3 py-2 rounded bg-[var(--accent)] text-white font-medium disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+            className="px-3 py-2 rounded bg-[var(--accent)] text-white font-medium disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-1)]"
           >
             {submitting ? 'Adding…' : 'Add video'}
           </button>

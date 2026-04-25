@@ -82,7 +82,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
           padding: '6px 12px',
           opacity: isDisabled ? 0.7 : 1,
           transition: 'opacity 0.2s',
-          boxShadow: focused && !isDisabled ? '0 0 0 2px #3b82f6' : 'none',
+          boxShadow:
+            focused && !isDisabled ? '0 0 0 2px var(--accent), 0 0 8px var(--accent-glow)' : 'none',
         }}
       >
         {/* ── Textarea ── */}
@@ -137,6 +138,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
             }}
             onMouseDown={(e) => (e.currentTarget.style.filter = 'brightness(0.9)')}
             onMouseUp={(e) => (e.currentTarget.style.filter = '')}
+            onMouseLeave={(e) => (e.currentTarget.style.filter = '')}
           >
             <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
               <rect x="1" y="1" width="10" height="10" rx="1" />
@@ -167,6 +169,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
             }}
             onMouseLeave={(e) => {
               if (!isDisabled) e.currentTarget.style.background = '#3b82f6';
+              if (!isDisabled) e.currentTarget.style.filter = '';
             }}
             onMouseDown={(e) => {
               if (!isDisabled) e.currentTarget.style.filter = 'brightness(0.9)';
