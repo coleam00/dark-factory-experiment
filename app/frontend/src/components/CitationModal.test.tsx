@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Citation } from '../lib/api';
-import { CitationModal } from './CitationModal';
+import { CitationModal, formatTimestamp } from './CitationModal';
 
 const mockCitation: Citation = {
   chunk_id: 'chunk-1',
@@ -120,18 +120,24 @@ describe('CitationModal', () => {
     expect(screen.getByText('Video unavailable')).toBeInTheDocument();
   });
 
-  it('shows video unavailable when youtube URL has no v parameter', () => {
+  it('shows iframe when youtube URL has a valid v parameter with extra query params', () => {
     const badCitation: Citation = {
       ...mockCitation,
       video_url: 'https://youtube.com/watch?v=abc123&other=param',
     };
-    // The v param extraction would still work in this case
     const onClose = vi.fn();
     render(<CitationModal citation={badCitation} onClose={onClose} />);
 
-    // This case actually works since v=abc123 is present
     const iframe = screen.queryByTitle('YouTube video player');
     expect(iframe).toBeInTheDocument();
+  });
+
+  it('locks body scroll while mounted and restores on unmount', () => {
+    const onClose = vi.fn();
+    const { unmount } = render(<CitationModal citation={mockCitation} onClose={onClose} />);
+    expect(document.body.style.overflow).toBe('hidden');
+    unmount();
+    expect(document.body.style.overflow).toBe('');
   });
 
   it('handles relative URL gracefully', () => {
@@ -144,5 +150,24 @@ describe('CitationModal', () => {
 
     // Relative URL throws in URL constructor, shows unavailable
     expect(screen.getByText('Video unavailable')).toBeInTheDocument();
+  });
+});
+
+describe('formatTimestamp', () => {
+  it('formats 0 seconds as 0:00', () => {
+    expect(formatTimestamp(0)).toBe('0:00');
+  });
+
+  it('formats 60 seconds as 1:00', () => {
+    expect(formatTimestamp(60)).toBe('1:00');
+  });
+
+  it('formats >1 hour as minutes:seconds (no hour pad)', () => {
+    // Documents current behavior: 3661s -> 61:01
+    expect(formatTimestamp(3661)).toBe('61:01');
+  });
+
+  it('formats fractional seconds by flooring', () => {
+    expect(formatTimestamp(12.7)).toBe('0:12');
   });
 });

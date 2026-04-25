@@ -6,7 +6,7 @@ interface CitationModalProps {
   onClose: () => void;
 }
 
-function formatTimestamp(seconds: number): string {
+export function formatTimestamp(seconds: number): string {
   const s = Math.floor(seconds);
   const mins = Math.floor(s / 60);
   const secs = s % 60;
@@ -86,7 +86,7 @@ export function CitationModal({ citation, onClose }: CitationModalProps) {
         </div>
 
         {/* Content: YouTube iframe (top) + transcript (bottom) */}
-        <div className="flex flex-col gap-4 mb-4 overflow-y-auto">
+        <div className="flex-1 min-h-0 flex flex-col gap-4 mb-4 overflow-y-auto">
           {/* YouTube iframe — 16:9 aspect ratio container */}
           <div className="w-full aspect-video">
             {embedUrl ? (
