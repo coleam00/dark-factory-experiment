@@ -34,20 +34,20 @@ function formatTimestamp(seconds: number): string {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
-// Citation chip; ``dimmed`` styles non-cited entries inside the consulted tier.
-function CitationChip({
-  citation,
-  onClick,
-  dimmed,
-}: {
-  citation: Citation;
-  onClick?: (citation: Citation) => void;
-  dimmed?: boolean;
-}) {
+// Two-tier citation render (issue #176): Tier 1 "Sources cited" (visible by
+// default) when any chunk has is_cited=true; Tier 2 "All sources consulted"
+// uses the existing toggle. Falls back to the legacy flat list when no chunk
+// is marked (legacy data or model-forgot-markers fallback).
+function citationChip(
+  citation: Citation,
+  i: number,
+  onCitationClick: ((c: Citation) => void) | undefined,
+  dimmed: boolean,
+) {
   return (
     <button
-      key={citation.chunk_id}
-      onClick={() => onClick?.(citation)}
+      key={`${citation.chunk_id}-${i}`}
+      onClick={() => onCitationClick?.(citation)}
       title={`${citation.video_title} at ${formatTimestamp(citation.start_seconds)}\n${citation.snippet}`}
       style={{
         display: 'inline-block',
@@ -70,10 +70,6 @@ function CitationChip({
   );
 }
 
-// Two-tier source render (issue #176): chunks the LLM cited via `[c:<id>]`
-// markers in Tier 1; full retrieval (collapsed) in Tier 2. Falls back to a
-// single flat list when no `is_cited` flags are present (legacy messages or
-// when the model forgot to emit markers).
 function SourceCitations({
   sources,
   onCitationClick,
@@ -81,44 +77,31 @@ function SourceCitations({
   sources: Citation[];
   onCitationClick?: (citation: Citation) => void;
 }) {
-  const [showConsulted, setShowConsulted] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   if (!sources || sources.length === 0) return null;
 
-  const hasIsCitedField = sources.some((s) => typeof s.is_cited === 'boolean');
   const cited = sources.filter((s) => s.is_cited === true);
   const consulted = sources.filter((s) => s.is_cited !== true);
-  const showTwoTier = hasIsCitedField && cited.length > 0;
+  const showTwoTier = cited.length > 0;
 
   return (
     <div style={{ marginTop: 10, borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 8 }}>
-      {/* Tier 1: Sources cited (visible by default when present) */}
       {showTwoTier && (
         <>
-          <div
-            style={{
-              color: '#94a3b8',
-              fontSize: 12,
-              marginBottom: 6,
-              fontWeight: 500,
-            }}
-          >
+          <div style={{ color: '#94a3b8', fontSize: 12, marginBottom: 6 }}>
             Sources cited ({cited.length})
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-            {cited.map((citation) => (
-              <CitationChip key={citation.chunk_id} citation={citation} onClick={onCitationClick} />
-            ))}
+            {cited.map((c, i) => citationChip(c, i, onCitationClick, false))}
           </div>
         </>
       )}
 
-      {/* Tier 2: All sources consulted (collapsed by default).
-          When two-tier active and there's nothing extra beyond cited, skip
-          the toggle entirely — Tier 1 already covers it. */}
+      {/* Toggle button (Tier 2 / legacy) */}
       {(!showTwoTier || consulted.length > 0) && (
         <button
-          onClick={() => setShowConsulted((v) => !v)}
+          onClick={() => setExpanded((v) => !v)}
           style={{
             background: 'transparent',
             border: 'none',
@@ -133,8 +116,8 @@ function SourceCitations({
           }}
           onMouseEnter={(e) => (e.currentTarget.style.color = '#f1f5f9')}
           onMouseLeave={(e) => (e.currentTarget.style.color = '#94a3b8')}
-          aria-expanded={showConsulted}
-          aria-label={showConsulted ? 'Collapse sources' : 'Expand sources'}
+          aria-expanded={expanded}
+          aria-label={expanded ? 'Collapse sources' : 'Expand sources'}
         >
           <svg
             width="12"
@@ -146,7 +129,7 @@ function SourceCitations({
             strokeLinecap="round"
             strokeLinejoin="round"
             style={{
-              transform: showConsulted ? 'rotate(90deg)' : 'rotate(0deg)',
+              transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
               transition: 'transform 0.2s',
             }}
           >
@@ -158,16 +141,12 @@ function SourceCitations({
         </button>
       )}
 
-      {showConsulted && (
+      {/* Citation chips */}
+      {expanded && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-          {(showTwoTier ? consulted : sources).map((citation) => (
-            <CitationChip
-              key={citation.chunk_id}
-              citation={citation}
-              onClick={onCitationClick}
-              dimmed={showTwoTier}
-            />
-          ))}
+          {(showTwoTier ? consulted : sources).map((c, i) =>
+            citationChip(c, i, onCitationClick, showTwoTier),
+          )}
         </div>
       )}
     </div>

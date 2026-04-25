@@ -159,13 +159,29 @@ class TestSseIntegration:
         assert payload[0]["chunk_id"] == "real1"
         assert payload[0]["is_cited"] is True
 
-    async def test_no_markers_emitted_falls_back_with_all_uncited(self) -> None:
-        """LLM forgot markers → every chunk is_cited=false; frontend renders
-        the legacy single-tier list."""
+    async def test_uncited_capped_at_citations_max_count(self) -> None:
+        """No markers + retrieval > cap → SSE payload sliced to CITATIONS_MAX_COUNT."""
+        from backend.config import CITATIONS_MAX_COUNT
+
+        chunks = [_chunk(f"c{i}") for i in range(CITATIONS_MAX_COUNT + 5)]
         body = await _post_message(
-            answer_tokens=["Plain answer."],
-            retrieved_chunks=[_chunk("c1"), _chunk("c2", "v2")],
+            answer_tokens=["Plain answer with no markers."],
+            retrieved_chunks=chunks,
+        )
+        assert len(_parse_sources(body)) == CITATIONS_MAX_COUNT
+
+    async def test_cited_pass_through_uncited_capped(self) -> None:
+        """Cited chunks always render (model's choice); only the consulted
+        tier is capped. Verifies the cap targets the right list."""
+        from backend.config import CITATIONS_MAX_COUNT
+
+        chunks = [_chunk(f"c{i}") for i in range(CITATIONS_MAX_COUNT + 3)]
+        body = await _post_message(
+            answer_tokens=[f"Cited [c:c0][c:c{CITATIONS_MAX_COUNT + 1}]."],
+            retrieved_chunks=chunks,
         )
         payload = _parse_sources(body)
-        assert all(c["is_cited"] is False for c in payload)
-        assert len(payload) == 2
+        cited_ids = {c["chunk_id"] for c in payload if c["is_cited"]}
+        assert cited_ids == {"c0", f"c{CITATIONS_MAX_COUNT + 1}"}
+        # 2 cited + CITATIONS_MAX_COUNT non-cited = 12 total.
+        assert len(payload) == 2 + CITATIONS_MAX_COUNT

@@ -28,7 +28,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from backend import rate_limit
 from backend.auth.dependencies import get_current_user
-from backend.config import LLM_TOOLS_ENABLED, LLM_TOOLS_MAX_PER_TURN
+from backend.config import CITATIONS_MAX_COUNT, LLM_TOOLS_ENABLED, LLM_TOOLS_MAX_PER_TURN
 from backend.db import repository
 from backend.llm.openrouter import stream_chat
 from backend.rag.citations import (
@@ -199,6 +199,10 @@ async def create_message(
                         cited_ids = extract_cited_chunk_ids(final_text_raw)
                         for chunk in source_citations:
                             chunk["is_cited"] = chunk.get("chunk_id") in cited_ids
+                        # Cap fallback (issue #176): cited pass through, non-cited sliced.
+                        cited = [c for c in source_citations if c.get("is_cited")]
+                        uncited = [c for c in source_citations if not c.get("is_cited")]
+                        source_citations[:] = cited + uncited[:CITATIONS_MAX_COUNT]
                     # Suppress sources on refusal (existing behaviour).
                     if source_citations:
                         final_text = (

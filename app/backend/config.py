@@ -107,6 +107,9 @@ KEYWORD_LANGUAGE: str = "english"
 # Set to a very large value (e.g. 999) to effectively disable.
 RETRIEVAL_MAX_PER_VIDEO: int = int(os.environ.get("RETRIEVAL_MAX_PER_VIDEO", "3"))
 
+# Cap on non-cited citations (issue #176); cited chunks always pass through.
+CITATIONS_MAX_COUNT: int = int(os.environ.get("CITATIONS_MAX_COUNT", "10"))
+
 # RAG tool-based retrieval — the LLM drives retrieval via tool calls
 # (search_videos, keyword_search_videos, semantic_search_videos,
 # get_video_transcript) rather than receiving pre-retrieved chunks. Disabled
