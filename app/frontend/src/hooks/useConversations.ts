@@ -1,10 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  type Conversation,
-  getConversations,
-  renameConversation,
-  searchConversations,
-} from '../lib/api';
+import { type Conversation, getConversations, renameConversation } from '../lib/api';
 
 export function useConversations(searchQuery?: string) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -15,11 +10,10 @@ export function useConversations(searchQuery?: string) {
   const fetchIdRef = useRef(0);
 
   const load = useCallback(async () => {
-    const trimmed = (searchQuery ?? '').trim();
     const myId = ++fetchIdRef.current;
     try {
       setLoading(true);
-      const data = trimmed ? await searchConversations(trimmed) : await getConversations();
+      const data = await getConversations();
       if (myId === fetchIdRef.current) setConversations(data);
     } catch (e) {
       if (myId === fetchIdRef.current) {
@@ -28,7 +22,7 @@ export function useConversations(searchQuery?: string) {
     } finally {
       if (myId === fetchIdRef.current) setLoading(false);
     }
-  }, [searchQuery]);
+  }, []);
 
   useEffect(() => {
     load();
@@ -47,12 +41,21 @@ export function useConversations(searchQuery?: string) {
     }
   };
 
+  // Filter out conversations with zero messages (preview === null).
+  // Keep conversations unfiltered for guard logic in Sidebar.tsx.
+  const withMessages = conversations.filter((c) => c.preview !== null);
+
+  const trimmed = (searchQuery ?? '').trim().toLowerCase();
+  const filteredConversations = trimmed
+    ? withMessages.filter((c) => c.title.toLowerCase().includes(trimmed))
+    : withMessages;
+
   return {
     conversations,
     loading,
     error,
     refetch: load,
     rename,
-    filteredConversations: conversations,
+    filteredConversations,
   };
 }
