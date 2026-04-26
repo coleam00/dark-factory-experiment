@@ -43,7 +43,7 @@ from uuid import uuid4
 
 from backend.db.postgres import get_pg_pool
 from backend.rag.chunker import chunk_video_timestamped
-from backend.rag.embeddings import embed_text
+from backend.rag.embeddings import embed_batch
 
 logger = logging.getLogger(__name__)
 
@@ -206,12 +206,17 @@ async def _ingest_one_file(
             logger.warning("Chunker returned 0 chunks for %s; skipping", rel_path)
             return
 
-        # Embed each chunk's content. Sequential — modest # of chunks per
-        # transcript; OpenRouter handles rate limiting fine and sequential
-        # keeps error attribution simple.
+        # Embed chunks in groups of <=100 per call. text-embedding-3-small's
+        # 300k-token-per-request budget is roughly enough for ~600 typical
+        # chunks, but the largest workshops have >1000 chunks and overflow
+        # in one shot — splitting keeps each request well under the limit.
+        # Sequential per-chunk calls (the original loop) were ~30-100x slower
+        # on first-time ingest; one batched call per file when possible.
+        BATCH_SIZE = 100
         embeddings: list[list[float]] = []
-        for ch in chunks:
-            embeddings.append(embed_text(ch["content"]))
+        for start in range(0, len(chunks), BATCH_SIZE):
+            group = chunks[start : start + BATCH_SIZE]
+            embeddings.extend(embed_batch([ch["content"] for ch in group]))
 
         async with conn.transaction():
             if existing:
