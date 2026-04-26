@@ -105,9 +105,20 @@ async def delete_video(video_id: str) -> None:
 
 
 async def list_videos() -> list[dict]:
+    """List videos for the catalog and the public /api/videos endpoint.
+
+    `source_type` and `lesson_url` are included so that downstream consumers
+    can route correctly:
+      - rag/catalog.py filters by `source_type` so non-members don't see
+        Dynamous lesson titles in the cached system prompt (issue #147).
+      - The frontend Library panel can route citation links by source.
+    Without these columns in the SELECT every row defaults to None and
+    callers can't distinguish YouTube from Dynamous content.
+    """
     async with _acquire() as conn:
         rows = await conn.fetch(
-            "SELECT id, title, description, url, created_at, channel_id, channel_title FROM videos ORDER BY created_at DESC"
+            "SELECT id, title, description, url, created_at, channel_id, channel_title, "
+            "source_type, lesson_url FROM videos ORDER BY created_at DESC"
         )
     return [dict(r) for r in rows]
 
