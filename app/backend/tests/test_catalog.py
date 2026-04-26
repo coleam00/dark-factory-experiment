@@ -57,36 +57,68 @@ def test_invalidate_catalog_clears_cache() -> None:
 
 
 def test_build_catalog_block_standard() -> None:
-    videos = [{"title": "My Video", "url": "https://youtube.com/watch?v=abc"}]
+    videos = [{"id": "vid-abc", "title": "My Video", "url": "https://youtube.com/watch?v=abc"}]
     block = catalog.build_catalog_block(videos, "standard")
     assert block["type"] == "text"
     assert "My Video" in block["text"]
     assert "https://youtube.com/watch?v=abc" in block["text"]
+    # The internal id is what get_video_transcript needs; it must appear in
+    # the catalog so the model can call the tool without a search round-trip.
+    assert "id=vid-abc" in block["text"]
     assert block["cache_control"] == {"type": "ephemeral"}
 
 
 def test_build_catalog_block_extended() -> None:
-    videos = [{"title": "My Video", "url": "https://youtube.com/watch?v=abc"}]
+    videos = [{"id": "vid-abc", "title": "My Video", "url": "https://youtube.com/watch?v=abc"}]
     block = catalog.build_catalog_block(videos, "extended")
     assert block["cache_control"] == {"type": "ephemeral", "ttl": 3600}
 
 
 def test_build_catalog_block_untitled_fallback() -> None:
-    videos = [{"title": None, "url": "https://youtube.com/watch?v=abc"}]
+    videos = [{"id": "vid-abc", "title": None, "url": "https://youtube.com/watch?v=abc"}]
     block = catalog.build_catalog_block(videos, "standard")
     assert "Untitled" in block["text"]
 
 
 def test_build_catalog_block_numbering() -> None:
     videos = [
-        {"title": "A", "url": "u1"},
-        {"title": "B", "url": "u2"},
-        {"title": "C", "url": "u3"},
+        {"id": "1", "title": "A", "url": "u1"},
+        {"id": "2", "title": "B", "url": "u2"},
+        {"id": "3", "title": "C", "url": "u3"},
     ]
     block = catalog.build_catalog_block(videos, "standard")
     assert "1. A" in block["text"]
     assert "2. B" in block["text"]
     assert "3. C" in block["text"]
+
+
+def test_build_catalog_block_includes_id_for_get_video_transcript() -> None:
+    """The id must appear in a copy-pasteable form so the LLM can route a
+    'lesson 1.6' style query straight to get_video_transcript without
+    issuing an extra search round (chunks aren't indexed by title or
+    curriculum identifier)."""
+    videos = [
+        {
+            "id": "33abd23a-9e63-4945-a780-95a84ba41e3a",
+            "title": "1.6 Conversational vs. Autonomous Agents",
+            "url": "",
+        },
+    ]
+    block = catalog.build_catalog_block(videos, "standard")
+    text = block["text"]
+    assert "1.6 Conversational vs. Autonomous Agents" in text
+    assert "id=33abd23a-9e63-4945-a780-95a84ba41e3a" in text
+
+
+def test_build_catalog_block_omits_url_separator_when_empty() -> None:
+    """Dynamous lessons can have empty url — don't render a dangling ' — '."""
+    videos = [{"id": "x", "title": "T", "url": ""}]
+    block = catalog.build_catalog_block(videos, "standard")
+    text = block["text"]
+    # Find the line for this video and check it doesn't end with " — "
+    line = next(line_ for line_ in text.splitlines() if line_.startswith("1. "))
+    assert not line.endswith(" — ")
+    assert "id=x" in line
 
 
 # ---------------------------------------------------------------------------
@@ -138,7 +170,7 @@ async def test_build_system_prompt_catalog_empty_library() -> None:
 def test_build_catalog_block_extended_ttl_is_integer() -> None:
     """CATALOG_TIER='extended' must produce an integer ttl, not a string."""
     with patch("backend.rag.catalog.CATALOG_CACHE_TTL_SECONDS", 3600):
-        videos = [{"title": "Vid", "url": "https://youtu.be/x"}]
+        videos = [{"id": "v", "title": "Vid", "url": "https://youtu.be/x"}]
         block = catalog.build_catalog_block(videos, "extended")
     assert isinstance(block["cache_control"]["ttl"], int)
     assert block["cache_control"]["ttl"] == 3600
@@ -146,7 +178,7 @@ def test_build_catalog_block_extended_ttl_is_integer() -> None:
 
 def test_build_catalog_block_missing_url() -> None:
     """Video dict without 'url' key must not raise a KeyError."""
-    videos = [{"title": "My Video"}]
+    videos = [{"id": "v", "title": "My Video"}]
     block = catalog.build_catalog_block(videos, "standard")
     assert "My Video" in block["text"]
     # url defaults to empty string — no crash
