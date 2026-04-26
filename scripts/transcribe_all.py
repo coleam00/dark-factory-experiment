@@ -189,8 +189,13 @@ def _extract_audio(video: Path, audio: Path) -> None:
 
     Whisper's accepted formats are flac/m4a/mp3/mp4/mpeg/mpga/oga/ogg/wav/webm,
     and rejects bare `.opus`. We use `.ogg` extension (Ogg container) with
-    libopus inside — Whisper handles it. 32 kbps mono is small enough that
-    even a 90-min workshop comes in well under the 25 MB upload cap.
+    libopus inside — Whisper handles it.
+
+    Bitrate is 16 kbps mono. Whisper's hard upload cap is 25 MB; at 16 kbps
+    that's enough headroom for ~3.5-hour audio. Empirically tried 32 kbps
+    first; two workshops in the ~100-min range hit `413: Maximum content size
+    limit exceeded` (26 MB ogg). 16 kbps is well within Opus's "still
+    intelligible speech" zone and Whisper transcribes it cleanly.
     """
     if not shutil.which("ffmpeg"):
         raise RuntimeError(
@@ -212,7 +217,7 @@ def _extract_audio(video: Path, audio: Path) -> None:
             "-c:a",
             "libopus",
             "-b:a",
-            "32k",
+            "16k",
             str(audio),
         ],
         capture_output=True,
