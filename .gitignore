@@ -38,3 +38,10 @@ app/screenshots/test-*
 
 # Archon per-codebase secrets
 .archon/config.yaml
+
+# Runtime deploy state — rewritten by deploy.sh on every blue/green flip,
+# so keeping it tracked makes every host-side `git pull` abort with a dirty
+# working tree. The bootstrap path in deploy.sh writes the initial value
+# (`reverse_proxy app-blue:8000`) when the file is absent; the
+# upstream.conf.example next to it is the human-readable reference shape.
+deploy/upstream.conf
