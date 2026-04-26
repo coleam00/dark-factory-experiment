@@ -64,6 +64,13 @@ services:
       CIRCLE_PAID_ACCESS_GROUP_ID: ${CIRCLE_PAID_ACCESS_GROUP_ID:-}
       MEMBERSHIP_REFRESH_SECONDS: ${MEMBERSHIP_REFRESH_SECONDS:-3600}
       DYNAMOUS_CONTENT_DIR: /app/content/dynamous
+      # Inject the video catalog into the cached system prompt so the LLM
+      # can map curriculum identifiers ("lesson 1.6", "module 7", "workshop
+      # #4") onto real video titles before retrieving. Default off so
+      # tighter prompt-cache budgets are unaffected; flip on per-deploy.
+      CATALOG_ENABLED: ${CATALOG_ENABLED:-false}
+      CATALOG_TIER: ${CATALOG_TIER:-standard}
+      CATALOG_CACHE_TTL_SECONDS: ${CATALOG_CACHE_TTL_SECONDS:-3600}
     volumes:
       # Read-only mount of the host-side dynamous-content checkout. The host's
       # deploy.sh git-clones / pulls this directory before bringing the new
@@ -108,6 +115,13 @@ services:
       CIRCLE_PAID_ACCESS_GROUP_ID: ${CIRCLE_PAID_ACCESS_GROUP_ID:-}
       MEMBERSHIP_REFRESH_SECONDS: ${MEMBERSHIP_REFRESH_SECONDS:-3600}
       DYNAMOUS_CONTENT_DIR: /app/content/dynamous
+      # Inject the video catalog into the cached system prompt so the LLM
+      # can map curriculum identifiers ("lesson 1.6", "module 7", "workshop
+      # #4") onto real video titles before retrieving. Default off so
+      # tighter prompt-cache budgets are unaffected; flip on per-deploy.
+      CATALOG_ENABLED: ${CATALOG_ENABLED:-false}
+      CATALOG_TIER: ${CATALOG_TIER:-standard}
+      CATALOG_CACHE_TTL_SECONDS: ${CATALOG_CACHE_TTL_SECONDS:-3600}
     volumes:
       - ${DYNAMOUS_CONTENT_HOST_PATH:-/opt/dynachat/dynamous-content}:/app/content/dynamous:ro
     depends_on:
