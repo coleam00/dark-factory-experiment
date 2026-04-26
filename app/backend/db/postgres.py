@@ -19,6 +19,26 @@ logger = logging.getLogger(__name__)
 _pool: asyncpg.Pool | None = None
 
 
+async def _init_connection(conn: asyncpg.Connection) -> None:
+    """Per-connection setup run by asyncpg before the pool hands it to a caller.
+
+    Currently sets pgvector's iterative-scan mode to `relaxed_order`. Without
+    this, filtered ANN queries (chunks WHERE source_type IN (...)) silently
+    fall back to exact scan and lose the HNSW index speedup. See pgvector
+    0.8.0 release notes. Failing this SET should not crash the app — older
+    pgvector versions don't have the GUC, and the fallback (exact scan) is
+    correct, just slower.
+    """
+    try:
+        await conn.execute("SET hnsw.iterative_scan = 'relaxed_order'")
+    except asyncpg.PostgresError as exc:
+        logger.warning(
+            "Could not set hnsw.iterative_scan (pgvector < 0.8.0?): %s; "
+            "filtered ANN queries will fall back to exact scan",
+            exc,
+        )
+
+
 async def init_pg_pool() -> asyncpg.Pool:
     """Create the asyncpg pool if not already created. Idempotent."""
     global _pool
@@ -31,6 +51,7 @@ async def init_pg_pool() -> asyncpg.Pool:
         dsn=DATABASE_URL,
         min_size=1,
         max_size=10,
+        init=_init_connection,
     )
     logger.info("Postgres pool ready.")
     return _pool

@@ -55,7 +55,8 @@ async def get_user_by_email(email: str) -> dict[str, Any] | None:
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
-            SELECT id, email, password_hash, created_at, last_login_at
+            SELECT id, email, password_hash, created_at, last_login_at,
+                   is_member, member_verified_at
             FROM users
             WHERE email = $1
             """,
@@ -70,7 +71,8 @@ async def get_user_by_id(user_id: UUID | str) -> dict[str, Any] | None:
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
-            SELECT id, email, created_at, last_login_at
+            SELECT id, email, created_at, last_login_at,
+                   is_member, member_verified_at
             FROM users
             WHERE id = $1
             """,
@@ -87,3 +89,37 @@ async def update_last_login(user_id: UUID | str) -> None:
             "UPDATE users SET last_login_at = now() WHERE id = $1",
             UUID(str(user_id)) if not isinstance(user_id, UUID) else user_id,
         )
+
+
+async def set_member_status(
+    user_id: UUID | str,
+    *,
+    is_member: bool,
+    conn: asyncpg.Connection | None = None,
+) -> None:
+    """Set is_member and stamp member_verified_at = now().
+
+    Called from the auth routes after each Circle verification (signup, login,
+    or /me refresh). Optional `conn` lets the caller run this inside an
+    in-flight transaction so the user insert and the membership stamp commit
+    atomically.
+    """
+    uid = UUID(str(user_id)) if not isinstance(user_id, UUID) else user_id
+
+    async def _do(c: asyncpg.Connection) -> None:
+        await c.execute(
+            """
+            UPDATE users
+            SET is_member = $2, member_verified_at = now()
+            WHERE id = $1
+            """,
+            uid,
+            is_member,
+        )
+
+    if conn is not None:
+        await _do(conn)
+        return
+    pool = get_pg_pool()
+    async with pool.acquire() as new_conn:
+        await _do(new_conn)

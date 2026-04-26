@@ -65,6 +65,24 @@ if not ADMIN_USER_EMAIL:
         file=sys.stderr,
     )
 
+# Circle membership verification (issue #147). Without these, paid-content
+# gating fails closed — every user is treated as a non-member and only sees
+# YouTube chunks. The app keeps working; users just don't see Dynamous course
+# content until the env is configured.
+CIRCLE_ADMIN_TOKEN: str = os.environ.get("CIRCLE_ADMIN_TOKEN", "")
+CIRCLE_PAID_ACCESS_GROUP_ID: int = int(os.environ.get("CIRCLE_PAID_ACCESS_GROUP_ID", "0") or "0")
+if not CIRCLE_ADMIN_TOKEN or not CIRCLE_PAID_ACCESS_GROUP_ID:
+    print(
+        "WARNING: Circle membership verification disabled "
+        "(CIRCLE_ADMIN_TOKEN or CIRCLE_PAID_ACCESS_GROUP_ID missing). "
+        "All users will be treated as non-members.",
+        file=sys.stderr,
+    )
+
+# Membership refresh staleness window. /me re-verifies a user against Circle
+# when member_verified_at is NULL or older than this many seconds.
+MEMBERSHIP_REFRESH_SECONDS: int = int(os.environ.get("MEMBERSHIP_REFRESH_SECONDS", "3600"))
+
 OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
 EMBEDDING_MODEL: str = "openai/text-embedding-3-small"
 CHAT_MODEL: str = "anthropic/claude-sonnet-4.6"

@@ -39,6 +39,8 @@ def fake_users_repo(monkeypatch):
             "password_hash": password_hash,
             "created_at": None,
             "last_login_at": None,
+            "is_member": False,
+            "member_verified_at": None,
         }
         store[uid] = row
         return {k: v for k, v in row.items() if k != "password_hash"}
@@ -61,12 +63,21 @@ def fake_users_repo(monkeypatch):
         if u:
             u["last_login_at"] = "now"
 
+    async def set_member_status(user_id: Any, *, is_member: bool, **kwargs: Any) -> None:
+        from datetime import UTC, datetime
+
+        u = store.get(str(user_id))
+        if u:
+            u["is_member"] = is_member
+            u["member_verified_at"] = datetime.now(UTC)
+
     from backend.db import users_repo
 
     monkeypatch.setattr(users_repo, "create_user", create_user)
     monkeypatch.setattr(users_repo, "get_user_by_email", get_user_by_email)
     monkeypatch.setattr(users_repo, "get_user_by_id", get_user_by_id)
     monkeypatch.setattr(users_repo, "update_last_login", update_last_login)
+    monkeypatch.setattr(users_repo, "set_member_status", set_member_status)
 
     # Patch auth.dependencies.users_repo.get_user_by_id too — it's imported as
     # `from backend.db import users_repo` so the module-level name is aliased.
@@ -80,6 +91,17 @@ def fake_users_repo(monkeypatch):
     monkeypatch.setattr(auth_route.users_repo, "create_user", create_user)
     monkeypatch.setattr(auth_route.users_repo, "get_user_by_email", get_user_by_email)
     monkeypatch.setattr(auth_route.users_repo, "update_last_login", update_last_login)
+    monkeypatch.setattr(auth_route.users_repo, "set_member_status", set_member_status)
+
+    # Stub Circle verification — default to False so existing tests pass without
+    # touching the network. Tests that exercise Circle behavior override this.
+    from backend.integrations import circle as circle_module
+
+    async def fake_verify(email: str) -> bool:
+        return False
+
+    monkeypatch.setattr(circle_module, "verify_paid_member", fake_verify)
+    monkeypatch.setattr(auth_route.circle, "verify_paid_member", fake_verify)
 
     return store
 

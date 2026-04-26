@@ -184,7 +184,9 @@ async def _hydrate_chunks(raw_chunks: list[dict]) -> list[dict]:
         info = video or {}
         return vid, {
             "title": info.get("title", "Unknown Video"),
-            "url": info.get("url", ""),
+            "url": info.get("url", "") or "",
+            "source_type": info.get("source_type", "youtube") or "youtube",
+            "lesson_url": info.get("lesson_url", "") or "",
         }
 
     video_cache: dict[str, dict[str, str]] = dict(
@@ -198,6 +200,8 @@ async def _hydrate_chunks(raw_chunks: list[dict]) -> list[dict]:
             "video_id": c.get("video_id", ""),
             "video_title": video_cache.get(c.get("video_id", ""), {}).get("title", "Unknown Video"),
             "video_url": video_cache.get(c.get("video_id", ""), {}).get("url", ""),
+            "source_type": video_cache.get(c.get("video_id", ""), {}).get("source_type", "youtube"),
+            "lesson_url": video_cache.get(c.get("video_id", ""), {}).get("lesson_url", ""),
             "start_seconds": c.get("start_seconds", 0.0),
             "end_seconds": c.get("end_seconds", 0.0),
             "snippet": c.get("snippet", ""),
@@ -238,6 +242,8 @@ _CANONICAL_CHUNK_KEYS = (
     "video_id",
     "video_title",
     "video_url",
+    "source_type",
+    "lesson_url",
     "start_seconds",
     "end_seconds",
     "snippet",
@@ -393,6 +399,7 @@ async def _embed_query(query: str, cache: dict[str, list[float]] | None) -> list
 async def execute_search_hybrid(
     raw_arguments: str | dict,
     embedding_cache: dict[str, list[float]] | None = None,
+    is_member: bool = False,
 ) -> dict[str, Any]:
     """Hybrid (keyword + semantic via RRF) search."""
     from backend.config import RETRIEVAL_MAX_PER_VIDEO
@@ -408,7 +415,7 @@ async def execute_search_hybrid(
 
     try:
         embedding = await _embed_query(query, embedding_cache)
-        chunks = await retrieve_hybrid(query, embedding, top_k=top_k)
+        chunks = await retrieve_hybrid(query, embedding, top_k=top_k, is_member=is_member)
     except Exception as exc:
         logger.warning("search_hybrid failed: %s", exc, exc_info=True)
         return {"ok": False, "error": f"search failed: {exc}"}
@@ -419,7 +426,10 @@ async def execute_search_hybrid(
     return {"ok": True, "text": _format_search_results(chunks), "chunks": chunks}
 
 
-async def execute_search_keyword(raw_arguments: str | dict) -> dict[str, Any]:
+async def execute_search_keyword(
+    raw_arguments: str | dict,
+    is_member: bool = False,
+) -> dict[str, Any]:
     """Keyword-only (tsvector FTS) search."""
     from backend.config import KEYWORD_LANGUAGE, RETRIEVAL_MAX_PER_VIDEO
 
@@ -431,8 +441,15 @@ async def execute_search_keyword(raw_arguments: str | dict) -> dict[str, Any]:
         return {"ok": False, "error": "missing required parameter: query"}
     top_k = _clamp_top_k(args.get("top_k"))
 
+    allowed = ["youtube", "dynamous"] if is_member else ["youtube"]
+
     try:
-        raw = await repository.keyword_search(query, top_k=top_k, language=KEYWORD_LANGUAGE)
+        raw = await repository.keyword_search(
+            query,
+            top_k=top_k,
+            language=KEYWORD_LANGUAGE,
+            allowed_source_types=allowed,
+        )
         chunks = await _hydrate_chunks(raw)
     except Exception as exc:
         logger.warning("search_keyword failed: %s", exc, exc_info=True)
@@ -447,6 +464,7 @@ async def execute_search_keyword(raw_arguments: str | dict) -> dict[str, Any]:
 async def execute_search_semantic(
     raw_arguments: str | dict,
     embedding_cache: dict[str, list[float]] | None = None,
+    is_member: bool = False,
 ) -> dict[str, Any]:
     """Semantic-only (pgvector cosine) search."""
     from backend.config import RETRIEVAL_MAX_PER_VIDEO
@@ -459,9 +477,13 @@ async def execute_search_semantic(
         return {"ok": False, "error": "missing required parameter: query"}
     top_k = _clamp_top_k(args.get("top_k"))
 
+    allowed = ["youtube", "dynamous"] if is_member else ["youtube"]
+
     try:
         embedding = await _embed_query(query, embedding_cache)
-        raw = await repository.vector_search_pg(embedding, top_k=top_k)
+        raw = await repository.vector_search_pg(
+            embedding, top_k=top_k, allowed_source_types=allowed
+        )
         chunks = await _hydrate_chunks(raw)
     except Exception as exc:
         logger.warning("search_semantic failed: %s", exc, exc_info=True)
@@ -476,9 +498,14 @@ async def execute_search_semantic(
 async def execute_get_video_transcript(
     raw_arguments: str | dict,
     video_id_whitelist: set[str] | None = None,
+    is_member: bool = False,
 ) -> dict[str, Any]:
     """Full transcript of one video. video_id_whitelist guards against the
-    model hallucinating ids; None disables the check (tests)."""
+    model hallucinating ids; None disables the check (tests).
+
+    Defense-in-depth: a non-member who somehow guesses a Dynamous video_id
+    is blocked here in addition to the search-layer filter.
+    """
     args = _parse_args(raw_arguments)
     if args is None:
         return {"ok": False, "error": "invalid JSON arguments"}
@@ -502,6 +529,12 @@ async def execute_get_video_transcript(
         logger.warning("get_video_transcript: get_video failed for %s: %s", video_id, exc)
         return {"ok": False, "error": f"failed to look up video: {exc}"}
     if not video:
+        return {"ok": False, "error": f"video not found: {video_id}"}
+
+    # Defense-in-depth ACL: non-members cannot pull Dynamous transcripts even
+    # if they somehow obtained the video_id. The search layer should already
+    # have filtered these out — this is the belt to that suspenders.
+    if not is_member and video.get("source_type") == "dynamous":
         return {"ok": False, "error": f"video not found: {video_id}"}
 
     try:
@@ -545,22 +578,30 @@ async def execute_tool(
     raw_arguments: str | dict,
     video_id_whitelist: set[str] | None = None,
     embedding_cache: dict[str, list[float]] | None = None,
+    is_member: bool = False,
 ) -> dict[str, Any]:
     """Dispatch by tool name. Unknown names return an error dict so the
     model sees the refusal and stops calling.
 
     ``embedding_cache`` is optional per-turn memoization — if the same query
     text is passed to hybrid and semantic search in one turn, we embed once.
+
+    ``is_member`` controls retrieval ACL: True surfaces both YouTube and
+    Dynamous (paid) chunks; False sees YouTube only.
     """
     if name == "search_videos":
-        return await execute_search_hybrid(raw_arguments, embedding_cache=embedding_cache)
+        return await execute_search_hybrid(
+            raw_arguments, embedding_cache=embedding_cache, is_member=is_member
+        )
     if name == "keyword_search_videos":
-        return await execute_search_keyword(raw_arguments)
+        return await execute_search_keyword(raw_arguments, is_member=is_member)
     if name == "semantic_search_videos":
-        return await execute_search_semantic(raw_arguments, embedding_cache=embedding_cache)
+        return await execute_search_semantic(
+            raw_arguments, embedding_cache=embedding_cache, is_member=is_member
+        )
     if name == "get_video_transcript":
         return await execute_get_video_transcript(
-            raw_arguments, video_id_whitelist=video_id_whitelist
+            raw_arguments, video_id_whitelist=video_id_whitelist, is_member=is_member
         )
     return {"ok": False, "error": f"unknown tool: {name}"}
 

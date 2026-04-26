@@ -139,6 +139,11 @@ async def create_message(
             )
             video_id_whitelist = set()
 
+        # Captured at the start of the turn so the entire tool sequence sees
+        # consistent ACL — even if /me later flips is_member, the in-flight
+        # turn won't change behavior mid-flight.
+        is_member_for_turn = bool(current_user.get("is_member") or False)
+
         async def _executor(name: str, raw_args: str) -> str:
             # Pass `None` (not empty set) when the whitelist failed to load so
             # the transcript tool falls back to open lookups instead of rejecting
@@ -149,6 +154,7 @@ async def create_message(
                 raw_args,
                 video_id_whitelist=whitelist,
                 embedding_cache=embedding_cache,
+                is_member=is_member_for_turn,
             )
             if result.get("ok") and result.get("chunks"):
                 tool_chunks_acc.extend(result["chunks"])

@@ -59,6 +59,18 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       JWT_SECRET: ${JWT_SECRET}
       ADMIN_USER_EMAIL: ${ADMIN_USER_EMAIL:-}
+      # Issue #147: Circle membership verification + Dynamous content ingest.
+      CIRCLE_ADMIN_TOKEN: ${CIRCLE_ADMIN_TOKEN:-}
+      CIRCLE_PAID_ACCESS_GROUP_ID: ${CIRCLE_PAID_ACCESS_GROUP_ID:-}
+      MEMBERSHIP_REFRESH_SECONDS: ${MEMBERSHIP_REFRESH_SECONDS:-3600}
+      DYNAMOUS_CONTENT_DIR: /app/content/dynamous
+    volumes:
+      # Read-only mount of the host-side dynamous-content checkout. The host's
+      # deploy.sh git-clones / pulls this directory before bringing the new
+      # color up. Path is parameterised so it can point at /opt/dynachat/dynamous-content
+      # in prod or a dev fixture in local testing. Empty/missing dir is fine —
+      # ingest_dynamous_content skips if the directory is absent.
+      - ${DYNAMOUS_CONTENT_HOST_PATH:-/opt/dynachat/dynamous-content}:/app/content/dynamous:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -91,6 +103,13 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       JWT_SECRET: ${JWT_SECRET}
       ADMIN_USER_EMAIL: ${ADMIN_USER_EMAIL:-}
+      # Issue #147: Circle membership verification + Dynamous content ingest.
+      CIRCLE_ADMIN_TOKEN: ${CIRCLE_ADMIN_TOKEN:-}
+      CIRCLE_PAID_ACCESS_GROUP_ID: ${CIRCLE_PAID_ACCESS_GROUP_ID:-}
+      MEMBERSHIP_REFRESH_SECONDS: ${MEMBERSHIP_REFRESH_SECONDS:-3600}
+      DYNAMOUS_CONTENT_DIR: /app/content/dynamous
+    volumes:
+      - ${DYNAMOUS_CONTENT_HOST_PATH:-/opt/dynachat/dynamous-content}:/app/content/dynamous:ro
     depends_on:
       postgres:
         condition: service_healthy

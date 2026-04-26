@@ -9,6 +9,7 @@ gymnastics are required (see CLAUDE.md "Deployment").
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 import asyncpg
@@ -20,9 +21,10 @@ from backend import rate_limit, signup_rate_limit
 from backend.auth.dependencies import COOKIE_NAME, get_current_user, is_admin_email
 from backend.auth.password import hash_password, verify_password
 from backend.auth.tokens import encode_token
-from backend.config import JWT_EXPIRY_SECONDS
+from backend.config import JWT_EXPIRY_SECONDS, MEMBERSHIP_REFRESH_SECONDS
 from backend.db import users_repo
 from backend.db.postgres import get_pg_pool
+from backend.integrations import circle
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +60,7 @@ class MeResponse(BaseModel):
     id: str
     email: str
     is_admin: bool
+    is_member: bool
     messages_used_today: int
     messages_remaining_today: int
     rate_window_resets_at: str | None
@@ -163,6 +166,13 @@ async def signup(
 
         await signup_rate_limit.record(conn, ip=ip, email_attempted=body.email, outcome="accepted")
 
+    # Verify Circle membership AFTER the user-creation transaction commits.
+    # Holding a DB connection across an external HTTP call would block the
+    # pool for up to 5s. circle.verify_paid_member is fail-closed, never
+    # raises — failures default to is_member=False; next /me will retry.
+    is_member = await circle.verify_paid_member(body.email)
+    await users_repo.set_member_status(user["id"], is_member=is_member)
+
     _set_session_cookie(response, str(user["id"]))
     return _user_to_response(user)
 
@@ -176,6 +186,14 @@ async def login(body: LoginRequest, response: Response) -> UserResponse:
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password"
         )
     await users_repo.update_last_login(user["id"])
+
+    # Re-verify Circle membership on every login. circle.verify_paid_member
+    # is fail-closed (returns bool, never raises) so a Circle outage cannot
+    # break login — the user falls back to non-member until the next /me
+    # refresh resolves it.
+    is_member = await circle.verify_paid_member(body.email)
+    await users_repo.set_member_status(user["id"], is_member=is_member)
+
     _set_session_cookie(response, str(user["id"]))
     return _user_to_response(user)
 
@@ -195,13 +213,30 @@ async def logout() -> Response:
 
 @router.get("/me", response_model=MeResponse)
 async def me(user: dict[str, Any] = Depends(get_current_user)) -> MeResponse:
-    """Return the currently-authenticated user plus their daily quota counter."""
-    status = await rate_limit.get_status(user["id"])
+    """Return the currently-authenticated user plus their daily quota counter.
+
+    Also opportunistically re-verifies Circle membership when the cached
+    `member_verified_at` is older than `MEMBERSHIP_REFRESH_SECONDS`. This is
+    the path that flips a previously-failed Circle check (e.g. API outage at
+    login time) once Circle recovers, without requiring the user to log out
+    and back in.
+    """
+    is_member = bool(user.get("is_member") or False)
+    verified_at = user.get("member_verified_at")
+    needs_refresh = verified_at is None or (
+        (datetime.now(UTC) - verified_at).total_seconds() > MEMBERSHIP_REFRESH_SECONDS
+    )
+    if needs_refresh:
+        is_member = await circle.verify_paid_member(str(user["email"]))
+        await users_repo.set_member_status(user["id"], is_member=is_member)
+
+    rl_status = await rate_limit.get_status(user["id"])
     return MeResponse(
         id=str(user["id"]),
         email=str(user["email"]),
         is_admin=is_admin_email(str(user["email"])),
-        messages_used_today=status.used,
-        messages_remaining_today=status.remaining,
-        rate_window_resets_at=status.resets_at.isoformat() if status.resets_at else None,
+        is_member=is_member,
+        messages_used_today=rl_status.used,
+        messages_remaining_today=rl_status.remaining,
+        rate_window_resets_at=rl_status.resets_at.isoformat() if rl_status.resets_at else None,
     )

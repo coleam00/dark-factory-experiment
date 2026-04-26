@@ -151,8 +151,8 @@ class TestRetrieveHybrid:
             assert mock_vec.called
 
             # Verify correct arguments passed (over-fetch factor applied)
-            mock_kw.assert_called_once_with("test query", top_k=fetch_k, language="english")
-            mock_vec.assert_called_once_with([0.1] * 1536, top_k=fetch_k)
+            mock_kw.assert_called_once_with("test query", top_k=fetch_k, language="english", allowed_source_types=["youtube"])
+            mock_vec.assert_called_once_with([0.1] * 1536, top_k=fetch_k, allowed_source_types=["youtube"])
 
             # Verify result shape has all required citation fields
             assert len(result) >= 1

@@ -68,6 +68,21 @@ async def lifespan(app: FastAPI):
 
     logger.info("Checking seed data…")
     await seed_if_empty()
+
+    # Ingest paid Dynamous course/workshop transcripts (issue #147). The
+    # private `dynamous-content` repo is git-cloned into the container at
+    # deploy time; this picks up whatever is on disk. Idempotent — files
+    # whose SHA matches what's in the DB are skipped. Failures here never
+    # crash startup; YouTube content keeps working regardless.
+    try:
+        from backend.ingest.dynamous import ingest_dynamous_content
+
+        content_dir = Path(os.environ.get("DYNAMOUS_CONTENT_DIR", "/app/content/dynamous"))
+        counts = await ingest_dynamous_content(content_dir)
+        logger.info("Dynamous ingest counts: %s", counts)
+    except Exception:
+        logger.exception("Dynamous content ingest failed; continuing without it")
+
     logger.info("Startup complete.")
     yield
     logger.info("Shutting down.")
