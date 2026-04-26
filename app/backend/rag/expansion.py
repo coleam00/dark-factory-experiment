@@ -127,6 +127,15 @@ async def expand_and_merge(
                     "video_id": raw[0]["video_id"],
                     "video_title": raw[0].get("video_title", ""),
                     "video_url": raw[0].get("video_url", ""),
+                    # Issue #147: preserve the source-type discriminator and
+                    # lesson_url for Dynamous chunks so the frontend can render
+                    # community.dynamous.ai citation links. Pull these from the
+                    # anchor (originally-retrieved chunk) — it went through
+                    # _hydrate_chunks and is guaranteed to have them. raw[0]
+                    # could be a neighbor fetched via get_chunk_neighbors, which
+                    # doesn't include those columns.
+                    "source_type": anchor.get("source_type", "youtube"),
+                    "lesson_url": anchor.get("lesson_url", ""),
                     "content": content,
                     "start_seconds": raw[0]["start_seconds"],
                     "end_seconds": raw[-1]["end_seconds"],
