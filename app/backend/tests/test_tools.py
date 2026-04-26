@@ -448,6 +448,84 @@ async def test_transcript_happy_path_returns_text_and_chunks(monkeypatch) -> Non
     assert result["chunks"][0]["video_title"] == "How RAG Works"
 
 
+async def test_transcript_chunks_carry_source_type_and_lesson_url(monkeypatch) -> None:
+    """Regression: get_video_transcript must include source_type and
+    lesson_url on every returned chunk, otherwise the frontend
+    CitationModal can't render the right external link for Dynamous
+    sources (Issue #147 follow-up — surfaced by enabling CATALOG_ENABLED
+    which makes the model route catalog identifiers straight to this
+    tool, exposing the missing fields)."""
+
+    async def fake_get_video(_v):
+        return {
+            "id": "v-dyn",
+            "title": "1.6 Conversational vs. Autonomous Agents",
+            "url": "",
+            "source_type": "dynamous",
+            "lesson_url": "https://community.dynamous.ai/c/module-1/lessons/2103806",
+        }
+
+    async def fake_list(_v):
+        return [
+            {
+                "id": "c1",
+                "content": "first",
+                "chunk_index": 0,
+                "start_seconds": 0.0,
+                "end_seconds": 5.0,
+                "snippet": "first",
+            }
+        ]
+
+    monkeypatch.setattr(tools_module.repository, "get_video", fake_get_video)
+    monkeypatch.setattr(tools_module.repository, "list_chunks_for_video", fake_list)
+
+    result = await execute_tool(
+        "get_video_transcript",
+        json.dumps({"video_id": "v-dyn"}),
+        video_id_whitelist={"v-dyn"},
+        is_member=True,
+    )
+    assert result["ok"] is True
+    assert len(result["chunks"]) == 1
+    chunk = result["chunks"][0]
+    assert chunk["source_type"] == "dynamous"
+    assert chunk["lesson_url"] == "https://community.dynamous.ai/c/module-1/lessons/2103806"
+
+
+async def test_transcript_chunks_default_youtube_when_metadata_missing(monkeypatch) -> None:
+    """Videos without source_type / lesson_url must fall back to the
+    YouTube defaults so legacy YouTube-only deployments still work."""
+
+    async def fake_get_video(_v):
+        return {"id": "v-yt", "title": "How RAG Works", "url": "https://youtu.be/abc"}
+
+    async def fake_list(_v):
+        return [
+            {
+                "id": "c1",
+                "content": "x",
+                "chunk_index": 0,
+                "start_seconds": 0.0,
+                "end_seconds": 5.0,
+                "snippet": "x",
+            }
+        ]
+
+    monkeypatch.setattr(tools_module.repository, "get_video", fake_get_video)
+    monkeypatch.setattr(tools_module.repository, "list_chunks_for_video", fake_list)
+
+    result = await execute_tool(
+        "get_video_transcript",
+        json.dumps({"video_id": "v-yt"}),
+        video_id_whitelist={"v-yt"},
+    )
+    assert result["ok"] is True
+    chunk = result["chunks"][0]
+    assert chunk["source_type"] == "youtube"
+    assert chunk["lesson_url"] == ""
+
+
 # --- Formatting / serialization -------------------------------------------
 
 

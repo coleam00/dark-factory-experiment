@@ -545,6 +545,18 @@ async def execute_get_video_transcript(
     if not raw_chunks:
         return {"ok": False, "error": f"no chunks available for video: {video_id}"}
 
+    # NB: source_type and lesson_url MUST be present so the frontend
+    # CitationModal can render the right external link. Search-tool
+    # paths get these via _hydrate_chunks; the transcript path builds
+    # chunks directly from list_chunks_for_video, which doesn't carry
+    # video metadata, so we inject from the already-loaded `video` row.
+    # Without this, Dynamous transcript-pulled citations render as
+    # "Video unavailable" with no "Open on Dynamous" link — which is
+    # exactly the failure mode the catalog rollout (issue #147) made
+    # frequent because the model now routes catalog identifiers
+    # straight to get_video_transcript.
+    source_type = video.get("source_type", "youtube") or "youtube"
+    lesson_url = video.get("lesson_url", "") or ""
     chunks = [
         {
             "chunk_id": c.get("id", ""),
@@ -552,6 +564,8 @@ async def execute_get_video_transcript(
             "video_id": video_id,
             "video_title": video.get("title", ""),
             "video_url": video.get("url", ""),
+            "source_type": source_type,
+            "lesson_url": lesson_url,
             "start_seconds": c.get("start_seconds", 0.0),
             "end_seconds": c.get("end_seconds", 0.0),
             "snippet": c.get("snippet", ""),
