@@ -1,0 +1,24 @@
+[Unit]
+Description=DynaChat YouTube channel sync (one-shot, invoked by .timer)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/dynachat/app/deploy/sync-channel.sh
+
+# 10-minute budget — the sync is sequential and a backlog of new videos
+# can take a few minutes per video (Supadata fetch + Whisper-style chunking
+# happens for each one before the response returns).
+TimeoutStartSec=600
+
+# Don't bombard journald with the full ingest stream — only keep stdout
+# (the JSON summary line) and the tail of stderr if the unit fails.
+StandardOutput=journal
+StandardError=journal
+
+# Keep one previous run's output around so `journalctl -u … --boot=-1` works.
+SyslogIdentifier=dynachat-channel-sync
+
+[Install]
+WantedBy=multi-user.target

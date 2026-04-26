@@ -4,3 +4,8 @@
 *.sh text eol=lf
 Dockerfile text eol=lf
 *.dockerfile text eol=lf
+
+# systemd unit files are parsed by systemd on the Linux host; CRLF causes
+# "Failed to parse" at install time.
+*.service text eol=lf
+*.timer text eol=lf

@@ -54,6 +54,43 @@ ADMIN_USER_EMAIL=admin@yourdomain.com
 
 The real `.env` lives ONLY on the deploy host, in a directory owned by a non-factory user with mode 600. It is never committed, never shared via chat, and never readable by the Dark Factory workflow user.
 
+## Automated YouTube channel sync
+
+`deploy/sync-channel.sh` runs a one-shot YouTube sync inside the active app
+container by `docker exec`-ing into the color named in `upstream.conf`. Two
+systemd units in `deploy/systemd/` drive it on a schedule:
+
+- `dynachat-channel-sync.service` — one-shot, calls `sync-channel.sh`
+- `dynachat-channel-sync.timer`   — every hour, with a 5-min jitter
+
+### Install on a host
+
+```bash
+# As root, from the repo checkout (typically /opt/dynachat/app/)
+install -m 0644 deploy/systemd/dynachat-channel-sync.service /etc/systemd/system/
+install -m 0644 deploy/systemd/dynachat-channel-sync.timer   /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now dynachat-channel-sync.timer
+
+# Verify
+systemctl list-timers dynachat-channel-sync.timer
+journalctl -u dynachat-channel-sync.service -n 20
+```
+
+### Trigger a sync manually
+
+```bash
+# Full sync (newest first, stops once Supadata is exhausted)
+systemctl start dynachat-channel-sync.service
+
+# Or run the wrapper directly with custom args (e.g. cap to 20 newest videos)
+/opt/dynachat/app/deploy/sync-channel.sh --limit 20
+```
+
+The wrapper is idempotent — already-ingested videos are skipped by
+`youtube_video_id` unless `--force` is passed (used to backfill new chunk
+schemas; see `routes/channels.py`'s `force` flag).
+
 ## SQLite → Postgres cutover runbook
 
 When migrating an existing production deployment from SQLite to Postgres:
