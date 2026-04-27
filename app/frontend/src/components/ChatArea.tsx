@@ -311,6 +311,12 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
   const bottomRef = useRef<HTMLDivElement>(null);
   const autoScrollRef = useRef(true);
 
+  // Reset auto-scroll intent when switching conversations so the new
+  // conversation starts pinned to the bottom.
+  useEffect(() => {
+    autoScrollRef.current = true;
+  }, [conversationId]);
+
   // Inline error state (for failed sends)
   const [inlineError, setInlineError] = useState<string | null>(null);
   const [failedMessageText, setFailedMessageText] = useState<string | null>(null);
@@ -328,14 +334,38 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
 
   useEffect(() => {
     if (autoScrollRef.current) {
+      const behavior: ScrollBehavior = isStreaming ? 'instant' : 'smooth';
       requestAnimationFrame(() => {
-        scrollToBottom();
+        scrollToBottom(behavior);
       });
     }
-  }, [messages.length, streamingContent, scrollToBottom]);
+  }, [messages.length, streamingContent, scrollToBottom, isStreaming]);
+
+  // While streaming, keep the view pinned to the bottom on every paint frame.
+  // The deps-based effect above only fires when streamingContent changes,
+  // which can lag behind actual DOM-height growth — React batches
+  // setStreamingContent calls and chunked tokens land between renders.
+  // A rAF loop catches every paint; scrollIntoView with block:'end' is
+  // idempotent (no-op when already at bottom). autoScrollRef gates the
+  // write so a user who scrolls up is not hijacked.
+  useEffect(() => {
+    if (!isStreaming) return;
+    let cancelled = false;
+    const tick = () => {
+      if (cancelled) return;
+      if (autoScrollRef.current) {
+        scrollToBottom('instant');
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+    return () => {
+      cancelled = true;
+    };
+  }, [isStreaming, scrollToBottom]);
 
   useEffect(() => {
-    if (!loading && messages.length > 0) {
+    if (!loading && messages.length > 0 && autoScrollRef.current) {
       setTimeout(() => scrollToBottom('instant' as ScrollBehavior), 50);
     }
   }, [loading, scrollToBottom]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -344,7 +374,24 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
     const el = scrollContainerRef.current;
     if (!el) return;
     const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    autoScrollRef.current = distFromBottom < 100;
+    // Asymmetric thresholds:
+    //  - distFromBottom < 100 → enable auto-scroll (user is at/near bottom)
+    //  - distFromBottom > 300 → disable (user clearly scrolled away)
+    //  - 100..300            → leave unchanged (gray zone)
+    // Why the gray zone: streaming content can grow faster than the
+    // browser delivers the scroll event from a programmatic catch-up.
+    // In that race, the scroll event fires with distFromBottom in the
+    // 100-300 range even though the user is still pinned. The pre-fix
+    // single-threshold logic flipped autoScroll off in this window and
+    // then never re-enabled (no more programmatic scrolls fire), causing
+    // the 1239px-in-1.5s lag observed in issue #215. Real user scroll-up
+    // gestures move significantly more than 300px so the disable signal
+    // remains responsive.
+    if (distFromBottom < 100) {
+      autoScrollRef.current = true;
+    } else if (distFromBottom > 300) {
+      autoScrollRef.current = false;
+    }
   }, []);
 
   // ── Citation click handler ──
