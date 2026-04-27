@@ -106,7 +106,7 @@ async def _post_message(*, answer_tokens: list[str], retrieved_chunks: list[dict
         tool_executor=None,
         max_tool_calls=0,
         final_text_out=None,
-    **_kwargs,
+        **_kwargs,
     ):
         if tool_executor is not None:
             await tool_executor("search_videos", json.dumps({"query": "t"}))
@@ -195,10 +195,11 @@ class TestSseIntegration:
         assert payload[0]["is_cited"] is True
 
     async def test_uncited_capped_at_citations_max_count(self) -> None:
-        """No markers + retrieval > cap → SSE payload sliced to CITATIONS_MAX_COUNT."""
+        """No markers + retrieval > cap → SSE payload sliced to CITATIONS_MAX_COUNT.
+        Each chunk uses a distinct video_id so collapse doesn't reduce the count."""
         from backend.config import CITATIONS_MAX_COUNT
 
-        chunks = [_chunk(f"c{i}") for i in range(CITATIONS_MAX_COUNT + 5)]
+        chunks = [_chunk(f"c{i}", f"v{i}") for i in range(CITATIONS_MAX_COUNT + 5)]
         body = await _post_message(
             answer_tokens=["Plain answer with no markers."],
             retrieved_chunks=chunks,
@@ -207,10 +208,11 @@ class TestSseIntegration:
 
     async def test_cited_pass_through_uncited_capped(self) -> None:
         """Cited chunks always render (model's choice); only the consulted
-        tier is capped. Verifies the cap targets the right list."""
+        tier is capped. Verifies the cap targets the right list.
+        Each chunk uses a distinct video_id so collapse doesn't reduce the count."""
         from backend.config import CITATIONS_MAX_COUNT
 
-        chunks = [_chunk(f"c{i}") for i in range(CITATIONS_MAX_COUNT + 3)]
+        chunks = [_chunk(f"c{i}", f"v{i}") for i in range(CITATIONS_MAX_COUNT + 3)]
         body = await _post_message(
             answer_tokens=[f"Cited [c:c0][c:c{CITATIONS_MAX_COUNT + 1}]."],
             retrieved_chunks=chunks,
@@ -220,3 +222,59 @@ class TestSseIntegration:
         assert cited_ids == {"c0", f"c{CITATIONS_MAX_COUNT + 1}"}
         # 2 cited + CITATIONS_MAX_COUNT non-cited = 12 total.
         assert len(payload) == 2 + CITATIONS_MAX_COUNT
+
+    async def test_same_video_chunks_collapsed_to_one_citation(self) -> None:
+        """Multiple chunks from the same video collapse into a single citation
+        entry (issue #208). segment_count reflects the original chunk count."""
+        chunks = [{**_chunk(f"c{i}", "v1"), "start_seconds": float(i * 10)} for i in range(5)]
+        # Only c2 (start_seconds=20.0) is cited
+        body = await _post_message(
+            answer_tokens=["Answer [c:c2]."],
+            retrieved_chunks=chunks,
+        )
+        payload = _parse_sources(body)
+        assert len(payload) == 1
+        entry = payload[0]
+        assert entry["video_id"] == "v1"
+        assert entry["is_cited"] is True
+        assert entry["segment_count"] == 5
+        # Representative picks earliest cited chunk → c2 at 20.0s
+        assert entry["start_seconds"] == 20.0
+
+    async def test_collapse_two_videos_preserves_both(self) -> None:
+        """Chunks from two different videos collapse to two entries, each with
+        correct is_cited and segment_count."""
+        chunks_v1 = [{**_chunk(f"v1c{i}", "v1"), "start_seconds": float(i * 5)} for i in range(3)]
+        chunks_v2 = [{**_chunk(f"v2c{i}", "v2"), "start_seconds": float(i * 5)} for i in range(3)]
+        # v1c1 and v2c0 are cited
+        body = await _post_message(
+            answer_tokens=["From v1 [c:v1c1]. From v2 [c:v2c0]."],
+            retrieved_chunks=chunks_v1 + chunks_v2,
+        )
+        payload = _parse_sources(body)
+        assert len(payload) == 2
+        by_vid = {e["video_id"]: e for e in payload}
+        assert by_vid["v1"]["is_cited"] is True
+        assert by_vid["v1"]["segment_count"] == 3
+        assert by_vid["v1"]["start_seconds"] == 5.0  # v1c1
+        assert by_vid["v2"]["is_cited"] is True
+        assert by_vid["v2"]["segment_count"] == 3
+        assert by_vid["v2"]["start_seconds"] == 0.0  # v2c0
+
+    async def test_collapse_uncited_group_picks_earliest_timestamp(self) -> None:
+        """All same-video chunks uncited → is_cited=False, earliest start_seconds selected."""
+        chunks = [
+            {**_chunk(f"c{i}", "v1"), "start_seconds": float(i * 10)}
+            for i in range(3)
+        ]
+        # No markers in answer — nothing cited
+        body = await _post_message(
+            answer_tokens=["Plain answer."],
+            retrieved_chunks=chunks,
+        )
+        payload = _parse_sources(body)
+        assert len(payload) == 1
+        entry = payload[0]
+        assert entry["is_cited"] is False
+        assert entry["segment_count"] == 3
+        assert entry["start_seconds"] == 0.0  # c0, earliest

@@ -51,9 +51,7 @@ async def main() -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     logger = logging.getLogger("sync_channel_cli")
-    logger.info(
-        "starting channel sync via CLI (limit=%s, force=%s)", args.limit, args.force
-    )
+    logger.info("starting channel sync via CLI (limit=%s, force=%s)", args.limit, args.force)
 
     # Stand the asyncpg pool up ourselves — the FastAPI lifespan does this
     # at uvicorn startup, but we're a separate Python process inside the same

@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import type { Citation } from '../lib/api';
 import { Message } from './Message';
 
 describe('Message — streamingStatus rendering', () => {
@@ -49,5 +50,62 @@ describe('Message — streamingStatus rendering', () => {
     );
     expect(screen.getByText('Answer here.')).toBeInTheDocument();
     expect(screen.queryByText(/Searching/)).not.toBeInTheDocument();
+  });
+});
+
+describe('Message — citation chip segment_count label', () => {
+  const baseCitation: Citation = {
+    chunk_id: 'c1',
+    video_id: 'v1',
+    video_title: 'Demo Video',
+    video_url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    start_seconds: 60,
+    end_seconds: 70,
+    snippet: 'snippet text',
+    is_cited: true,
+  };
+
+  it('shows "(N segments)" suffix when segment_count > 1', () => {
+    const citation = { ...baseCitation, segment_count: 4 };
+    render(
+      <Message
+        role="assistant"
+        content="Answer text."
+        isStreaming={false}
+        streamingStatus={null}
+        sources={[citation]}
+        onCitationClick={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /\(4 segments\)/ })).toBeInTheDocument();
+  });
+
+  it('omits segment label when segment_count is 1', () => {
+    const citation = { ...baseCitation, segment_count: 1 };
+    render(
+      <Message
+        role="assistant"
+        content="Answer text."
+        isStreaming={false}
+        streamingStatus={null}
+        sources={[citation]}
+        onCitationClick={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText(/segments/)).not.toBeInTheDocument();
+  });
+
+  it('omits segment label when segment_count is absent', () => {
+    render(
+      <Message
+        role="assistant"
+        content="Answer text."
+        isStreaming={false}
+        streamingStatus={null}
+        sources={[baseCitation]}
+        onCitationClick={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText(/segments/)).not.toBeInTheDocument();
   });
 });

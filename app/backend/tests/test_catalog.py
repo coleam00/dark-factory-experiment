@@ -175,9 +175,24 @@ async def test_build_system_prompt_catalog_excludes_dynamous_for_non_members() -
     from backend.llm.openrouter import build_system_prompt
 
     full_catalog = [
-        {"id": "yt-1", "title": "YouTube Vid 1", "url": "https://youtu.be/x", "source_type": "youtube"},
-        {"id": "dyn-1", "title": "1.6 Conversational vs. Autonomous Agents", "url": "", "source_type": "dynamous"},
-        {"id": "yt-2", "title": "YouTube Vid 2", "url": "https://youtu.be/y", "source_type": "youtube"},
+        {
+            "id": "yt-1",
+            "title": "YouTube Vid 1",
+            "url": "https://youtu.be/x",
+            "source_type": "youtube",
+        },
+        {
+            "id": "dyn-1",
+            "title": "1.6 Conversational vs. Autonomous Agents",
+            "url": "",
+            "source_type": "dynamous",
+        },
+        {
+            "id": "yt-2",
+            "title": "YouTube Vid 2",
+            "url": "https://youtu.be/y",
+            "source_type": "youtube",
+        },
     ]
     with (
         patch("backend.llm.openrouter.CATALOG_ENABLED", True),
@@ -200,8 +215,18 @@ async def test_build_system_prompt_catalog_includes_dynamous_for_members() -> No
     from backend.llm.openrouter import build_system_prompt
 
     full_catalog = [
-        {"id": "yt-1", "title": "YouTube Vid 1", "url": "https://youtu.be/x", "source_type": "youtube"},
-        {"id": "dyn-1", "title": "1.6 Conversational vs. Autonomous Agents", "url": "", "source_type": "dynamous"},
+        {
+            "id": "yt-1",
+            "title": "YouTube Vid 1",
+            "url": "https://youtu.be/x",
+            "source_type": "youtube",
+        },
+        {
+            "id": "dyn-1",
+            "title": "1.6 Conversational vs. Autonomous Agents",
+            "url": "",
+            "source_type": "dynamous",
+        },
     ]
     with (
         patch("backend.llm.openrouter.CATALOG_ENABLED", True),

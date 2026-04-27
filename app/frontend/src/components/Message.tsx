@@ -61,6 +61,7 @@ function citationChip(
       }}
     >
       {formatTimestamp(citation.start_seconds)} — {citation.video_title}
+      {(citation.segment_count ?? 0) > 1 ? ` (${citation.segment_count} segments)` : ''}
     </button>
   );
 }

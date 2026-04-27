@@ -752,7 +752,12 @@ class TestRefusalSourcesSuppressionIntegration:
         ]
 
         async def mock_stream_chat(
-            messages, tools=None, tool_executor=None, max_tool_calls=0, final_text_out=None, **_kwargs
+            messages,
+            tools=None,
+            tool_executor=None,
+            max_tool_calls=0,
+            final_text_out=None,
+            **_kwargs,
         ):
             if tool_executor is not None:
                 await tool_executor("search_videos", json.dumps({"query": "test"}))
@@ -761,7 +766,9 @@ class TestRefusalSourcesSuppressionIntegration:
                 final_text_out.append(refusal_text)
             yield done_chunk
 
-        async def mock_execute_tool(name, raw_args, video_id_whitelist=None, embedding_cache=None, is_member=False):
+        async def mock_execute_tool(
+            name, raw_args, video_id_whitelist=None, embedding_cache=None, is_member=False
+        ):
             return {"ok": True, "text": "context", "chunks": source_citations}
 
         test_user_id = str(uuid4())
@@ -849,7 +856,12 @@ class TestRefusalSourcesSuppressionIntegration:
         # an injected closure. We simulate a successful search + then a refusal
         # response by calling the executor ourselves inside mock_stream_chat.
         async def mock_stream_chat(
-            messages, tools=None, tool_executor=None, max_tool_calls=0, final_text_out=None, **_kwargs
+            messages,
+            tools=None,
+            tool_executor=None,
+            max_tool_calls=0,
+            final_text_out=None,
+            **_kwargs,
         ):
             if tool_executor is not None:
                 await tool_executor("search_videos", json.dumps({"query": "test"}))
@@ -858,7 +870,9 @@ class TestRefusalSourcesSuppressionIntegration:
                 final_text_out.append(refusal_text)
             yield done_chunk
 
-        async def mock_execute_tool(name, raw_args, video_id_whitelist=None, embedding_cache=None, is_member=False):
+        async def mock_execute_tool(
+            name, raw_args, video_id_whitelist=None, embedding_cache=None, is_member=False
+        ):
             return {"ok": True, "text": "context", "chunks": source_citations}
 
         from uuid import uuid4
@@ -947,7 +961,12 @@ class TestRefusalSourcesSuppressionIntegration:
         ]
 
         async def mock_stream_chat(
-            messages, tools=None, tool_executor=None, max_tool_calls=0, final_text_out=None, **_kwargs
+            messages,
+            tools=None,
+            tool_executor=None,
+            max_tool_calls=0,
+            final_text_out=None,
+            **_kwargs,
         ):
             if tool_executor is not None:
                 await tool_executor("search_videos", json.dumps({"query": "test"}))
@@ -956,7 +975,9 @@ class TestRefusalSourcesSuppressionIntegration:
                 final_text_out.append(answer_text)
             yield done_chunk
 
-        async def mock_execute_tool(name, raw_args, video_id_whitelist=None, embedding_cache=None, is_member=False):
+        async def mock_execute_tool(
+            name, raw_args, video_id_whitelist=None, embedding_cache=None, is_member=False
+        ):
             return {"ok": True, "text": "context", "chunks": source_citations}
 
         from uuid import uuid4
@@ -1060,7 +1081,7 @@ class TestChunkExpansionIntegration:
             tool_executor=None,
             max_tool_calls=0,
             final_text_out=None,
-        **_kwargs,
+            **_kwargs,
         ):
             if tool_executor is not None:
                 await tool_executor("search_videos", json.dumps({"query": "test"}))
@@ -1069,7 +1090,9 @@ class TestChunkExpansionIntegration:
                 final_text_out.append("The video explains it works.")
             yield done_chunk
 
-        async def mock_execute_tool(name, raw_args, video_id_whitelist=None, embedding_cache=None, is_member=False):
+        async def mock_execute_tool(
+            name, raw_args, video_id_whitelist=None, embedding_cache=None, is_member=False
+        ):
             return {"ok": True, "text": "context", "chunks": source_citations}
 
         from uuid import uuid4

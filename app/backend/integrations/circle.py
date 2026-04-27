@@ -73,9 +73,7 @@ async def verify_paid_member(email: str) -> bool:
                 return False
 
             # Step 2: confirm the member is in the paid access group
-            r2 = await client.get(
-                f"{CIRCLE_BASE}/community_members/{member_id}/access_groups"
-            )
+            r2 = await client.get(f"{CIRCLE_BASE}/community_members/{member_id}/access_groups")
             if r2.status_code != 200:
                 logger.warning(
                     "Circle access_groups returned %s for member %s; fail-closed",

@@ -266,10 +266,13 @@ Example sources array:
     "video_url": "https://www.youtube.com/watch?v=abc123xyz",
     "start_seconds": 145.5,
     "end_seconds": 162.3,
-    "snippet": "...decorators wrap a function to extend its behavior..."
+    "snippet": "...decorators wrap a function to extend its behavior...",
+    "segment_count": 3
   }
 ]
 ```
+
+`segment_count` — number of transcript chunks from the same video that were collapsed into this single citation entry. Always ≥ 1. The frontend displays "(N segments)" when this value is > 1.
 
 **`[DONE]` Terminator:**
 ```

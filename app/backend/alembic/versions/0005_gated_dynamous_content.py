@@ -41,10 +41,7 @@ def upgrade() -> None:
         ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb
         """
     )
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS videos_content_path_idx "
-        "ON videos (content_path)"
-    )
+    op.execute("CREATE INDEX IF NOT EXISTS videos_content_path_idx ON videos (content_path)")
 
     # --- chunks: denormalize source_type for fast ACL filtering ----------
     # Default 'youtube' is correct for existing rows (all pre-#147 chunks
@@ -55,10 +52,7 @@ def upgrade() -> None:
         ADD COLUMN IF NOT EXISTS source_type TEXT NOT NULL DEFAULT 'youtube'
         """
     )
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS chunks_source_type_idx "
-        "ON chunks (source_type)"
-    )
+    op.execute("CREATE INDEX IF NOT EXISTS chunks_source_type_idx ON chunks (source_type)")
 
     # --- users: Circle membership tracking -------------------------------
     op.execute(
