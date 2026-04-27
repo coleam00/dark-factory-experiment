@@ -260,3 +260,21 @@ class TestSseIntegration:
         assert by_vid["v2"]["is_cited"] is True
         assert by_vid["v2"]["segment_count"] == 3
         assert by_vid["v2"]["start_seconds"] == 0.0  # v2c0
+
+    async def test_collapse_uncited_group_picks_earliest_timestamp(self) -> None:
+        """All same-video chunks uncited → is_cited=False, earliest start_seconds selected."""
+        chunks = [
+            {**_chunk(f"c{i}", "v1"), "start_seconds": float(i * 10)}
+            for i in range(3)
+        ]
+        # No markers in answer — nothing cited
+        body = await _post_message(
+            answer_tokens=["Plain answer."],
+            retrieved_chunks=chunks,
+        )
+        payload = _parse_sources(body)
+        assert len(payload) == 1
+        entry = payload[0]
+        assert entry["is_cited"] is False
+        assert entry["segment_count"] == 3
+        assert entry["start_seconds"] == 0.0  # c0, earliest

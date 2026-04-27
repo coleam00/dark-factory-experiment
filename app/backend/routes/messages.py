@@ -466,7 +466,7 @@ async def _maybe_set_conversation_title(
         await repository.update_conversation_title(conv_id, user_id=user_id, title=title)
 
 
-def _collapse_by_video(chunks: list[dict]) -> list[dict]:
+def _collapse_by_video(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Collapse multiple chunks from the same video into a single citation entry.
 
     After the ``is_cited`` pass, chunks from the same video are redundant in
