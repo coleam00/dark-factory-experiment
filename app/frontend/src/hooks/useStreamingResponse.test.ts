@@ -283,10 +283,7 @@ describe('conversationId reset — state clears on navigation', () => {
   });
 
   it('resets all streaming state when conversationId changes', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockReturnValue(new Promise(() => {})),
-    );
+    vi.stubGlobal('fetch', vi.fn().mockReturnValue(new Promise(() => {})));
 
     const { result, rerender } = renderHook(
       ({ convId }: { convId: string | null }) => useStreamingResponse(convId),
@@ -308,10 +305,7 @@ describe('conversationId reset — state clears on navigation', () => {
   });
 
   it('resets streaming state when conversationId changes to null', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockReturnValue(new Promise(() => {})),
-    );
+    vi.stubGlobal('fetch', vi.fn().mockReturnValue(new Promise(() => {})));
 
     const { result, rerender } = renderHook(
       ({ convId }: { convId: string | null }) => useStreamingResponse(convId),
@@ -329,10 +323,7 @@ describe('conversationId reset — state clears on navigation', () => {
   });
 
   it('does not reset state when conversationId stays the same', async () => {
-    const sseChunks = [
-      'data: "Hello"\n\n',
-      'data: [DONE]\n\n',
-    ];
+    const sseChunks = ['data: "Hello"\n\n', 'data: [DONE]\n\n'];
 
     vi.stubGlobal(
       'fetch',
