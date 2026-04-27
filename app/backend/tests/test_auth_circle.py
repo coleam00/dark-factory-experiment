@@ -64,7 +64,7 @@ def fake_users_repo(monkeypatch):
 
     async def get_user_by_id(user_id: Any) -> dict[str, Any] | None:
         u = store.get(str(user_id))
-        return ({k: v for k, v in u.items() if k != "password_hash"} if u else None)
+        return {k: v for k, v in u.items() if k != "password_hash"} if u else None
 
     async def update_last_login(user_id: Any) -> None:
         u = store.get(str(user_id))

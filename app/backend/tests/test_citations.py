@@ -106,7 +106,7 @@ async def _post_message(*, answer_tokens: list[str], retrieved_chunks: list[dict
         tool_executor=None,
         max_tool_calls=0,
         final_text_out=None,
-    **_kwargs,
+        **_kwargs,
     ):
         if tool_executor is not None:
             await tool_executor("search_videos", json.dumps({"query": "t"}))

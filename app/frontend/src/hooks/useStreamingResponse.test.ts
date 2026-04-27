@@ -283,10 +283,9 @@ describe('conversationId reset', () => {
   });
 
   it('resets streaming state when conversationId changes', () => {
-    const { result, rerender } = renderHook(
-      ({ id }) => useStreamingResponse(id),
-      { initialProps: { id: 'conv-1' } },
-    );
+    const { result, rerender } = renderHook(({ id }) => useStreamingResponse(id), {
+      initialProps: { id: 'conv-1' },
+    });
 
     // Verify initial state
     expect(result.current.isStreaming).toBe(false);
