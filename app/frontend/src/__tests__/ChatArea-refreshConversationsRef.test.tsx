@@ -41,9 +41,9 @@ vi.mock('../hooks/useMessages', () => ({
 
 vi.mock('../hooks/useStreamingResponse', () => ({
   useStreamingResponse: () => ({
-    streamingContent: '',
+    streamingContent: streamingStateRef.current.streamingContent,
     streamingSources: [],
-    isStreaming: false,
+    isStreaming: streamingStateRef.current.isStreaming,
     startStream: vi.fn().mockImplementation(async (conversationId, content, onComplete) => {
       // Actually call the real fetch logic to properly test error handling
       const res = await fetch(`/api/conversations/${conversationId}/messages`, {
@@ -87,6 +87,7 @@ beforeEach(() => {
 
 // Mutable ref captured by the useToast mock factory - updated in beforeEach
 const addToastRef = { current: vi.fn() };
+const streamingStateRef = { current: { isStreaming: false, streamingContent: '' } };
 
 describe('ChatArea refreshConversationsRef', () => {
   beforeEach(() => {
@@ -94,6 +95,8 @@ describe('ChatArea refreshConversationsRef', () => {
     vi.spyOn(api, 'getConversations').mockResolvedValue([]);
     // Reset addToastRef to a fresh spy for each test
     addToastRef.current = vi.fn();
+    // Reset streaming state ref
+    streamingStateRef.current = { isStreaming: false, streamingContent: '' };
   });
 
   /**
@@ -350,5 +353,93 @@ describe('ChatArea refreshConversationsRef', () => {
     // Even though messages === [] on first render, EmptyState must not appear
     // because location.state.initialMessage signals a first-send in flight.
     expect(screen.queryByText('Ask anything about the video library')).not.toBeInTheDocument();
+  });
+
+  // Regression tests for issue #215: auto-scroll behavior during streaming
+  it('should use instant scroll behavior during streaming', async () => {
+    streamingStateRef.current = { isStreaming: true, streamingContent: 'token' };
+
+    let rafCallback: ((time: number) => void) | null = null;
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
+      rafCallback = cb as (time: number) => void;
+      return 1;
+    });
+
+    const scrollSpy = vi.spyOn(Element.prototype, 'scrollIntoView');
+
+    render(
+      <MemoryRouter>
+        <ChatArea conversationId="conv-1" />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('textbox')).toBeInTheDocument();
+    });
+
+    // Execute the RAF callback to trigger the scroll
+    if (rafCallback) {
+      (rafCallback as (time: number) => void)(0);
+    }
+
+    // Verify scrollIntoView was called with 'instant' behavior during streaming
+    expect(scrollSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ behavior: 'instant', block: 'end' }),
+    );
+  });
+
+  it('should not auto-scroll when user has scrolled up', async () => {
+    streamingStateRef.current = { isStreaming: true, streamingContent: 'token1' };
+
+    const rafCallbacks: Array<(time: number) => void> = [];
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
+      rafCallbacks.push(cb as (time: number) => void);
+      return rafCallbacks.length;
+    });
+
+    const scrollSpy = vi.spyOn(Element.prototype, 'scrollIntoView');
+
+    const { container, rerender } = render(
+      <MemoryRouter>
+        <ChatArea conversationId="conv-1" />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('textbox')).toBeInTheDocument();
+    });
+
+    // Flush all pending RAF callbacks from initial render
+    rafCallbacks.splice(0, rafCallbacks.length).forEach((cb) => cb(0));
+
+    // Clear spy to focus on post-scroll behavior
+    scrollSpy.mockClear();
+
+    // Simulate user scrolling up by firing scroll event with distFromBottom >= 100
+    // The scroll container is the parent of the bottom-ref div (height: 1px)
+    const bottomDiv = container.querySelector('div[style*="height: 1px"]');
+    const scrollContainer = bottomDiv?.parentElement;
+    expect(scrollContainer).toBeTruthy();
+    if (scrollContainer) {
+      vi.spyOn(scrollContainer, 'scrollHeight', 'get').mockReturnValue(1000);
+      vi.spyOn(scrollContainer, 'scrollTop', 'get').mockReturnValue(0);
+      vi.spyOn(scrollContainer, 'clientHeight', 'get').mockReturnValue(500);
+
+      scrollContainer.dispatchEvent(new Event('scroll', { bubbles: false }));
+    }
+
+    // Change streaming content to trigger a re-render
+    streamingStateRef.current.streamingContent = 'token2';
+    rerender(
+      <MemoryRouter>
+        <ChatArea conversationId="conv-1" />
+      </MemoryRouter>,
+    );
+
+    // Flush any RAF callbacks queued after re-render
+    rafCallbacks.splice(0, rafCallbacks.length).forEach((cb) => cb(0));
+
+    // After scrolling up, scrollIntoView should NOT have been called again
+    expect(scrollSpy).not.toHaveBeenCalled();
   });
 });

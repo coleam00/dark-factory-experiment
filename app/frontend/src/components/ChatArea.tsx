@@ -311,6 +311,12 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
   const bottomRef = useRef<HTMLDivElement>(null);
   const autoScrollRef = useRef(true);
 
+  // Reset auto-scroll intent when switching conversations so the new
+  // conversation starts pinned to the bottom.
+  useEffect(() => {
+    autoScrollRef.current = true;
+  }, [conversationId]);
+
   // Inline error state (for failed sends)
   const [inlineError, setInlineError] = useState<string | null>(null);
   const [failedMessageText, setFailedMessageText] = useState<string | null>(null);
@@ -328,14 +334,15 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
 
   useEffect(() => {
     if (autoScrollRef.current) {
+      const behavior: ScrollBehavior = isStreaming ? 'instant' : 'smooth';
       requestAnimationFrame(() => {
-        scrollToBottom();
+        scrollToBottom(behavior);
       });
     }
-  }, [messages.length, streamingContent, scrollToBottom]);
+  }, [messages.length, streamingContent, scrollToBottom, isStreaming]);
 
   useEffect(() => {
-    if (!loading && messages.length > 0) {
+    if (!loading && messages.length > 0 && autoScrollRef.current) {
       setTimeout(() => scrollToBottom('instant' as ScrollBehavior), 50);
     }
   }, [loading, scrollToBottom]); // eslint-disable-line react-hooks/exhaustive-deps
