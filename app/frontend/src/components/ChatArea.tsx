@@ -302,7 +302,7 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
     isStreaming,
     startStream,
     abortStream,
-  } = useStreamingResponse();
+  } = useStreamingResponse(conversationId || null);
   const { addToast } = useToast();
   const { refresh: refreshAuth } = useAuth();
 

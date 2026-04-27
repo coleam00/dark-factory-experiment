@@ -155,7 +155,7 @@ describe('status event SSE parsing — hook state transitions', () => {
     );
 
     const onComplete = vi.fn();
-    const { result } = renderHook(() => useStreamingResponse());
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
 
     await act(async () => {
       await result.current.startStream('conv-1', 'hi', onComplete);
@@ -189,7 +189,7 @@ describe('status event SSE parsing — hook state transitions', () => {
       }),
     );
 
-    const { result } = renderHook(() => useStreamingResponse());
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
 
     await act(async () => {
       await result.current.startStream('conv-1', 'hi', vi.fn());
@@ -216,7 +216,7 @@ describe('status event SSE parsing — hook state transitions', () => {
       }),
     );
 
-    const { result } = renderHook(() => useStreamingResponse());
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
 
     await act(async () => {
       await result.current.startStream('conv-1', 'hi', vi.fn());
@@ -247,7 +247,7 @@ describe('status event SSE parsing — hook state transitions', () => {
       }),
     );
 
-    const { result } = renderHook(() => useStreamingResponse());
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
 
     await act(async () => {
       await result.current.startStream('conv-1', 'hi', vi.fn());
@@ -263,16 +263,99 @@ describe('abortStream', () => {
   });
 
   it('should be a no-op when no stream is active', () => {
-    const { result } = renderHook(() => useStreamingResponse());
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
     expect(result.current.abortStream).not.toThrow();
     expect(result.current.isStreaming).toBe(false);
   });
 
   it('should be callable multiple times without throwing', () => {
-    const { result } = renderHook(() => useStreamingResponse());
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
     result.current.abortStream();
     result.current.abortStream();
     result.current.abortStream();
     expect(result.current.isStreaming).toBe(false);
+  });
+});
+
+describe('conversationId reset — state clears on navigation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('resets all streaming state when conversationId changes', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockReturnValue(new Promise(() => {})),
+    );
+
+    const { result, rerender } = renderHook(
+      ({ convId }: { convId: string | null }) => useStreamingResponse(convId),
+      { initialProps: { convId: 'conv-a' } },
+    );
+
+    // Start streaming (fire-and-forget — promise never resolves)
+    act(() => {
+      void result.current.startStream('conv-a', 'hello', vi.fn());
+    });
+
+    // Switch conversation — effect should reset all state
+    rerender({ convId: 'conv-b' });
+
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.streamingContent).toBe('');
+    expect(result.current.streamingSources).toHaveLength(0);
+    expect(result.current.streamingStatus).toBeNull();
+  });
+
+  it('resets streaming state when conversationId changes to null', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockReturnValue(new Promise(() => {})),
+    );
+
+    const { result, rerender } = renderHook(
+      ({ convId }: { convId: string | null }) => useStreamingResponse(convId),
+      { initialProps: { convId: 'conv-a' as string | null } },
+    );
+
+    act(() => {
+      void result.current.startStream('conv-a', 'hello', vi.fn());
+    });
+
+    rerender({ convId: null });
+
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.streamingContent).toBe('');
+  });
+
+  it('does not reset state when conversationId stays the same', async () => {
+    const sseChunks = [
+      'data: "Hello"\n\n',
+      'data: [DONE]\n\n',
+    ];
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: makeSseStream(sseChunks),
+      }),
+    );
+
+    const onComplete = vi.fn();
+    const { result, rerender } = renderHook(
+      ({ convId }: { convId: string | null }) => useStreamingResponse(convId),
+      { initialProps: { convId: 'conv-a' } },
+    );
+
+    await act(async () => {
+      await result.current.startStream('conv-a', 'hi', onComplete);
+    });
+
+    // Re-render with same conversationId — onComplete should have been called
+    rerender({ convId: 'conv-a' });
+
+    expect(onComplete).toHaveBeenCalledWith(expect.objectContaining({ fullText: 'Hello' }));
   });
 });
