@@ -32,16 +32,12 @@ describe('CitationModal', () => {
     expect(iframe.src).toContain('autoplay=1');
   });
 
-  it('shows transcript snippet with heading', () => {
+  it('does not render a transcript snippet section', () => {
     const onClose = vi.fn();
     render(<CitationModal citation={mockCitation} onClose={onClose} />);
 
-    expect(screen.getByText('Transcript Excerpt')).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        'This is a sample transcript snippet that appears in the video at the cited moment.',
-      ),
-    ).toBeInTheDocument();
+    expect(screen.queryByText('Transcript Excerpt')).not.toBeInTheDocument();
+    expect(screen.queryByText(mockCitation.snippet)).not.toBeInTheDocument();
   });
 
   it('shows external link with correct t param', () => {
@@ -79,18 +75,6 @@ describe('CitationModal', () => {
     const closeButton = screen.getByRole('button', { name: 'Close' });
     fireEvent.click(closeButton);
     expect(onClose).toHaveBeenCalledTimes(1);
-  });
-
-  it('truncates long snippets with ellipsis', () => {
-    const longCitation: Citation = {
-      ...mockCitation,
-      snippet: 'A'.repeat(400),
-    };
-    const onClose = vi.fn();
-    render(<CitationModal citation={longCitation} onClose={onClose} />);
-
-    const snippetEl = screen.getByText(/^A{297}…$/);
-    expect(snippetEl).toBeInTheDocument();
   });
 
   it('shows video unavailable when video URL is invalid', () => {

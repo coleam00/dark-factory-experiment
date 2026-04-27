@@ -14,19 +14,15 @@ export function formatTimestamp(seconds: number): string {
 }
 
 export function CitationModal({ citation, onClose }: CitationModalProps) {
-  // Issue #147: paid Dynamous course / workshop citations render without an
-  // embedded player. Circle doesn't support timestamp deep-links, so we link
-  // straight to the lesson URL with the (MM:SS) shown as text in the header.
-  const isDynamous = citation.source_type === 'dynamous';
+  // Modal is YouTube-only. Dynamous citations are routed directly to lesson_url
+  // by the caller (ChatArea.handleCitationClick) — this component never sees them.
 
   // Extract YouTube video ID from URL (format: https://www.youtube.com/watch?v=<id>)
   let videoId = '';
-  if (!isDynamous) {
-    try {
-      videoId = new URL(citation.video_url).searchParams.get('v') ?? '';
-    } catch {
-      console.warn('[CitationModal] Could not parse video URL:', citation.video_url);
-    }
+  try {
+    videoId = new URL(citation.video_url).searchParams.get('v') ?? '';
+  } catch {
+    console.warn('[CitationModal] Could not parse video URL:', citation.video_url);
   }
 
   const startSeconds = Math.floor(citation.start_seconds);
@@ -35,13 +31,9 @@ export function CitationModal({ citation, onClose }: CitationModalProps) {
     ? `https://www.youtube.com/embed/${videoId}?start=${startSeconds}&autoplay=1`
     : '';
 
-  const externalUrl = isDynamous
-    ? (citation.lesson_url ?? '')
-    : videoId
-      ? `https://www.youtube.com/watch?v=${videoId}&t=${startSeconds}s`
-      : '';
-
-  const externalLabel = isDynamous ? 'Open on Dynamous' : 'Open on YouTube';
+  const externalUrl = videoId
+    ? `https://www.youtube.com/watch?v=${videoId}&t=${startSeconds}s`
+    : '';
 
   // Close on ESC key
   useEffect(() => {
@@ -59,10 +51,6 @@ export function CitationModal({ citation, onClose }: CitationModalProps) {
       document.body.style.overflow = '';
     };
   }, []);
-
-  // Truncate snippet to max 300 display chars (297 + ellipsis)
-  const snippetDisplay =
-    citation.snippet.length > 300 ? citation.snippet.slice(0, 297) + '…' : citation.snippet;
 
   return (
     <div
@@ -96,34 +84,23 @@ export function CitationModal({ citation, onClose }: CitationModalProps) {
           </button>
         </div>
 
-        {/* Content: YouTube iframe (top) + transcript (bottom).
-            Dynamous citations skip the iframe — Circle has no embed/deep-link
-            support, so the snippet + external link is all we render. */}
+        {/* Content: YouTube iframe. Modal is YouTube-only — Dynamous citations
+            go directly to lesson_url (handled in ChatArea before this modal opens). */}
         <div className="flex-1 min-h-0 flex flex-col gap-4 mb-4 overflow-y-auto">
-          {!isDynamous && (
-            <div className="w-full aspect-video">
-              {embedUrl ? (
-                <iframe
-                  src={embedUrl}
-                  allow="autoplay; encrypted-media"
-                  allowFullScreen
-                  title="YouTube video player"
-                  className="w-full h-full rounded-lg"
-                />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center bg-slate-900 rounded-lg text-slate-500 text-sm">
-                  Video unavailable
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Transcript snippet */}
-          <div>
-            <h4 className="text-slate-200 text-sm font-semibold mb-1">Transcript Excerpt</h4>
-            <p className="text-slate-300 text-sm leading-relaxed m-0 whitespace-pre-wrap">
-              {snippetDisplay}
-            </p>
+          <div className="w-full aspect-video">
+            {embedUrl ? (
+              <iframe
+                src={embedUrl}
+                allow="autoplay; encrypted-media"
+                allowFullScreen
+                title="YouTube video player"
+                className="w-full h-full rounded-lg"
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center bg-slate-900 rounded-lg text-slate-500 text-sm">
+                Video unavailable
+              </div>
+            )}
           </div>
         </div>
 
@@ -136,7 +113,7 @@ export function CitationModal({ citation, onClose }: CitationModalProps) {
               rel="noopener noreferrer"
               className="text-slate-400 hover:text-slate-200 text-xs flex items-center gap-1 transition-colors"
             >
-              {externalLabel}
+              Open on YouTube
               <svg
                 width="10"
                 height="10"

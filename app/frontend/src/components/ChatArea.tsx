@@ -347,9 +347,15 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
     autoScrollRef.current = distFromBottom < 100;
   }, []);
 
-  // ── Citation click handler (opens modal) ──
+  // ── Citation click handler ──
+  // Dynamous: open lesson URL directly in a new tab — no modal.
+  // YouTube: open the embedded player modal as usual.
   const handleCitationClick = useCallback((citation: Citation) => {
-    setSelectedCitation(citation);
+    if (citation.source_type === 'dynamous') {
+      window.open(citation.lesson_url ?? '', '_blank', 'noopener,noreferrer');
+    } else {
+      setSelectedCitation(citation);
+    }
   }, []);
 
   // ── Send handler ──
