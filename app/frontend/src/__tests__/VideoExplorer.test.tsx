@@ -567,4 +567,66 @@ describe('VideoExplorer', () => {
       expect(screen.queryByText(/No videos match/)).not.toBeInTheDocument();
     });
   });
+
+  describe('title link', () => {
+    it('renders title as a link to video.url for a YouTube video', async () => {
+      vi.spyOn(api, 'getVideos').mockResolvedValueOnce([
+        {
+          id: '1',
+          title: 'YouTube Video Title',
+          description: '',
+          url: 'https://youtube.com/watch?v=abc123',
+          created_at: '2024-01-01T00:00:00Z',
+          source_type: 'youtube',
+        },
+      ]);
+      render(<VideoExplorer isOpen={true} onClose={vi.fn()} />);
+      await waitFor(() => expect(screen.getByText('YouTube Video Title')).toBeInTheDocument());
+
+      const link = screen.getByRole('link', { name: 'YouTube Video Title' }) as HTMLAnchorElement;
+      expect(link.href).toContain('youtube.com/watch?v=abc123');
+      expect(link.target).toBe('_blank');
+      expect(link.rel).toContain('noopener');
+      expect(link.rel).toContain('noreferrer');
+    });
+
+    it('renders title as a link to lesson_url for a Dynamous video', async () => {
+      vi.spyOn(api, 'getVideos').mockResolvedValueOnce([
+        {
+          id: '2',
+          title: 'Dynamous Lesson Title',
+          description: '',
+          url: 'https://youtube.com/watch?v=xyz',
+          created_at: '2024-01-01T00:00:00Z',
+          source_type: 'dynamous',
+          lesson_url: 'https://community.dynamous.ai/c/lessons/episode-7',
+        },
+      ]);
+      render(<VideoExplorer isOpen={true} onClose={vi.fn()} />);
+      await waitFor(() => expect(screen.getByText('Dynamous Lesson Title')).toBeInTheDocument());
+
+      const link = screen.getByRole('link', {
+        name: 'Dynamous Lesson Title',
+      }) as HTMLAnchorElement;
+      expect(link.href).toContain('community.dynamous.ai');
+      expect(link.target).toBe('_blank');
+    });
+
+    it('renders title as plain text when no URL is available', async () => {
+      vi.spyOn(api, 'getVideos').mockResolvedValueOnce([
+        {
+          id: '3',
+          title: 'Untitled Video',
+          description: '',
+          url: '',
+          created_at: '2024-01-01T00:00:00Z',
+        },
+      ]);
+      render(<VideoExplorer isOpen={true} onClose={vi.fn()} />);
+      await waitFor(() => expect(screen.getByText('Untitled Video')).toBeInTheDocument());
+
+      // Title should not be a link
+      expect(screen.queryByRole('link', { name: 'Untitled Video' })).not.toBeInTheDocument();
+    });
+  });
 });

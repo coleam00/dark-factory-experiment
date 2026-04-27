@@ -34,6 +34,9 @@ function SkeletonCard() {
 
 // ── Video card ───────────────────────────────────────────────────
 function VideoCard({ video, query = '' }: { video: Video; query?: string }) {
+  const titleHref =
+    video.source_type === 'dynamous' ? (video.lesson_url ?? video.url) : video.url;
+
   return (
     <div
       className="bg-slate-800 border border-white/10 rounded-lg p-3.5 transition-colors duration-150"
@@ -41,9 +44,22 @@ function VideoCard({ video, query = '' }: { video: Video; query?: string }) {
       onMouseLeave={(e) => e.currentTarget.classList.remove('video-card-hover')}
     >
       {/* Title */}
-      <p className="text-sm font-semibold text-slate-100 mb-1.5 leading-tight">
-        {highlightMatch(video.title, query)}
-      </p>
+      {titleHref ? (
+        <a
+          href={titleHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-sm font-semibold text-slate-100 mb-1.5 leading-tight no-underline block"
+          onMouseEnter={(e) => (e.currentTarget.style.textDecoration = 'underline')}
+          onMouseLeave={(e) => (e.currentTarget.style.textDecoration = 'none')}
+        >
+          {highlightMatch(video.title, query)}
+        </a>
+      ) : (
+        <p className="text-sm font-semibold text-slate-100 mb-1.5 leading-tight">
+          {highlightMatch(video.title, query)}
+        </p>
+      )}
 
       {/* Description / channel attribution */}
       {video.channel_title ? (

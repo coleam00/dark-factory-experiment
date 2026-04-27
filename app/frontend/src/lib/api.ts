@@ -31,6 +31,8 @@ export interface Video {
   created_at: string;
   channel_id?: string;
   channel_title?: string;
+  source_type?: 'youtube' | 'dynamous' | string;
+  lesson_url?: string;
 }
 
 export interface Conversation {
