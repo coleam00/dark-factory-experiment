@@ -498,7 +498,11 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
   const showMessages = !loading && !error && !notFound && !showEmpty;
   const showSkeleton = loading && !showEmpty;
 
-  const showStreamingBubble = isStreaming;
+  // True when messages.length===0 but a first-send is in flight (chip → navigate → mount).
+  // isStreaming covers the streaming window; location.state?.initialMessage covers the gap
+  // before dispatchedInitialRef fires (#205).
+  const showEmptyInConversation =
+    messages.length === 0 && !inlineError && !isStreaming && !location.state?.initialMessage;
 
   const handleExport = useCallback(() => {
     try {
@@ -600,7 +604,7 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
 
         {showMessages && (
           <div style={{ padding: '24px 24px 0', display: 'flex', flexDirection: 'column' }}>
-            {messages.length === 0 && !inlineError ? (
+            {showEmptyInConversation ? (
               <EmptyState onStarterClick={handleStarterClick} />
             ) : (
               messages.map((msg) => (
@@ -615,7 +619,7 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
             )}
 
             {/* Streaming assistant bubble */}
-            {showStreamingBubble && (
+            {isStreaming && (
               <Message
                 role="assistant"
                 content={streamingContent}
