@@ -410,7 +410,9 @@ describe('ChatArea refreshConversationsRef', () => {
     });
 
     // Flush all pending RAF callbacks from initial render
-    rafCallbacks.splice(0, rafCallbacks.length).forEach((cb) => cb(0));
+    for (const cb of rafCallbacks.splice(0, rafCallbacks.length)) {
+      cb(0);
+    }
 
     // Clear spy to focus on post-scroll behavior
     scrollSpy.mockClear();
@@ -437,7 +439,9 @@ describe('ChatArea refreshConversationsRef', () => {
     );
 
     // Flush any RAF callbacks queued after re-render
-    rafCallbacks.splice(0, rafCallbacks.length).forEach((cb) => cb(0));
+    for (const cb of rafCallbacks.splice(0, rafCallbacks.length)) {
+      cb(0);
+    }
 
     // After scrolling up, scrollIntoView should NOT have been called again
     expect(scrollSpy).not.toHaveBeenCalled();
