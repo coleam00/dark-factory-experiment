@@ -364,6 +364,30 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
     };
   }, [isStreaming, scrollToBottom]);
 
+  // ResizeObserver re-pins the view whenever ANY content height change
+  // happens — including content that paints after the streaming rAF loop
+  // ends (citation chips, persisted-message DOM swaps, lazy images).
+  // Without this, the view sits ~one-chip-row above the absolute bottom
+  // at end-of-stream because the chips render in a frame after isStreaming
+  // flipped to false. ResizeObserver is idempotent (scrollIntoView at
+  // already-bottom is a no-op) and gated by autoScrollRef so a user who
+  // has scrolled up is not yanked.
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => {
+      if (autoScrollRef.current) {
+        scrollToBottom('instant');
+      }
+    });
+    // Observe the inner messages wrapper — its size changes as content
+    // is added; the scroll container's outer size is fixed (flex: 1).
+    const inner = container.firstElementChild;
+    if (inner) ro.observe(inner);
+    return () => ro.disconnect();
+  }, [scrollToBottom]);
+
   useEffect(() => {
     if (!loading && messages.length > 0 && autoScrollRef.current) {
       setTimeout(() => scrollToBottom('instant' as ScrollBehavior), 50);
