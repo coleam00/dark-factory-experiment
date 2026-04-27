@@ -331,6 +331,22 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
   // Without rAF, scroll fires before React's DOM reconciliation completes (issue #76).
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
     bottomRef.current?.scrollIntoView({ behavior, block: 'end' });
+    // scrollIntoView({block:'end'}) on the bottom-ref sentinel does NOT
+    // account for the scroll container's paddingBottom — the sentinel's
+    // viewport edge stops short of the absolute bottom by exactly the
+    // padding amount (140px in the current layout, observed as the
+    // 139px end-of-stream gap in production E2E). Force scrollTop to
+    // max to cover the padding offset. try/catch guards jsdom which
+    // exposes scrollTop as a getter-only property.
+    const container = scrollContainerRef.current;
+    if (container) {
+      try {
+        container.scrollTop = container.scrollHeight;
+      } catch {
+        // jsdom test environment — the scrollIntoView spy above is the
+        // observable behaviour the tests assert against.
+      }
+    }
   }, []);
 
   useEffect(() => {
