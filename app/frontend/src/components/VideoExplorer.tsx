@@ -49,9 +49,7 @@ function VideoCard({ video, query = '' }: { video: Video; query?: string }) {
           href={titleHref}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-sm font-semibold text-slate-100 mb-1.5 leading-tight no-underline block"
-          onMouseEnter={(e) => (e.currentTarget.style.textDecoration = 'underline')}
-          onMouseLeave={(e) => (e.currentTarget.style.textDecoration = 'none')}
+          className="text-sm font-semibold text-slate-100 mb-1.5 leading-tight no-underline hover:underline focus-visible:underline block"
         >
           {highlightMatch(video.title, query)}
         </a>

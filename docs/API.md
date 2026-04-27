@@ -323,10 +323,15 @@ List all ingested videos.
     "title": "Introduction to Python",
     "description": "Learn Python basics...",
     "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    "source_type": "youtube",
+    "lesson_url": null,
     "created_at": "2026-03-01T10:00:00Z"
   }
 ]
 ```
+
+`source_type` is `"youtube"` for standard YouTube content and `"dynamous"` for Dynamous community lessons.
+`lesson_url` is only present for `source_type: "dynamous"` and points to the Dynamous lesson page.
 
 ---
 

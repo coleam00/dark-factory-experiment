@@ -610,6 +610,34 @@ describe('VideoExplorer', () => {
       }) as HTMLAnchorElement;
       expect(link.href).toContain('community.dynamous.ai');
       expect(link.target).toBe('_blank');
+      expect(link.rel).toContain('noopener');
+      expect(link.rel).toContain('noreferrer');
+    });
+
+    it('renders title as a link to video.url when source_type is dynamous but lesson_url is absent', async () => {
+      vi.spyOn(api, 'getVideos').mockResolvedValueOnce([
+        {
+          id: '4',
+          title: 'Dynamous Video Without Lesson URL',
+          description: '',
+          url: 'https://youtube.com/watch?v=fallback',
+          created_at: '2024-01-01T00:00:00Z',
+          source_type: 'dynamous',
+          // lesson_url intentionally omitted
+        },
+      ]);
+      render(<VideoExplorer isOpen={true} onClose={vi.fn()} />);
+      await waitFor(() =>
+        expect(screen.getByText('Dynamous Video Without Lesson URL')).toBeInTheDocument()
+      );
+
+      const link = screen.getByRole('link', {
+        name: 'Dynamous Video Without Lesson URL',
+      }) as HTMLAnchorElement;
+      expect(link.href).toContain('youtube.com/watch?v=fallback');
+      expect(link.target).toBe('_blank');
+      expect(link.rel).toContain('noopener');
+      expect(link.rel).toContain('noreferrer');
     });
 
     it('renders title as plain text when no URL is available', async () => {
