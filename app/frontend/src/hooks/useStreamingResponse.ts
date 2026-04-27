@@ -21,7 +21,11 @@ export function useStreamingResponse(conversationId: string | null) {
 
   useEffect(() => {
     if (streamAbortRef.current) {
-      streamAbortRef.current.abort();
+      try {
+        streamAbortRef.current.abort();
+      } catch (err) {
+        console.warn('[useStreamingResponse] Abort failed:', err);
+      }
       streamAbortRef.current = null;
     }
     setIsStreaming(false);
@@ -30,9 +34,27 @@ export function useStreamingResponse(conversationId: string | null) {
     setStreamingStatus(null);
   }, [conversationId]);
 
+  // Abort any in-flight stream when the component unmounts
+  useEffect(() => {
+    return () => {
+      if (streamAbortRef.current) {
+        try {
+          streamAbortRef.current.abort();
+        } catch (err) {
+          console.warn('[useStreamingResponse] Abort failed:', err);
+        }
+        streamAbortRef.current = null;
+      }
+    };
+  }, []);
+
   const abortStream = useCallback(() => {
     if (streamAbortRef.current) {
-      streamAbortRef.current.abort();
+      try {
+        streamAbortRef.current.abort();
+      } catch (err) {
+        console.warn('[useStreamingResponse] Abort failed:', err);
+      }
       streamAbortRef.current = null;
     }
   }, []);
@@ -190,6 +212,12 @@ export function useStreamingResponse(conversationId: string | null) {
 
         // Stream completed successfully
         onComplete({ fullText, sources });
+      } catch (err) {
+        // Intentional abort (conversation switch or stop button) is not a failure
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          return;
+        }
+        throw err;
       } finally {
         // Always reset streaming state — React 18 batches this with the onComplete
         // state updates, ensuring a seamless transition to the persisted message.
@@ -200,7 +228,7 @@ export function useStreamingResponse(conversationId: string | null) {
       }
       if (streamError) throw streamError;
     },
-    [],
+    [conversationId],
   );
 
   return {

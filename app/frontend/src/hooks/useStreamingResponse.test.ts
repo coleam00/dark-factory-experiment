@@ -4,6 +4,7 @@
  * Verifies:
  *   - Parses sources event with Citation[] objects into streamingSources state
  *   - Handles malformed sources JSON gracefully with console.warn
+ *   - Resets streaming state and aborts in-flight streams on conversation switch
  */
 
 import { act, renderHook } from '@testing-library/react';
@@ -30,98 +31,128 @@ const mockCitation = {
   snippet: 'Test snippet text',
 };
 
-describe('useStreamingResponse SSE parsing', () => {
+describe('useStreamingResponse SSE parsing — hook state transitions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('parses sources event with Citation objects', () => {
-    const warnMock = vi.fn();
-    const originalWarn = console.warn;
-    console.warn = warnMock;
+  it('populates streamingSources from a sources SSE event', async () => {
+    const sseChunks = [
+      `event: sources\ndata: ${JSON.stringify([mockCitation])}\n\n`,
+      'data: "Answer."\n\n',
+      'data: [DONE]\n\n',
+    ];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: makeSseStream(sseChunks),
+      }),
+    );
 
-    // Simulate SSE parsing logic from the hook
-    const data = JSON.stringify([mockCitation]);
-    let sources: unknown[] = [];
-    try {
-      const parsed = JSON.parse(data);
-      if (Array.isArray(parsed)) {
-        sources = parsed;
-      }
-    } catch (e) {
-      console.warn('[useStreamingResponse] Failed to parse sources event:', e);
-    }
+    const onComplete = vi.fn();
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+    await act(async () => {
+      await result.current.startStream('conv-1', 'hi', onComplete);
+    });
 
-    expect(sources).toHaveLength(1);
-    expect((sources[0] as typeof mockCitation).chunk_id).toBe('chunk-1');
-    expect((sources[0] as typeof mockCitation).video_title).toBe('Test Video');
-
-    console.warn = originalWarn;
+    expect(onComplete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sources: expect.arrayContaining([
+          expect.objectContaining({ chunk_id: 'chunk-1', video_title: 'Test Video' }),
+        ]),
+      }),
+    );
+    // Hook state is cleared in finally after stream ends
+    expect(result.current.streamingSources).toEqual([]);
   });
 
-  it('warns on malformed sources JSON', () => {
-    const warnMock = vi.fn();
-    const originalWarn = console.warn;
-    console.warn = warnMock;
+  it('warns on malformed sources JSON and leaves sources empty', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    const data = 'not valid json {';
+    const sseChunks = [
+      'event: sources\ndata: not valid json {\n\n',
+      'data: "Answer."\n\n',
+      'data: [DONE]\n\n',
+    ];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: makeSseStream(sseChunks),
+      }),
+    );
 
-    let sources: unknown[] = [];
-    try {
-      const parsed = JSON.parse(data);
-      if (Array.isArray(parsed)) {
-        sources = parsed;
-      }
-    } catch (e) {
-      console.warn('[useStreamingResponse] Failed to parse sources event:', e);
-    }
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+    await act(async () => {
+      await result.current.startStream('conv-1', 'hi', vi.fn());
+    });
 
-    expect(sources).toHaveLength(0);
-    expect(warnMock).toHaveBeenCalledWith(
+    expect(result.current.streamingSources).toEqual([]);
+    expect(warnSpy).toHaveBeenCalledWith(
       '[useStreamingResponse] Failed to parse sources event:',
       expect.any(Error),
     );
 
-    console.warn = originalWarn;
+    warnSpy.mockRestore();
   });
 
-  it('handles empty sources array', () => {
-    const eventType = 'sources';
-    const data = '[]';
+  it('handles empty sources array through the hook', async () => {
+    const sseChunks = ['event: sources\ndata: []\n\n', 'data: "Answer."\n\n', 'data: [DONE]\n\n'];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: makeSseStream(sseChunks),
+      }),
+    );
 
-    let sources: unknown[] = [];
-    try {
-      const parsed = JSON.parse(data);
-      if (Array.isArray(parsed)) {
-        sources = parsed;
-      }
-    } catch {
-      // ignore
-    }
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+    await act(async () => {
+      await result.current.startStream('conv-1', 'hi', vi.fn());
+    });
 
-    expect(sources).toHaveLength(0);
+    expect(result.current.streamingSources).toEqual([]);
   });
 
-  it('handles sources event with multiple citations', () => {
+  it('handles sources event with multiple citations', async () => {
     const multipleCitations = [
       mockCitation,
       { ...mockCitation, chunk_id: 'chunk-2', video_title: 'Second Video' },
     ];
-    const data = JSON.stringify(multipleCitations);
+    const sseChunks = [
+      `event: sources\ndata: ${JSON.stringify(multipleCitations)}\n\n`,
+      'data: "Answer."\n\n',
+      'data: [DONE]\n\n',
+    ];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: makeSseStream(sseChunks),
+      }),
+    );
 
-    let sources: unknown[] = [];
-    try {
-      const parsed = JSON.parse(data);
-      if (Array.isArray(parsed)) {
-        sources = parsed;
-      }
-    } catch {
-      // ignore
-    }
+    const onComplete = vi.fn();
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+    await act(async () => {
+      await result.current.startStream('conv-1', 'hi', onComplete);
+    });
 
-    expect(sources).toHaveLength(2);
-    expect((sources[0] as typeof mockCitation).chunk_id).toBe('chunk-1');
-    expect((sources[1] as typeof mockCitation).chunk_id).toBe('chunk-2');
+    expect(onComplete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sources: expect.arrayContaining([
+          expect.objectContaining({ chunk_id: 'chunk-1' }),
+          expect.objectContaining({ chunk_id: 'chunk-2' }),
+        ]),
+      }),
+    );
+    // Hook state is cleared in finally after stream ends
+    expect(result.current.streamingSources).toEqual([]);
   });
 });
 
@@ -282,20 +313,61 @@ describe('conversationId reset', () => {
     vi.clearAllMocks();
   });
 
-  it('resets streaming state when conversationId changes', () => {
+  it('aborts in-flight stream and resets state when conversationId changes', async () => {
+    const abortSpy = vi.spyOn(AbortController.prototype, 'abort');
+
+    // Create a fetch that never resolves so the stream stays "in-flight"
+    let resolveFetch = (_value: Response) => {};
+    const fetchPromise = new Promise<Response>((resolve) => {
+      resolveFetch = resolve;
+    });
+    vi.stubGlobal('fetch', vi.fn().mockReturnValue(fetchPromise));
+
     const { result, rerender } = renderHook(({ id }) => useStreamingResponse(id), {
       initialProps: { id: 'conv-1' },
     });
 
-    // Verify initial state
-    expect(result.current.isStreaming).toBe(false);
+    // Start a stream — this should create an AbortController
+    act(() => {
+      result.current.startStream('conv-1', 'hello', vi.fn());
+    });
 
-    // Rerender with new id
+    // Stream should be active
+    expect(result.current.isStreaming).toBe(true);
+
+    // Simulate the user switching conversations
     rerender({ id: 'conv-2' });
 
+    // The abort should have been called
+    expect(abortSpy).toHaveBeenCalled();
+
+    // All state should be reset
     expect(result.current.isStreaming).toBe(false);
     expect(result.current.streamingContent).toBe('');
     expect(result.current.streamingSources).toEqual([]);
     expect(result.current.streamingStatus).toBeNull();
+
+    // Clean up: resolve the pending fetch so the test doesn't hang
+    resolveFetch(
+      new Response(
+        new ReadableStream({
+          start(c) {
+            c.close();
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+    abortSpy.mockRestore();
+  });
+
+  it('does not abort when conversationId stays the same', () => {
+    const abortSpy = vi.spyOn(AbortController.prototype, 'abort');
+    const { rerender } = renderHook(({ id }) => useStreamingResponse(id), {
+      initialProps: { id: 'conv-1' },
+    });
+    rerender({ id: 'conv-1' });
+    expect(abortSpy).not.toHaveBeenCalled();
+    abortSpy.mockRestore();
   });
 });

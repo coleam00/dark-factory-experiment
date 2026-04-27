@@ -146,6 +146,36 @@ describe('CitationModal', () => {
     // Relative URL throws in URL constructor, shows unavailable
     expect(screen.getByText('Video unavailable')).toBeInTheDocument();
   });
+
+  it('renders Dynamous citation with lesson_url link and no iframe', () => {
+    const dynamousCitation: Citation = {
+      ...mockCitation,
+      source_type: 'dynamous',
+      lesson_url: 'https://community.dynamous.ai/c/lesson-1',
+    };
+    const onClose = vi.fn();
+    render(<CitationModal citation={dynamousCitation} onClose={onClose} />);
+
+    // No YouTube iframe for Dynamous content
+    expect(screen.queryByTitle('YouTube video player')).not.toBeInTheDocument();
+
+    // External link points to lesson_url with Dynamous label
+    const link = screen.getByRole('link', { name: /Open on Dynamous/i }) as HTMLAnchorElement;
+    expect(link.href).toBe('https://community.dynamous.ai/c/lesson-1');
+  });
+
+  it('renders Dynamous citation with empty lesson_url as no link', () => {
+    const dynamousCitation: Citation = {
+      ...mockCitation,
+      source_type: 'dynamous',
+      lesson_url: undefined,
+    };
+    const onClose = vi.fn();
+    render(<CitationModal citation={dynamousCitation} onClose={onClose} />);
+
+    // No external link when lesson_url is missing
+    expect(screen.queryByRole('link', { name: /Open on Dynamous/i })).not.toBeInTheDocument();
+  });
 });
 
 describe('formatTimestamp', () => {
