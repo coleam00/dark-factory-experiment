@@ -119,7 +119,9 @@ def _parse_segments(body: str) -> list[dict[str, Any]]:
             if i + 1 < len(matches)
             else float(start)  # filler — caller may override
         )
-        segments.append({"start": float(start), "end": float(end), "text": text, "heading": heading})
+        segments.append(
+            {"start": float(start), "end": float(end), "text": text, "heading": heading}
+        )
     # The last segment's end_seconds = start_seconds (we don't know duration);
     # acceptable since the chunker preserves both for citation rendering.
     return segments
@@ -165,9 +167,7 @@ async def ingest_dynamous_content(content_dir: Path) -> dict[str, int]:
     return counts
 
 
-async def _ingest_one_file(
-    md_path: Path, rel_path: str, pool: Any, counts: dict[str, int]
-) -> None:
+async def _ingest_one_file(md_path: Path, rel_path: str, pool: Any, counts: dict[str, int]) -> None:
     """Process one transcript file. Idempotent."""
     text = md_path.read_text(encoding="utf-8")
     fm, body = _parse_frontmatter(text)

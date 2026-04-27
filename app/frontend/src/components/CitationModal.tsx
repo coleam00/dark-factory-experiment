@@ -36,10 +36,10 @@ export function CitationModal({ citation, onClose }: CitationModalProps) {
     : '';
 
   const externalUrl = isDynamous
-    ? citation.lesson_url ?? ''
+    ? (citation.lesson_url ?? '')
     : videoId
-    ? `https://www.youtube.com/watch?v=${videoId}&t=${startSeconds}s`
-    : '';
+      ? `https://www.youtube.com/watch?v=${videoId}&t=${startSeconds}s`
+      : '';
 
   const externalLabel = isDynamous ? 'Open on Dynamous' : 'Open on YouTube';
 
