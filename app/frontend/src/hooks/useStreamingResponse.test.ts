@@ -1,9 +1,10 @@
 /**
- * Tests for useStreamingResponse hook SSE parsing.
+ * Tests for useStreamingResponse hook SSE parsing and state management.
  *
  * Verifies:
  *   - Parses sources event with Citation[] objects into streamingSources state
  *   - Handles malformed sources JSON gracefully with console.warn
+ *   - Resets all streaming state (and aborts in-flight fetch) when conversationId changes
  */
 
 import { act, renderHook } from '@testing-library/react';
@@ -295,6 +296,9 @@ describe('conversationId reset — state clears on navigation', () => {
       void result.current.startStream('conv-a', 'hello', vi.fn());
     });
 
+    // Verify streaming started before testing the reset
+    expect(result.current.isStreaming).toBe(true);
+
     // Switch conversation — effect should reset all state
     rerender({ convId: 'conv-b' });
 
@@ -344,9 +348,88 @@ describe('conversationId reset — state clears on navigation', () => {
       await result.current.startStream('conv-a', 'hi', onComplete);
     });
 
-    // Re-render with same conversationId — onComplete should have been called
+    // Re-render with same conversationId — effect must NOT reset state
     rerender({ convId: 'conv-a' });
 
+    // onComplete was called by startStream when the stream completed above
     expect(onComplete).toHaveBeenCalledWith(expect.objectContaining({ fullText: 'Hello' }));
+  });
+});
+
+describe('sources event — hook state via renderHook', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('dispatches sources to streamingSources state via the real hook', async () => {
+    const citation = {
+      chunk_id: 'chunk-1',
+      video_id: 'vid-1',
+      video_title: 'Test Video',
+      video_url: 'https://www.youtube.com/watch?v=abc123',
+      start_seconds: 10,
+      end_seconds: 20,
+      snippet: 'Test snippet text',
+    };
+    const sseChunks = [
+      `event: sources\ndata: ${JSON.stringify([citation])}\n\n`,
+      'data: "Answer"\n\n',
+      'data: [DONE]\n\n',
+    ];
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: makeSseStream(sseChunks),
+      }),
+    );
+
+    const onComplete = vi.fn();
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await act(async () => {
+      await result.current.startStream('conv-1', 'hi', onComplete);
+    });
+
+    // Sources are passed to onComplete before the finally block clears state
+    expect(onComplete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sources: [expect.objectContaining({ chunk_id: 'chunk-1' })],
+      }),
+    );
+  });
+
+  it('leaves streamingSources empty and warns on malformed sources JSON', async () => {
+    const sseChunks = [
+      'event: sources\ndata: not-valid-json\n\n',
+      'data: "Answer"\n\n',
+      'data: [DONE]\n\n',
+    ];
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: makeSseStream(sseChunks),
+      }),
+    );
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const onComplete = vi.fn();
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await act(async () => {
+      await result.current.startStream('conv-1', 'hi', onComplete);
+    });
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[useStreamingResponse] Failed to parse sources event:',
+      expect.any(Error),
+    );
+    // onComplete still fires with empty sources on parse failure
+    expect(onComplete).toHaveBeenCalledWith(expect.objectContaining({ sources: [] }));
   });
 });

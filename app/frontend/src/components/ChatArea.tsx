@@ -422,6 +422,11 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
           pendingUserMsgIdRef.current = null;
         }
 
+        // Intentional abort (navigation or user cancel) — no error toast
+        if (e instanceof DOMException && e.name === 'AbortError') {
+          return;
+        }
+
         if (e instanceof RateLimitError) {
           // MISSION §10 #1 — daily cap hit. No retry; the user literally
           // can't send another message until the window slides forward.
