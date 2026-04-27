@@ -595,6 +595,8 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
 
         {showMessages && (
           <div style={{ padding: '24px 24px 0', display: 'flex', flexDirection: 'column' }}>
+            {/* Hide EmptyState during first-send: !isStreaming covers the streaming window,
+                !location.state?.initialMessage covers the gap before dispatchedInitialRef fires (#205) */}
             {messages.length === 0 &&
             !inlineError &&
             !isStreaming &&
