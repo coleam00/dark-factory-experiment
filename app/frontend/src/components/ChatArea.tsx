@@ -309,6 +309,7 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
   const chatInputRef = useRef<ChatInputHandle>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const messagesWrapperRef = useRef<HTMLDivElement>(null);
   const autoScrollRef = useRef(true);
 
   // Reset auto-scroll intent when switching conversations so the new
@@ -373,20 +374,22 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
   // already-bottom is a no-op) and gated by autoScrollRef so a user who
   // has scrolled up is not yanked.
   useEffect(() => {
-    const container = scrollContainerRef.current;
-    if (!container) return;
     if (typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(() => {
       if (autoScrollRef.current) {
         scrollToBottom('instant');
       }
     });
-    // Observe the inner messages wrapper — its size changes as content
-    // is added; the scroll container's outer size is fixed (flex: 1).
-    const inner = container.firstElementChild;
+    // Observe the inner messages wrapper — its size changes as content is
+    // added. We use a dedicated ref because the scroll container's first
+    // child can be the conditional Export button (a fixed-size element
+    // that never resizes), which would render the observer inert.
+    const inner = messagesWrapperRef.current;
     if (inner) ro.observe(inner);
     return () => ro.disconnect();
-  }, [scrollToBottom]);
+    // messages.length triggers re-attachment when the wrapper transitions
+    // from absent (0 messages) to present (first message renders).
+  }, [scrollToBottom, messages.length]);
 
   useEffect(() => {
     if (!loading && messages.length > 0 && autoScrollRef.current) {
@@ -682,7 +685,10 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
         {showNotFound && <ConversationNotFound onBack={() => navigate('/')} />}
 
         {showMessages && (
-          <div style={{ padding: '24px 24px 0', display: 'flex', flexDirection: 'column' }}>
+          <div
+            ref={messagesWrapperRef}
+            style={{ padding: '24px 24px 0', display: 'flex', flexDirection: 'column' }}
+          >
             {showEmptyInConversation ? (
               <EmptyState onStarterClick={handleStarterClick} />
             ) : (
