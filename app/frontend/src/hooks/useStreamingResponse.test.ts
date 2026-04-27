@@ -283,7 +283,7 @@ describe('conversationId reset — state clears on navigation', () => {
     vi.clearAllMocks();
   });
 
-  it('resets all streaming state when conversationId changes', async () => {
+  it('resets all streaming state when conversationId changes', () => {
     vi.stubGlobal('fetch', vi.fn().mockReturnValue(new Promise(() => {})));
 
     const { result, rerender } = renderHook(
@@ -308,7 +308,7 @@ describe('conversationId reset — state clears on navigation', () => {
     expect(result.current.streamingStatus).toBeNull();
   });
 
-  it('resets streaming state when conversationId changes to null', async () => {
+  it('resets streaming state when conversationId changes to null', () => {
     vi.stubGlobal('fetch', vi.fn().mockReturnValue(new Promise(() => {})));
 
     const { result, rerender } = renderHook(
