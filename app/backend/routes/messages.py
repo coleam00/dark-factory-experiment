@@ -211,6 +211,10 @@ async def create_message(
                         cited_ids = extract_cited_chunk_ids(final_text_raw)
                         for chunk in source_citations:
                             chunk["is_cited"] = chunk.get("chunk_id") in cited_ids
+                        # Collapse same-video chunks (issue #208): keep one
+                        # entry per video_id, choosing the earliest-cited
+                        # timestamp as the representative.
+                        source_citations[:] = _collapse_by_video(source_citations)
                         # Cap fallback (issue #176): cited pass through, non-cited sliced.
                         cited = [c for c in source_citations if c.get("is_cited")]
                         uncited = [c for c in source_citations if not c.get("is_cited")]
@@ -460,3 +464,45 @@ async def _maybe_set_conversation_title(
         else:
             title = first_user_message.strip()
         await repository.update_conversation_title(conv_id, user_id=user_id, title=title)
+
+
+def _collapse_by_video(chunks: list[dict]) -> list[dict]:
+    """Collapse multiple chunks from the same video into a single citation entry.
+
+    After the ``is_cited`` pass, chunks from the same video are redundant in
+    the UI — the user needs one clickable chip per video, not one per 5-second
+    transcript segment (issue #208).
+
+    For each ``video_id`` group:
+    - ``is_cited`` is True if ANY chunk in the group was cited by the LLM.
+    - ``start_seconds`` is the earliest timestamp among cited chunks (or among
+      all chunks if none were cited), so the deep-link opens near the most
+      relevant moment.
+    - ``segment_count`` records how many chunks were collapsed so the frontend
+      can optionally display "(N segments)".
+    - All other fields are taken from the representative chunk.
+
+    Insertion order of videos is preserved (first-seen wins).
+    """
+    seen: dict[str, list[dict]] = {}
+    for c in chunks:
+        vid = c.get("video_id") or ""
+        if vid not in seen:
+            seen[vid] = []
+        seen[vid].append(c)
+
+    collapsed: list[dict] = []
+    for group in seen.values():
+        cited_in_group = [c for c in group if c.get("is_cited")]
+        if cited_in_group:
+            representative = min(cited_in_group, key=lambda c: c.get("start_seconds") or 0.0)
+            is_cited = True
+        else:
+            representative = min(group, key=lambda c: c.get("start_seconds") or 0.0)
+            is_cited = False
+        entry = dict(representative)
+        entry["is_cited"] = is_cited
+        entry["segment_count"] = len(group)
+        collapsed.append(entry)
+
+    return collapsed

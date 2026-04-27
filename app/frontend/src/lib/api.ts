@@ -69,6 +69,11 @@ export interface Citation {
    * empty for YouTube citations.
    */
   lesson_url?: string;
+  /**
+   * Number of transcript segments collapsed into this citation (issue #208).
+   * Only present for citations generated server-side after collapse.
+   */
+  segment_count?: number;
 }
 
 export interface Message {

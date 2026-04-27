@@ -104,7 +104,8 @@ Rules.
 - Multiple chunks supporting the same sentence stack: `[c:abc123][c:def456]`.
 - Copy the marker verbatim from the tool result. Do not invent ids.
 - Markers are protocol tokens, not exposition: never explain them, never
-  describe them, just emit them at sentence end."""
+  describe them, just emit them at sentence end.
+- When multiple chunks come from the same video, cite only one marker per video per sentence. The UI automatically collapses same-video citations into a single chip — emitting every chunk marker from a transcript call clutters the raw text without adding information for the user."""
 
 
 SYSTEM_PROMPT_TEMPLATE = _BASE_SYSTEM_PROMPT
@@ -133,10 +134,7 @@ async def build_system_prompt(max_tool_calls: int = 0, is_member: bool = False) 
     if CATALOG_ENABLED:
         videos = await catalog.get_catalog()
         if not is_member:
-            videos = [
-                v for v in videos
-                if (v.get("source_type") or "youtube") == "youtube"
-            ]
+            videos = [v for v in videos if (v.get("source_type") or "youtube") == "youtube"]
         if videos:
             blocks.append(catalog.build_catalog_block(videos, CATALOG_TIER))
             return blocks
