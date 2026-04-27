@@ -352,7 +352,9 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
   // YouTube: open the embedded player modal as usual.
   const handleCitationClick = useCallback((citation: Citation) => {
     if (citation.source_type === 'dynamous') {
-      window.open(citation.lesson_url ?? '', '_blank', 'noopener,noreferrer');
+      if (citation.lesson_url) {
+        window.open(citation.lesson_url, '_blank', 'noopener,noreferrer');
+      }
     } else {
       setSelectedCitation(citation);
     }
