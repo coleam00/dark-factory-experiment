@@ -321,4 +321,34 @@ describe('ChatArea refreshConversationsRef', () => {
       'error',
     );
   });
+
+  // Regression test for issue #205: chip-driven first-send left EmptyState visible
+  // because the showMessages branch rendered EmptyState whenever messages.length === 0,
+  // even during the window between route-change and the dispatchedInitialRef effect firing.
+  it('should not render EmptyState when location.state.initialMessage is present (#205)', async () => {
+    // Prevent the dispatchedInitialRef effect's handleSend from making real fetch calls
+    vi.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: new ReadableStream({
+        start(c) {
+          c.close();
+        },
+      }),
+    } as unknown as Response);
+
+    render(
+      <MemoryRouter
+        initialEntries={[
+          { pathname: '/c/conv-1', state: { initialMessage: 'How do subagents work?' } },
+        ]}
+      >
+        <ChatArea conversationId="conv-1" />
+      </MemoryRouter>,
+    );
+
+    // Even though messages === [] on first render, EmptyState must not appear
+    // because location.state.initialMessage signals a first-send in flight.
+    expect(screen.queryByText('Ask anything about the video library')).not.toBeInTheDocument();
+  });
 });

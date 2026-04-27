@@ -96,8 +96,8 @@ function EmptyState({ onStarterClick }: EmptyStateProps) {
         Ask anything about the video library
       </h2>
       <p style={{ margin: '0 0 24px', color: '#94a3b8', maxWidth: 380, lineHeight: 1.6 }}>
-        This AI has access to transcripts from Cole Medin&apos;s YouTube channel and the
-        Dynamous course + workshop library.
+        This AI has access to transcripts from Cole Medin&apos;s YouTube channel and the Dynamous
+        course + workshop library.
       </p>
       <div
         style={{ display: 'flex', flexDirection: 'column', gap: 10, width: '100%', maxWidth: 400 }}
@@ -362,7 +362,9 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
         if (isStreaming) return;
         try {
           const conv = await createConversation();
-          navigate(`/c/${conv.id}`, { state: { initialMessage: content } satisfies ConvLocationState });
+          navigate(`/c/${conv.id}`, {
+            state: { initialMessage: content } satisfies ConvLocationState,
+          });
         } catch (e) {
           console.error(
             '[ChatArea] Failed to create conversation:',
@@ -593,7 +595,10 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
 
         {showMessages && (
           <div style={{ padding: '24px 24px 0', display: 'flex', flexDirection: 'column' }}>
-            {messages.length === 0 && !inlineError ? (
+            {messages.length === 0 &&
+            !inlineError &&
+            !isStreaming &&
+            !location.state?.initialMessage ? (
               <EmptyState onStarterClick={handleStarterClick} />
             ) : (
               messages.map((msg) => (
