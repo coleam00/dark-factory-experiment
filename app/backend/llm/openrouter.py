@@ -24,6 +24,7 @@ from backend.config import (
     CATALOG_ENABLED,
     CATALOG_TIER,
     CHAT_MODEL,
+    LLM_REASONING_EFFORT,
     OPENROUTER_API_KEY,
     OPENROUTER_BASE_URL,
 )
@@ -215,6 +216,11 @@ async def stream_chat(
         # content. Silent ~10%/24h failures in prod traced back to this.
         "max_tokens": 8192,
     }
+    if LLM_REASONING_EFFORT:
+        # OpenRouter normalises this across providers — for Gemini 3 Flash,
+        # "minimal" maps to thinking disabled (~190+ tok/s); for OpenAI o-series
+        # it maps to lowest reasoning budget. Anthropic ignores it.
+        base_kwargs["extra_body"] = {"reasoning": {"effort": LLM_REASONING_EFFORT}}
     if tools_active:
         base_kwargs["tools"] = tools
 

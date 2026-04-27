@@ -71,6 +71,11 @@ services:
       CATALOG_ENABLED: ${CATALOG_ENABLED:-false}
       CATALOG_TIER: ${CATALOG_TIER:-standard}
       CATALOG_CACHE_TTL_SECONDS: ${CATALOG_CACHE_TTL_SECONDS:-3600}
+      # OpenRouter chat model + optional reasoning effort override. Defaults
+      # match the prod baseline; canary deploys override these to test new
+      # models on the inactive blue/green slot before flipping Caddy.
+      CHAT_MODEL: ${CHAT_MODEL:-anthropic/claude-sonnet-4.6}
+      LLM_REASONING_EFFORT: ${LLM_REASONING_EFFORT:-}
     volumes:
       # Read-only mount of the host-side dynamous-content checkout. The host's
       # deploy.sh git-clones / pulls this directory before bringing the new
@@ -122,6 +127,11 @@ services:
       CATALOG_ENABLED: ${CATALOG_ENABLED:-false}
       CATALOG_TIER: ${CATALOG_TIER:-standard}
       CATALOG_CACHE_TTL_SECONDS: ${CATALOG_CACHE_TTL_SECONDS:-3600}
+      # OpenRouter chat model + optional reasoning effort override. Defaults
+      # match the prod baseline; canary deploys override these to test new
+      # models on the inactive blue/green slot before flipping Caddy.
+      CHAT_MODEL: ${CHAT_MODEL:-anthropic/claude-sonnet-4.6}
+      LLM_REASONING_EFFORT: ${LLM_REASONING_EFFORT:-}
     volumes:
       - ${DYNAMOUS_CONTENT_HOST_PATH:-/opt/dynachat/dynamous-content}:/app/content/dynamous:ro
     depends_on:

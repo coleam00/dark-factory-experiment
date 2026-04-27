@@ -85,7 +85,14 @@ MEMBERSHIP_REFRESH_SECONDS: int = int(os.environ.get("MEMBERSHIP_REFRESH_SECONDS
 
 OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
 EMBEDDING_MODEL: str = "openai/text-embedding-3-small"
-CHAT_MODEL: str = "anthropic/claude-sonnet-4.6"
+# OpenRouter slug for the chat model. Defaults to Sonnet 4.6 for prod; can be
+# overridden per-deploy to canary a different model (e.g. google/gemini-3-flash-preview).
+CHAT_MODEL: str = os.environ.get("CHAT_MODEL", "anthropic/claude-sonnet-4.6")
+# When the model is a reasoning model (Gemini 3 Flash, OpenAI o-series, etc.)
+# we can disable thinking to maximize tokens/sec on workloads that don't need
+# long chain-of-thought (e.g. RAG with explicit tool guidance). "minimal" maps
+# to disabled-or-near-zero thinking budget across providers via OpenRouter.
+LLM_REASONING_EFFORT: str = os.environ.get("LLM_REASONING_EFFORT", "").strip().lower()
 
 # Postgres — required for all data (chat + auth). The app fails fast without it.
 # In prod, docker-compose injects DATABASE_URL from the POSTGRES_* vars.
