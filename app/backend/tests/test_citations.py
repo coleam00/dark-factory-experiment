@@ -263,10 +263,7 @@ class TestSseIntegration:
 
     async def test_collapse_uncited_group_picks_earliest_timestamp(self) -> None:
         """All same-video chunks uncited → is_cited=False, earliest start_seconds selected."""
-        chunks = [
-            {**_chunk(f"c{i}", "v1"), "start_seconds": float(i * 10)}
-            for i in range(3)
-        ]
+        chunks = [{**_chunk(f"c{i}", "v1"), "start_seconds": float(i * 10)} for i in range(3)]
         # No markers in answer — nothing cited
         body = await _post_message(
             answer_tokens=["Plain answer."],

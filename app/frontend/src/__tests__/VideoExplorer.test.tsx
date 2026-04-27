@@ -628,7 +628,7 @@ describe('VideoExplorer', () => {
       ]);
       render(<VideoExplorer isOpen={true} onClose={vi.fn()} />);
       await waitFor(() =>
-        expect(screen.getByText('Dynamous Video Without Lesson URL')).toBeInTheDocument()
+        expect(screen.getByText('Dynamous Video Without Lesson URL')).toBeInTheDocument(),
       );
 
       const link = screen.getByRole('link', {

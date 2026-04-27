@@ -34,8 +34,7 @@ function SkeletonCard() {
 
 // ── Video card ───────────────────────────────────────────────────
 function VideoCard({ video, query = '' }: { video: Video; query?: string }) {
-  const titleHref =
-    video.source_type === 'dynamous' ? (video.lesson_url ?? video.url) : video.url;
+  const titleHref = video.source_type === 'dynamous' ? (video.lesson_url ?? video.url) : video.url;
 
   return (
     <div
