@@ -155,7 +155,7 @@ describe('status event SSE parsing — hook state transitions', () => {
     );
 
     const onComplete = vi.fn();
-    const { result } = renderHook(() => useStreamingResponse());
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
 
     await act(async () => {
       await result.current.startStream('conv-1', 'hi', onComplete);
@@ -189,7 +189,7 @@ describe('status event SSE parsing — hook state transitions', () => {
       }),
     );
 
-    const { result } = renderHook(() => useStreamingResponse());
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
 
     await act(async () => {
       await result.current.startStream('conv-1', 'hi', vi.fn());
@@ -216,7 +216,7 @@ describe('status event SSE parsing — hook state transitions', () => {
       }),
     );
 
-    const { result } = renderHook(() => useStreamingResponse());
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
 
     await act(async () => {
       await result.current.startStream('conv-1', 'hi', vi.fn());
@@ -247,7 +247,7 @@ describe('status event SSE parsing — hook state transitions', () => {
       }),
     );
 
-    const { result } = renderHook(() => useStreamingResponse());
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
 
     await act(async () => {
       await result.current.startStream('conv-1', 'hi', vi.fn());
@@ -263,16 +263,40 @@ describe('abortStream', () => {
   });
 
   it('should be a no-op when no stream is active', () => {
-    const { result } = renderHook(() => useStreamingResponse());
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
     expect(result.current.abortStream).not.toThrow();
     expect(result.current.isStreaming).toBe(false);
   });
 
   it('should be callable multiple times without throwing', () => {
-    const { result } = renderHook(() => useStreamingResponse());
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
     result.current.abortStream();
     result.current.abortStream();
     result.current.abortStream();
     expect(result.current.isStreaming).toBe(false);
+  });
+});
+
+describe('conversationId reset', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('resets streaming state when conversationId changes', () => {
+    const { result, rerender } = renderHook(
+      ({ id }) => useStreamingResponse(id),
+      { initialProps: { id: 'conv-1' } },
+    );
+
+    // Verify initial state
+    expect(result.current.isStreaming).toBe(false);
+
+    // Rerender with new id
+    rerender({ id: 'conv-2' });
+
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.streamingContent).toBe('');
+    expect(result.current.streamingSources).toEqual([]);
+    expect(result.current.streamingStatus).toBeNull();
   });
 });

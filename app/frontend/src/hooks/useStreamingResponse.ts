@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { type Citation, RateLimitError } from '../lib/api';
 
 export interface StreamResult {
@@ -11,13 +11,24 @@ export interface StreamingStatus {
   subject: string;
 }
 
-export function useStreamingResponse() {
+export function useStreamingResponse(conversationId: string | null) {
   const [streamingContent, setStreamingContent] = useState<string>('');
   const [streamingSources, setStreamingSources] = useState<Citation[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingStatus, setStreamingStatus] = useState<StreamingStatus | null>(null);
 
   const streamAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (streamAbortRef.current) {
+      streamAbortRef.current.abort();
+      streamAbortRef.current = null;
+    }
+    setIsStreaming(false);
+    setStreamingContent('');
+    setStreamingSources([]);
+    setStreamingStatus(null);
+  }, [conversationId]);
 
   const abortStream = useCallback(() => {
     if (streamAbortRef.current) {
