@@ -134,7 +134,7 @@ async def build_system_prompt(max_tool_calls: int = 0, is_member: bool = False) 
     if CATALOG_ENABLED:
         videos = await catalog.get_catalog()
         if not is_member:
-            videos = [v for v in videos if (v.get("source_type") or "youtube") == "youtube"]
+            videos = [v for v in videos if v.get("source_type", "youtube") == "youtube"]
         if videos:
             blocks.append(catalog.build_catalog_block(videos, CATALOG_TIER))
             return blocks

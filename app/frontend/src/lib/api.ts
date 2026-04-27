@@ -107,6 +107,19 @@ export class ApiError extends Error {
   }
 }
 
+// Try to extract `detail` from the FastAPI JSON error envelope, fall
+// back to raw text so we still surface unexpected responses.
+async function parseErrorDetail(res: Response): Promise<string> {
+  const text = await res.text();
+  try {
+    const parsed = JSON.parse(text) as { detail?: string };
+    if (typeof parsed?.detail === 'string') return parsed.detail;
+  } catch {
+    // not JSON — keep text as-is
+  }
+  return text;
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     credentials: 'include',
@@ -122,19 +135,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     throw new ApiError(401, 'Not authenticated');
   }
   if (!res.ok) {
-    const text = await res.text();
-    // Try to extract `detail` from the FastAPI JSON error envelope, fall
-    // back to raw text so we still surface unexpected responses.
-    let detail = text;
-    try {
-      const parsed = JSON.parse(text) as { detail?: string };
-      if (parsed && typeof parsed.detail === 'string') {
-        detail = parsed.detail;
-      }
-    } catch {
-      // not JSON — keep `text` as-is
-    }
-    throw new ApiError(res.status, detail);
+    throw new ApiError(res.status, await parseErrorDetail(res));
   }
   return res.json() as Promise<T>;
 }
@@ -225,15 +226,7 @@ export const deleteVideo = async (id: string): Promise<void> => {
     credentials: 'include',
   });
   if (!res.ok) {
-    const text = await res.text();
-    let detail = text;
-    try {
-      const parsed = JSON.parse(text) as { detail?: string };
-      if (parsed && typeof parsed.detail === 'string') detail = parsed.detail;
-    } catch {
-      // not JSON
-    }
-    throw new ApiError(res.status, detail);
+    throw new ApiError(res.status, await parseErrorDetail(res));
   }
 };
 

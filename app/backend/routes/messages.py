@@ -142,7 +142,7 @@ async def create_message(
         # Captured at the start of the turn so the entire tool sequence sees
         # consistent ACL — even if /me later flips is_member, the in-flight
         # turn won't change behavior mid-flight.
-        is_member_for_turn = bool(current_user.get("is_member") or False)
+        is_member_for_turn = bool(current_user.get("is_member", False))
 
         async def _executor(name: str, raw_args: str) -> str:
             # Pass `None` (not empty set) when the whitelist failed to load so
