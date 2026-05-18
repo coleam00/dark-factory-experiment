@@ -197,24 +197,28 @@ async def _hydrate_chunks(raw_chunks: list[dict]) -> list[dict]:
         await asyncio.gather(*(_load(v) for v in unique_ids))
     )
 
-    return [
-        {
-            "chunk_id": c.get("id", c.get("chunk_id", "")),
-            "content": c.get("content", ""),
-            "video_id": c.get("video_id", ""),
-            "video_title": video_cache.get(c.get("video_id", ""), {}).get("title", "Unknown Video"),
-            "video_url": video_cache.get(c.get("video_id", ""), {}).get("url", ""),
-            "source_type": video_cache.get(c.get("video_id", ""), {}).get("source_type", "youtube"),
-            "lesson_url": video_cache.get(c.get("video_id", ""), {}).get("lesson_url", ""),
-            "start_seconds": c.get("start_seconds", 0.0),
-            "end_seconds": c.get("end_seconds", 0.0),
-            "snippet": c.get("snippet", ""),
-            # Preserve chunk_index so downstream small-to-big expansion (see
-            # rag/expansion.py) can fetch siblings in the same video.
-            "chunk_index": c.get("chunk_index", 0),
-        }
-        for c in raw_chunks
-    ]
+    result: list[dict] = []
+    for c in raw_chunks:
+        vid = c.get("video_id", "")
+        meta = video_cache.get(vid, {})
+        result.append(
+            {
+                "chunk_id": c.get("id", c.get("chunk_id", "")),
+                "content": c.get("content", ""),
+                "video_id": vid,
+                "video_title": meta.get("title", "Unknown Video"),
+                "video_url": meta.get("url", ""),
+                "source_type": meta.get("source_type", "youtube"),
+                "lesson_url": meta.get("lesson_url", ""),
+                "start_seconds": c.get("start_seconds", 0.0),
+                "end_seconds": c.get("end_seconds", 0.0),
+                "snippet": c.get("snippet", ""),
+                # Preserve chunk_index so downstream small-to-big expansion (see
+                # rag/expansion.py) can fetch siblings in the same video.
+                "chunk_index": c.get("chunk_index", 0),
+            }
+        )
+    return result
 
 
 def _format_search_results(chunks: list[dict]) -> str:
@@ -242,9 +246,7 @@ def _format_search_results(chunks: list[dict]) -> str:
         # YouTube id lifted from the URL — and the transcript tool's whitelist
         # rejects it, leaving get_video_transcript effectively unusable.
         vid = f" (video_id: {video_id})" if video_id else ""
-        parts.append(
-            f"{marker}{title}{vid} at {mins:02d}:{secs:02d}\n{c.get('content', '')}"
-        )
+        parts.append(f"{marker}{title}{vid} at {mins:02d}:{secs:02d}\n{c.get('content', '')}")
     return "\n\n---\n\n".join(parts)
 
 

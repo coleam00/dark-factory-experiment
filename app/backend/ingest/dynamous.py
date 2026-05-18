@@ -112,13 +112,11 @@ def _parse_segments(body: str) -> list[dict[str, Any]]:
             continue
         if heading:
             text = f"{heading}\n\n{text}"
-        end = (
-            int(matches[i + 1].group(1)) * 3600
-            + int(matches[i + 1].group(2)) * 60
-            + int(matches[i + 1].group(3))
-            if i + 1 < len(matches)
-            else float(start)  # filler — caller may override
-        )
+        if i + 1 < len(matches):
+            nxt = matches[i + 1]
+            end = int(nxt.group(1)) * 3600 + int(nxt.group(2)) * 60 + int(nxt.group(3))
+        else:
+            end = start  # filler — caller may override
         segments.append(
             {"start": float(start), "end": float(end), "text": text, "heading": heading}
         )

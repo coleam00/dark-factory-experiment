@@ -85,9 +85,7 @@ class TestSseStatusEvents:
         from backend.llm.openrouter import stream_chat
 
         round1_chunks = [
-            _FakeDeltaChunk(
-                tool_calls=[_FakeToolCallDelta(0, call_id="call_1", name=tool_name)]
-            ),
+            _FakeDeltaChunk(tool_calls=[_FakeToolCallDelta(0, call_id="call_1", name=tool_name)]),
             _FakeDeltaChunk(tool_calls=[_FakeToolCallDelta(0, arguments=tool_args)]),
             _FakeDeltaChunk(finish_reason="tool_calls"),
         ]
@@ -207,7 +205,7 @@ class TestSseStatusEvents:
         assert len(start_events) == 1
         lines = start_events[0].strip().split("\n")
         data_line = next(line for line in lines if line.startswith("data: "))
-        payload = json.loads(data_line[len("data: "):])
+        payload = json.loads(data_line[len("data: ") :])
         assert payload["tool"] == "get_video_transcript"
         assert payload["label"] == "Reading transcript: abc123"
 

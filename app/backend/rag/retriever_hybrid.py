@@ -24,6 +24,13 @@ from backend.db import repository
 
 logger = logging.getLogger(__name__)
 
+_UNKNOWN_VIDEO_META: dict[str, str] = {
+    "title": "Unknown Video",
+    "url": "",
+    "source_type": "youtube",
+    "lesson_url": "",
+}
+
 # Module-level video metadata cache (populated on demand per chunk result)
 _video_cache: dict[str, dict[str, str]] = {}
 
@@ -131,12 +138,7 @@ async def retrieve_hybrid(
                     video_id,
                     chunk.get("id", "?"),
                 )
-                _video_cache[video_id] = {
-                    "title": "Unknown Video",
-                    "url": "",
-                    "source_type": "youtube",
-                    "lesson_url": "",
-                }
+                _video_cache[video_id] = _UNKNOWN_VIDEO_META
 
         video_meta = _video_cache[video_id]
         results.append(
