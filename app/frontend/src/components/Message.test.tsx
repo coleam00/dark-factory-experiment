@@ -51,6 +51,34 @@ describe('Message — streamingStatus rendering', () => {
     expect(screen.getByText('Answer here.')).toBeInTheDocument();
     expect(screen.queryByText(/Searching/)).not.toBeInTheDocument();
   });
+
+  it('renders the tool-aware label when status carries a label', () => {
+    render(
+      <Message
+        role="assistant"
+        content=""
+        isStreaming={true}
+        streamingStatus={{
+          tool: 'get_video_transcript',
+          subject: 'abc123',
+          label: 'Reading transcript: How to Build AI Agents',
+        }}
+      />,
+    );
+    expect(screen.getByText('Reading transcript: How to Build AI Agents…')).toBeInTheDocument();
+  });
+
+  it('falls back to subject-based text when label is absent', () => {
+    render(
+      <Message
+        role="assistant"
+        content=""
+        isStreaming={true}
+        streamingStatus={{ tool: 'search_videos', subject: 'building agents' }}
+      />,
+    );
+    expect(screen.getByText('Searching: building agents…')).toBeInTheDocument();
+  });
 });
 
 describe('Message — citation chip segment_count label', () => {

@@ -9,6 +9,9 @@ export interface StreamResult {
 export interface StreamingStatus {
   tool: string;
   subject: string;
+  /** Tool-aware human-readable label from the backend (issue #223).
+   *  May be '' if an older backend omits it — UI falls back to subject. */
+  label: string;
 }
 
 export function useStreamingResponse(conversationId: string | null) {
@@ -152,9 +155,13 @@ export function useStreamingResponse(conversationId: string | null) {
                     setStreamingStatus({
                       tool: String(parsed.tool ?? ''),
                       subject: String(parsed.subject ?? ''),
+                      label: String(parsed.label ?? ''),
                     });
                   } else if (parsed.type === 'tool_call_done') {
-                    setStreamingStatus(null);
+                    // Hold the last status through tool_call_done so the indicator reads
+                    // as continuous progress. It is cleared when the next tool_call_start
+                    // arrives, when the first answer token lands, or when the stream ends
+                    // (see the content branch below and the finally block). Issue #223.
                   }
                 }
               } catch (e) {

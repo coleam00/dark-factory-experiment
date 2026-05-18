@@ -181,6 +181,9 @@ class TestSseStatusEvents:
                 assert isinstance(payload["subject"], str)
                 assert payload["tool"] == "search_videos"
                 assert payload["subject"] == "building agents"
+                assert "label" in payload, f"tool_call_start missing 'label': {payload}"
+                assert isinstance(payload["label"], str)
+                assert payload["label"] == 'Searching the library: "building agents"'
             elif payload["type"] == "tool_call_done":
                 assert payload["tool"] == "search_videos"
             else:
@@ -212,6 +215,46 @@ def test_extract_tool_subject_type_error() -> None:
 
     result = _extract_tool_subject("search_videos", None)  # type: ignore[arg-type]
     assert result == ""
+
+
+@pytest.mark.parametrize(
+    "tool_name,args_raw,expected",
+    [
+        ("search_videos", json.dumps({"query": "agents"}), 'Searching the library: "agents"'),
+        ("keyword_search_videos", json.dumps({"query": "RAG"}), 'Searching the library: "RAG"'),
+        ("semantic_search_videos", json.dumps({"query": "LLM"}), 'Searching the library: "LLM"'),
+        ("search_videos", json.dumps({}), "Searching the library"),
+        ("unknown_tool", json.dumps({"query": "x"}), ""),
+        ("get_video_transcript", json.dumps({}), ""),
+    ],
+)
+async def test_build_tool_status_label_no_db(tool_name, args_raw, expected) -> None:
+    from backend.llm.openrouter import _build_tool_status_label
+    assert await _build_tool_status_label(tool_name, args_raw) == expected
+
+
+async def test_build_tool_status_label_transcript_resolves_title() -> None:
+    from backend.llm.openrouter import _build_tool_status_label
+    with patch(
+        "backend.llm.openrouter.repository.get_video",
+        new=AsyncMock(return_value={"title": "How to Build AI Agents"}),
+    ):
+        label = await _build_tool_status_label(
+            "get_video_transcript", json.dumps({"video_id": "abc123"})
+        )
+    assert label == "Reading transcript: How to Build AI Agents"
+
+
+async def test_build_tool_status_label_transcript_falls_back_to_id() -> None:
+    from backend.llm.openrouter import _build_tool_status_label
+    with patch(
+        "backend.llm.openrouter.repository.get_video",
+        new=AsyncMock(side_effect=RuntimeError("db down")),
+    ):
+        label = await _build_tool_status_label(
+            "get_video_transcript", json.dumps({"video_id": "abc123"})
+        )
+    assert label == "Reading transcript: abc123"
 
 
 class TestCapReachedNoStatusEvents:

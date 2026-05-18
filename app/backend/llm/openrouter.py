@@ -28,6 +28,7 @@ from backend.config import (
     OPENROUTER_API_KEY,
     OPENROUTER_BASE_URL,
 )
+from backend.db import repository
 from backend.rag import catalog
 
 logger = logging.getLogger(__name__)
@@ -166,6 +167,32 @@ def _extract_tool_subject(tool_name: str, tool_args_raw: str) -> str:
         return str(args.get("query", ""))
     if tool_name == "get_video_transcript":
         return str(args.get("video_id", ""))
+    return ""
+
+
+async def _build_tool_status_label(tool_name: str, tool_args_raw: str) -> str:
+    """Build a human-readable, tool-aware label for a tool_call_start event.
+
+    Search tools render the query in quotes; get_video_transcript resolves
+    the video title from the videos table, falling back to the raw id if
+    the lookup fails or returns nothing. Returns "" for unknown tools or an
+    unparseable subject — the frontend then shows a neutral "Working…".
+    """
+    subject = _extract_tool_subject(tool_name, tool_args_raw)
+    if tool_name in ("search_videos", "keyword_search_videos", "semantic_search_videos"):
+        return f'Searching the library: "{subject}"' if subject else "Searching the library"
+    if tool_name == "get_video_transcript":
+        if not subject:
+            return ""
+        title = subject  # fall back to the raw id
+        try:
+            video = await repository.get_video(subject)
+        except Exception as exc:
+            logger.debug("_build_tool_status_label: get_video failed for %s: %s", subject, exc)
+            video = None
+        if video and video.get("title"):
+            title = str(video["title"])
+        return f"Reading transcript: {title}"
     return ""
 
 
@@ -359,9 +386,10 @@ async def stream_chat(
                     tool_args_raw = tc["function"]["arguments"]
                     if tool_calls_made < max_tool_calls:
                         subject = _extract_tool_subject(tool_name, tool_args_raw)
+                        label = await _build_tool_status_label(tool_name, tool_args_raw)
                         yield (
                             "event: status\n"
-                            f"data: {json.dumps({'type': 'tool_call_start', 'tool': tool_name, 'subject': subject})}\n\n"
+                            f"data: {json.dumps({'type': 'tool_call_start', 'tool': tool_name, 'subject': subject, 'label': label})}\n\n"
                         )
                         try:
                             payload = await tool_executor(tool_name, tool_args_raw)

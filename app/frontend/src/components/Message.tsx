@@ -13,7 +13,7 @@ interface MessageProps {
   /** Called when the user clicks a citation chip */
   onCitationClick?: (citation: Citation) => void;
   /** Current tool-call status during streaming (ephemeral progress indicator) */
-  streamingStatus?: { tool: string; subject: string } | null;
+  streamingStatus?: { tool: string; subject: string; label?: string } | null;
 }
 
 // ── Typing indicator (3 pulsing dots) ────────────────────────────
@@ -25,6 +25,14 @@ function TypingIndicator() {
       <div className="typing-dot" />
     </div>
   );
+}
+
+/** Compose the live status line. `label` is the tool-aware text from the
+ *  backend (issue #223); `subject` is the legacy raw query/id kept as a
+ *  fallback for backward compatibility during a blue/green deploy window. */
+function statusLine(status: { label?: string; subject: string }): string {
+  const text = status.label || (status.subject ? `Searching: ${status.subject}` : '');
+  return text ? `${text}…` : 'Working…';
 }
 
 // ── Source citations section ──────────────────────────────────────
@@ -185,9 +193,7 @@ export function Message({
       >
         {isStreaming && !content ? (
           streamingStatus ? (
-            <div className="text-slate-400 text-[13px] italic">
-              {streamingStatus.subject ? `Searching: ${streamingStatus.subject}…` : 'Working…'}
-            </div>
+            <div className="text-slate-400 text-[13px] italic">{statusLine(streamingStatus)}</div>
           ) : (
             <TypingIndicator />
           )

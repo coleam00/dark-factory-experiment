@@ -7,7 +7,7 @@
  *   - Resets all streaming state (and aborts in-flight fetch) when conversationId changes
  */
 
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useStreamingResponse } from './useStreamingResponse';
 
@@ -255,6 +255,92 @@ describe('status event SSE parsing — hook state transitions', () => {
     });
 
     expect(result.current.streamingStatus).toBeNull();
+  });
+
+  it('parses the label field from a tool_call_start event into state', async () => {
+    const startPayload = JSON.stringify({
+      type: 'tool_call_start',
+      tool: 'get_video_transcript',
+      subject: 'abc123',
+      label: 'Reading transcript: My Video',
+    });
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const enc = new TextEncoder();
+        controller.enqueue(enc.encode(`event: status\ndata: ${startPayload}\n\n`));
+        await gate;
+        controller.enqueue(enc.encode('data: [DONE]\n\n'));
+        controller.close();
+      },
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: stream,
+      }),
+    );
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+    let p: Promise<void>;
+    act(() => {
+      p = result.current.startStream('conv-1', 'hi', vi.fn());
+    });
+    await waitFor(() => {
+      expect(result.current.streamingStatus?.label).toBe('Reading transcript: My Video');
+    });
+    release?.();
+    await act(async () => {
+      await p;
+    });
+  });
+
+  it('holds streamingStatus through tool_call_done (no flash to null)', async () => {
+    const startPayload = JSON.stringify({
+      type: 'tool_call_start',
+      tool: 'search_videos',
+      subject: 'agents',
+      label: 'Searching the library: "agents"',
+    });
+    const donePayload = JSON.stringify({ type: 'tool_call_done', tool: 'search_videos' });
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const enc = new TextEncoder();
+        controller.enqueue(enc.encode(`event: status\ndata: ${startPayload}\n\n`));
+        controller.enqueue(enc.encode(`event: status\ndata: ${donePayload}\n\n`));
+        await gate;
+        controller.enqueue(enc.encode('data: [DONE]\n\n'));
+        controller.close();
+      },
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: stream,
+      }),
+    );
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+    let p: Promise<void>;
+    act(() => {
+      p = result.current.startStream('conv-1', 'hi', vi.fn());
+    });
+    await waitFor(() => {
+      expect(result.current.streamingStatus?.label).toBe('Searching the library: "agents"');
+    });
+    release?.();
+    await act(async () => {
+      await p;
+    });
   });
 });
 
