@@ -230,11 +230,13 @@ def test_extract_tool_subject_type_error() -> None:
 )
 async def test_build_tool_status_label_no_db(tool_name, args_raw, expected) -> None:
     from backend.llm.openrouter import _build_tool_status_label
+
     assert await _build_tool_status_label(tool_name, args_raw) == expected
 
 
 async def test_build_tool_status_label_transcript_resolves_title() -> None:
     from backend.llm.openrouter import _build_tool_status_label
+
     with patch(
         "backend.llm.openrouter.repository.get_video",
         new=AsyncMock(return_value={"title": "How to Build AI Agents"}),
@@ -247,6 +249,7 @@ async def test_build_tool_status_label_transcript_resolves_title() -> None:
 
 async def test_build_tool_status_label_transcript_falls_back_to_id() -> None:
     from backend.llm.openrouter import _build_tool_status_label
+
     with patch(
         "backend.llm.openrouter.repository.get_video",
         new=AsyncMock(side_effect=RuntimeError("db down")),
