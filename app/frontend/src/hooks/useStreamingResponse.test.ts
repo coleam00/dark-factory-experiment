@@ -341,6 +341,101 @@ describe('status event SSE parsing — hook state transitions', () => {
     await act(async () => {
       await p;
     });
+    // Status must be cleared once the stream ends
+    expect(result.current.streamingStatus).toBeNull();
+  });
+
+  it('handles tool_call_start from an older backend that omits label', async () => {
+    const startPayload = JSON.stringify({
+      type: 'tool_call_start',
+      tool: 'search_videos',
+      subject: 'agents',
+      // label intentionally omitted
+    });
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const enc = new TextEncoder();
+        controller.enqueue(enc.encode(`event: status\ndata: ${startPayload}\n\n`));
+        await gate;
+        controller.enqueue(enc.encode('data: [DONE]\n\n'));
+        controller.close();
+      },
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: stream,
+      }),
+    );
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+    let p: Promise<void>;
+    act(() => {
+      p = result.current.startStream('conv-1', 'hi', vi.fn());
+    });
+    await waitFor(() => {
+      expect(result.current.streamingStatus?.label).toBe('');
+      expect(result.current.streamingStatus?.subject).toBe('agents');
+    });
+    release?.();
+    await act(async () => {
+      await p;
+    });
+  });
+
+  it('overwrites streamingStatus when a second tool_call_start arrives', async () => {
+    const firstPayload = JSON.stringify({
+      type: 'tool_call_start',
+      tool: 'search_videos',
+      subject: 'agents',
+      label: 'Searching the library: "agents"',
+    });
+    const secondPayload = JSON.stringify({
+      type: 'tool_call_start',
+      tool: 'get_video_transcript',
+      subject: 'abc123',
+      label: 'Reading transcript: My Video',
+    });
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const enc = new TextEncoder();
+        controller.enqueue(enc.encode(`event: status\ndata: ${firstPayload}\n\n`));
+        controller.enqueue(enc.encode(`event: status\ndata: ${secondPayload}\n\n`));
+        await gate;
+        controller.enqueue(enc.encode('data: [DONE]\n\n'));
+        controller.close();
+      },
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: stream,
+      }),
+    );
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+    let p: Promise<void>;
+    act(() => {
+      p = result.current.startStream('conv-1', 'hi', vi.fn());
+    });
+    await waitFor(() => {
+      expect(result.current.streamingStatus?.label).toBe('Reading transcript: My Video');
+      expect(result.current.streamingStatus?.tool).toBe('get_video_transcript');
+    });
+    release?.();
+    await act(async () => {
+      await p;
+    });
   });
 });
 

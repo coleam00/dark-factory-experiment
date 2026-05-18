@@ -10,7 +10,7 @@ describe('Message — streamingStatus rendering', () => {
         role="assistant"
         content=""
         isStreaming={true}
-        streamingStatus={{ tool: 'search_videos', subject: 'building agents' }}
+        streamingStatus={{ tool: 'search_videos', subject: 'building agents', label: '' }}
       />,
     );
     expect(screen.getByText('Searching: building agents…')).toBeInTheDocument();
@@ -23,7 +23,7 @@ describe('Message — streamingStatus rendering', () => {
         role="assistant"
         content=""
         isStreaming={true}
-        streamingStatus={{ tool: 'unknown_tool', subject: '' }}
+        streamingStatus={{ tool: 'unknown_tool', subject: '', label: '' }}
       />,
     );
     expect(screen.getByText('Working…')).toBeInTheDocument();
@@ -45,7 +45,7 @@ describe('Message — streamingStatus rendering', () => {
         role="assistant"
         content="Answer here."
         isStreaming={true}
-        streamingStatus={{ tool: 'search_videos', subject: 'building agents' }}
+        streamingStatus={{ tool: 'search_videos', subject: 'building agents', label: '' }}
       />,
     );
     expect(screen.getByText('Answer here.')).toBeInTheDocument();
@@ -74,10 +74,22 @@ describe('Message — streamingStatus rendering', () => {
         role="assistant"
         content=""
         isStreaming={true}
-        streamingStatus={{ tool: 'search_videos', subject: 'building agents' }}
+        streamingStatus={{ tool: 'search_videos', subject: 'building agents', label: '' }}
       />,
     );
     expect(screen.getByText('Searching: building agents…')).toBeInTheDocument();
+  });
+
+  it('falls back to Searching when label is empty string but subject is present', () => {
+    render(
+      <Message
+        role="assistant"
+        content=""
+        isStreaming={true}
+        streamingStatus={{ tool: 'unknown_tool', subject: 'agents', label: '' }}
+      />,
+    );
+    expect(screen.getByText('Searching: agents…')).toBeInTheDocument();
   });
 });
 

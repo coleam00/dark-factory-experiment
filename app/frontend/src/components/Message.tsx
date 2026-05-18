@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { StreamingStatus } from '../hooks/useStreamingResponse';
 import type { Citation } from '../lib/api';
 import { formatTimestamp } from './CitationModal';
 import { MarkdownRenderer } from './MarkdownRenderer';
@@ -13,7 +14,7 @@ interface MessageProps {
   /** Called when the user clicks a citation chip */
   onCitationClick?: (citation: Citation) => void;
   /** Current tool-call status during streaming (ephemeral progress indicator) */
-  streamingStatus?: { tool: string; subject: string; label?: string } | null;
+  streamingStatus?: StreamingStatus | null;
 }
 
 // ── Typing indicator (3 pulsing dots) ────────────────────────────
@@ -30,7 +31,7 @@ function TypingIndicator() {
 /** Compose the live status line. `label` is the tool-aware text from the
  *  backend (issue #223); `subject` is the legacy raw query/id kept as a
  *  fallback for backward compatibility during a blue/green deploy window. */
-function statusLine(status: { label?: string; subject: string }): string {
+function statusLine(status: StreamingStatus): string {
   const text = status.label || (status.subject ? `Searching: ${status.subject}` : '');
   return text ? `${text}…` : 'Working…';
 }

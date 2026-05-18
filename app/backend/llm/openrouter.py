@@ -17,6 +17,7 @@ import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from typing import Any, cast
 
+import asyncpg
 from openai import APIConnectionError, APIError, APIStatusError, AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
@@ -187,8 +188,20 @@ async def _build_tool_status_label(tool_name: str, tool_args_raw: str) -> str:
         title = subject  # fall back to the raw id
         try:
             video = await repository.get_video(subject)
+        except (asyncpg.PostgresError, RuntimeError, ConnectionError, OSError) as exc:
+            logger.warning(
+                "_build_tool_status_label: DB lookup failed for video %s: %s",
+                subject,
+                exc,
+            )
+            video = None
         except Exception as exc:
-            logger.debug("_build_tool_status_label: get_video failed for %s: %s", subject, exc)
+            logger.error(
+                "_build_tool_status_label: unexpected error for video %s: %s",
+                subject,
+                exc,
+                exc_info=True,
+            )
             video = None
         if video and video.get("title"):
             title = str(video["title"])

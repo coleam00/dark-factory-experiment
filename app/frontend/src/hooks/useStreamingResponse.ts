@@ -158,6 +158,12 @@ export function useStreamingResponse(conversationId: string | null) {
                       label: String(parsed.label ?? ''),
                     });
                   } else if (parsed.type === 'tool_call_done') {
+                    if (!parsed.tool || parsed.tool !== streamingStatus?.tool) {
+                      console.warn(
+                        '[useStreamingResponse] tool_call_done mismatch or missing tool:',
+                        parsed,
+                      );
+                    }
                     // Hold the last status through tool_call_done so the indicator reads
                     // as continuous progress. It is cleared when the next tool_call_start
                     // arrives, when the first answer token lands, or when the stream ends
