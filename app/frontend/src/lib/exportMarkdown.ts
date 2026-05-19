@@ -18,10 +18,6 @@ export function formatTimestamp(seconds: number): string {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
-function warnInvalidVideoUrl(url: string): void {
-  console.warn(`[exportMarkdown] Skipping timestamp link — invalid video_url: "${url}"`);
-}
-
 export function formatCitation(citation: Citation): string {
   if (!citation.snippet?.trim()) return '';
 
@@ -44,12 +40,16 @@ export function formatCitation(citation: Citation): string {
   try {
     videoId = new URL(citation.video_url).searchParams.get('v') ?? '';
   } catch {
-    warnInvalidVideoUrl(citation.video_url);
+    console.warn(
+      `[exportMarkdown] Skipping timestamp link — invalid video_url: "${citation.video_url}"`,
+    );
     return `${citation.video_title} (timestamp link unavailable) — ${range}`;
   }
 
   if (!videoId) {
-    warnInvalidVideoUrl(citation.video_url);
+    console.warn(
+      `[exportMarkdown] Skipping timestamp link — invalid video_url: "${citation.video_url}"`,
+    );
     return `${citation.video_title} (timestamp link unavailable) — ${range}`;
   }
 

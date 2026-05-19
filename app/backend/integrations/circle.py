@@ -102,13 +102,12 @@ def _extract_member(body: Any) -> dict[str, Any] | None:
     Circle's `/community_members/search` historically returned the member object
     directly. Newer responses sometimes wrap in `records`. Handle both.
     """
-    if not isinstance(body, dict):
-        return None
-    if "id" in body:
-        return body
-    recs = body.get("records")
-    if isinstance(recs, list) and recs:
-        first = recs[0]
-        if isinstance(first, dict):
-            return first
+    if isinstance(body, dict):
+        if "id" in body:
+            return body
+        recs = body.get("records") if isinstance(body.get("records"), list) else None
+        if recs:
+            first = recs[0]
+            if isinstance(first, dict):
+                return first
     return None

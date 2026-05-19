@@ -122,8 +122,8 @@ async def build_system_prompt(max_tool_calls: int = 0, is_member: bool = False) 
     ``cache_control`` is appended so Anthropic can cache the static content.
 
     The catalog block is filtered by ``is_member``: non-members see only
-    ``source_type='youtube'`` videos, mirroring the retrieval-layer ACL
-    (issue #147). Without this filter, non-members would see every paid
+    ``source_type='youtube'`` videos, mirroring the retrieval-layer ACL.
+    Without this filter, non-members would see every paid
     Dynamous lesson title and id in the cached prompt — defense-in-depth
     blocks transcript retrieval, but the model can still leak titles and
     ids in its prose by referring to "the catalog".
@@ -195,14 +195,6 @@ async def _build_tool_status_label(tool_name: str, tool_args_raw: str) -> str:
                 exc,
             )
             video = None
-        except Exception as exc:
-            logger.error(
-                "_build_tool_status_label: unexpected error for video %s: %s",
-                subject,
-                exc,
-                exc_info=True,
-            )
-            video = None
         if video and video.get("title"):
             title = str(video["title"])
         return f"Reading transcript: {title}"
@@ -231,7 +223,7 @@ async def stream_chat(
     not trigger false positive refusals.
 
     ``is_member`` flows through to ``build_system_prompt`` so the catalog
-    block (issue #147) only lists YouTube videos for non-members.
+    block only lists YouTube videos for non-members.
     """
     client = _get_async_client()
     tools_active = bool(tools) and tool_executor is not None and max_tool_calls > 0
