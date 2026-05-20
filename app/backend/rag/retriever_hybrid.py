@@ -31,8 +31,9 @@ _video_cache: dict[str, dict[str, str]] = {}
 def invalidate_cache() -> None:
     """Clear the video metadata cache."""
     global _video_cache
+    count = len(_video_cache)
     _video_cache.clear()
-    logger.info("Hybrid retriever video cache invalidated.")
+    logger.info(f"Hybrid retriever video cache invalidated ({count} entries cleared).")
 
 
 async def retrieve_hybrid(
