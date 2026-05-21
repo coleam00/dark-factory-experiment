@@ -340,6 +340,72 @@ async def test_ingest_from_url_supadata_error_returns_503():
     assert "Transcript fetch failed" in response.json()["detail"]
 
 
+async def test_ingest_from_url_cleans_up_on_embed_failure():
+    """embed_batch raising → 502 AND the orphan video row is deleted."""
+    mock_video = {
+        "id": "v-from-url-orphan",
+        "title": "Fake oEmbed Title",
+        "description": "Ingested from https://www.youtube.com/watch?v=abc123",
+        "url": "https://www.youtube.com/watch?v=abc123",
+        "transcript": "Hello world.",
+    }
+
+    fake_helper = AsyncMock(
+        return_value={
+            "youtube_video_id": "abc123",
+            "title": "Fake oEmbed Title",
+            "description": "Ingested from https://www.youtube.com/watch?v=abc123",
+            "transcript": "Hello world.",
+            "segments": [
+                {"start": 0.0, "end": 3.0, "text": "Hello world."},
+            ],
+        }
+    )
+
+    chunk_dict = {
+        "content": "chunk 1",
+        "start_seconds": 0.0,
+        "end_seconds": 3.0,
+        "snippet": "chunk 1",
+    }
+
+    with (
+        patch(
+            "backend.routes.ingest.fetch_video_for_ingest",
+            new=fake_helper,
+        ),
+        patch(
+            "backend.routes.ingest.repository.create_video",
+            new_callable=AsyncMock,
+            return_value=mock_video,
+        ),
+        patch(
+            "backend.routes.ingest.chunk_video_timestamped",
+            return_value=([chunk_dict], False),
+        ),
+        patch(
+            "backend.routes.ingest.embed_batch",
+            side_effect=RuntimeError("embeddings api down"),
+        ),
+        patch(
+            "backend.routes.ingest.repository.delete_video",
+            new_callable=AsyncMock,
+        ) as mock_delete_video,
+    ):
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+        ) as ac:
+            response = await ac.post(
+                "/api/ingest/from-url",
+                json={"url": "https://www.youtube.com/watch?v=abc123"},
+            )
+
+    assert response.status_code == 502
+    assert "Embeddings API request failed" in response.json()["detail"]
+    mock_delete_video.assert_awaited_once_with("v-from-url-orphan")
+
+
 async def test_ingest_from_url_empty_chunks_returns_stored_no_chunks():
     """Helper returns a video but chunker returns 0 chunks → status stored_no_chunks."""
     mock_video = {
