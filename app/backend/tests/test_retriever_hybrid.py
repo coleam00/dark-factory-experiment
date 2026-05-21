@@ -7,12 +7,15 @@ Verifies:
   - A rare exact term ranks higher via hybrid than pure cosine
   - A conceptual query with no exact-term overlap still returns relevant results
   - Hybrid retriever raises clear error when DATABASE_URL is unset
+  - The video-metadata cache is single-flight and LRU-bounded
 """
 
+import asyncio
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
+import backend.rag.retriever_hybrid as retriever_hybrid_module
 from backend.rag.retriever_hybrid import _rrf_merge, retrieve_hybrid
 
 # Minimal chunk fixtures for RRF testing
@@ -223,3 +226,142 @@ class TestRetrieveHybrid:
 
         result = _rrf_merge(keyword, vector, k=60, top_k=5)
         assert result[0]["id"] == "c_concept"
+
+
+class TestVideoCacheSingleFlight:
+    """Regression tests for the single-flight + LRU-bounded video metadata cache."""
+
+    async def test_single_flight_concurrent_misses_call_get_video_once(self):
+        """N concurrent retrieve_hybrid() calls on the same uncached video_id
+        result in exactly one repository.get_video() call (single-flight).
+        """
+        release = asyncio.Event()
+
+        async def gated_get_video(_video_id: str) -> dict:
+            await release.wait()
+            return {
+                "title": "T",
+                "url": "U",
+                "source_type": "youtube",
+                "lesson_url": "",
+            }
+
+        with (
+            patch(
+                "backend.rag.retriever_hybrid.repository.keyword_search",
+                new_callable=AsyncMock,
+            ) as mock_kw,
+            patch(
+                "backend.rag.retriever_hybrid.repository.vector_search_pg",
+                new_callable=AsyncMock,
+            ) as mock_vec,
+            patch(
+                "backend.rag.retriever_hybrid.repository.get_video",
+                new_callable=AsyncMock,
+                side_effect=gated_get_video,
+            ) as mock_video,
+        ):
+            mock_kw.return_value = [_CHUNK_A]
+            mock_vec.return_value = [_CHUNK_A]
+
+            async def kick() -> list[dict]:
+                return await retrieve_hybrid("q", [0.0] * 1536, top_k=1)
+
+            tasks = [asyncio.create_task(kick()) for _ in range(5)]
+            # Yield so all tasks reach the gated get_video before we release.
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            release.set()
+            results = await asyncio.gather(*tasks)
+
+            assert mock_video.call_count == 1
+            assert len(results) == 5
+            for r in results:
+                assert r[0]["video_title"] == "T"
+
+    async def test_lru_eviction_bounds_cache_size(self, monkeypatch):
+        """Cache size never exceeds MAX_VIDEO_CACHE_SIZE; oldest entry is evicted first."""
+        monkeypatch.setattr(retriever_hybrid_module, "MAX_VIDEO_CACHE_SIZE", 2)
+
+        def chunk_for(video_id: str) -> dict:
+            return {
+                "id": f"c-{video_id}",
+                "video_id": video_id,
+                "content": "x",
+                "chunk_index": 0,
+                "start_seconds": 0.0,
+                "end_seconds": 1.0,
+                "snippet": "",
+            }
+
+        async def fake_get_video(video_id: str) -> dict:
+            return {"title": f"title-{video_id}", "url": f"url-{video_id}"}
+
+        with (
+            patch(
+                "backend.rag.retriever_hybrid.repository.keyword_search",
+                new_callable=AsyncMock,
+            ) as mock_kw,
+            patch(
+                "backend.rag.retriever_hybrid.repository.vector_search_pg",
+                new_callable=AsyncMock,
+            ) as mock_vec,
+            patch(
+                "backend.rag.retriever_hybrid.repository.get_video",
+                new_callable=AsyncMock,
+                side_effect=fake_get_video,
+            ),
+        ):
+            for vid in ("va", "vb", "vc"):
+                mock_kw.return_value = [chunk_for(vid)]
+                mock_vec.return_value = [chunk_for(vid)]
+                await retrieve_hybrid("q", [0.0] * 1536, top_k=1)
+
+            assert len(retriever_hybrid_module._video_cache) == 2
+            # Oldest insert (va) should have been evicted; vb and vc remain.
+            assert "va" not in retriever_hybrid_module._video_cache
+            assert "vb" in retriever_hybrid_module._video_cache
+            assert "vc" in retriever_hybrid_module._video_cache
+
+    async def test_get_video_exception_clears_inflight_for_retry(self):
+        """A failed get_video() must clear the in-flight entry so the next call retries."""
+        call_count = {"n": 0}
+
+        async def flaky_get_video(_video_id: str) -> dict:
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise RuntimeError("boom")
+            return {
+                "title": "OK",
+                "url": "U",
+                "source_type": "youtube",
+                "lesson_url": "",
+            }
+
+        with (
+            patch(
+                "backend.rag.retriever_hybrid.repository.keyword_search",
+                new_callable=AsyncMock,
+            ) as mock_kw,
+            patch(
+                "backend.rag.retriever_hybrid.repository.vector_search_pg",
+                new_callable=AsyncMock,
+            ) as mock_vec,
+            patch(
+                "backend.rag.retriever_hybrid.repository.get_video",
+                new_callable=AsyncMock,
+                side_effect=flaky_get_video,
+            ),
+        ):
+            mock_kw.return_value = [_CHUNK_A]
+            mock_vec.return_value = [_CHUNK_A]
+
+            with pytest.raises(RuntimeError, match="boom"):
+                await retrieve_hybrid("q", [0.0] * 1536, top_k=1)
+
+            # Second call should retry get_video and succeed.
+            result = await retrieve_hybrid("q", [0.0] * 1536, top_k=1)
+            assert result[0]["video_title"] == "OK"
+            assert call_count["n"] == 2
+            # No leaked in-flight entry.
+            assert "v1" not in retriever_hybrid_module._inflight

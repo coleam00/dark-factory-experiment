@@ -16,23 +16,82 @@ cosine fallback).
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 
 from backend.config import HYBRID_K_CONSTANT, HYBRID_OVERFETCH_FACTOR, KEYWORD_LANGUAGE
 from backend.db import repository
 
 logger = logging.getLogger(__name__)
 
-# Module-level video metadata cache (populated on demand per chunk result)
-_video_cache: dict[str, dict[str, str]] = {}
+# Why: bound the cache so long-running processes don't grow it without limit.
+MAX_VIDEO_CACHE_SIZE = 1024
+
+# Module-level video metadata cache (populated on demand per chunk result).
+# OrderedDict gives O(1) LRU touch via move_to_end + popitem(last=False).
+_video_cache: OrderedDict[str, dict[str, str]] = OrderedDict()
+
+# Single-flight coordination: while a video_id's metadata is being fetched, the
+# first task stores a Future here; concurrent misses await that same Future
+# instead of issuing a duplicate repository.get_video() call.
+_inflight: dict[str, asyncio.Future[dict[str, str]]] = {}
 
 
 def invalidate_cache() -> None:
-    """Clear the video metadata cache."""
-    global _video_cache
+    """Clear the video metadata cache (and any in-flight lookups)."""
     _video_cache.clear()
+    # Waiters already holding a reference to an in-flight Future still receive
+    # its result — that's fine (stale but valid). New lookups simply miss.
+    _inflight.clear()
     logger.info("Hybrid retriever video cache invalidated.")
+
+
+async def _get_video_meta(video_id: str) -> dict[str, str]:
+    """Single-flight, LRU-bounded lookup of video metadata for `video_id`.
+
+    Cache hit: O(1) move_to_end + return (no awaits).
+    Cache miss with no in-flight peer: create a Future, fetch, populate cache,
+        evict if over bound, resolve Future, return.
+    Cache miss with in-flight peer: await the existing Future (no duplicate fetch).
+    """
+    if video_id in _video_cache:
+        _video_cache.move_to_end(video_id)
+        return _video_cache[video_id]
+
+    existing = _inflight.get(video_id)
+    if existing is not None:
+        return await existing
+
+    fut: asyncio.Future[dict[str, str]] = asyncio.get_running_loop().create_future()
+    _inflight[video_id] = fut
+    try:
+        video = await repository.get_video(video_id)
+        if video:
+            meta = {
+                "title": video.get("title", ""),
+                "url": video.get("url", "") or "",
+                "source_type": video.get("source_type", "youtube") or "youtube",
+                "lesson_url": video.get("lesson_url", "") or "",
+            }
+        else:
+            logger.warning("Video not found for video_id=%s", video_id)
+            meta = {
+                "title": "Unknown Video",
+                "url": "",
+                "source_type": "youtube",
+                "lesson_url": "",
+            }
+        _video_cache[video_id] = meta
+        if len(_video_cache) > MAX_VIDEO_CACHE_SIZE:
+            _video_cache.popitem(last=False)
+        fut.set_result(meta)
+        return meta
+    except Exception as exc:
+        fut.set_exception(exc)
+        raise
+    finally:
+        _inflight.pop(video_id, None)
 
 
 async def retrieve_hybrid(
@@ -116,29 +175,7 @@ async def retrieve_hybrid(
     results: list[dict] = []
     for chunk in merged:
         video_id = chunk["video_id"]
-        if video_id not in _video_cache:
-            video = await repository.get_video(video_id)
-            if video:
-                _video_cache[video_id] = {
-                    "title": video.get("title", ""),
-                    "url": video.get("url", "") or "",
-                    "source_type": video.get("source_type", "youtube") or "youtube",
-                    "lesson_url": video.get("lesson_url", "") or "",
-                }
-            else:
-                logger.warning(
-                    "Video not found for video_id=%s, chunk_id=%s",
-                    video_id,
-                    chunk.get("id", "?"),
-                )
-                _video_cache[video_id] = {
-                    "title": "Unknown Video",
-                    "url": "",
-                    "source_type": "youtube",
-                    "lesson_url": "",
-                }
-
-        video_meta = _video_cache[video_id]
+        video_meta = await _get_video_meta(video_id)
         results.append(
             {
                 "chunk_id": chunk["id"],
