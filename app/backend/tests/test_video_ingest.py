@@ -388,3 +388,77 @@ async def test_ingest_from_url_empty_chunks_returns_stored_no_chunks():
     data = response.json()
     assert data["status"] == "stored_no_chunks"
     assert data["chunks_created"] == 0
+
+
+async def test_ingest_from_url_embedding_failure_cleans_up_orphan_video():
+    """embed_batch raising → video row is deleted and 502 returned (no orphan row)."""
+    mock_video = {
+        "id": "v-from-url-1",
+        "title": "Fake oEmbed Title",
+        "description": "Ingested from https://www.youtube.com/watch?v=abc123",
+        "url": "https://www.youtube.com/watch?v=abc123",
+        "transcript": "Hello world. This is a test.",
+    }
+
+    fake_helper = AsyncMock(
+        return_value={
+            "youtube_video_id": "abc123",
+            "title": "Fake oEmbed Title",
+            "description": "Ingested from https://www.youtube.com/watch?v=abc123",
+            "transcript": "Hello world. This is a test.",
+            "segments": [
+                {"start": 0.0, "end": 3.0, "text": "Hello world."},
+                {"start": 3.5, "end": 6.0, "text": "This is a test."},
+            ],
+        }
+    )
+
+    chunk_dict = {
+        "content": "chunk 1",
+        "start_seconds": 0.0,
+        "end_seconds": 3.0,
+        "snippet": "chunk 1",
+    }
+
+    with (
+        patch(
+            "backend.routes.ingest.fetch_video_for_ingest",
+            new=fake_helper,
+        ),
+        patch(
+            "backend.routes.ingest.repository.create_video",
+            new_callable=AsyncMock,
+            return_value=mock_video,
+        ),
+        patch(
+            "backend.routes.ingest.chunk_video_timestamped",
+            return_value=([chunk_dict], False),
+        ),
+        patch(
+            "backend.routes.ingest.embed_batch",
+            side_effect=RuntimeError("boom"),
+        ),
+        patch(
+            "backend.routes.ingest.repository.delete_video",
+            new_callable=AsyncMock,
+        ) as mock_delete_video,
+        patch(
+            "backend.routes.ingest.repository.create_chunk",
+            new_callable=AsyncMock,
+        ) as mock_create_chunk,
+        patch("backend.routes.ingest.retriever_hybrid.invalidate_cache"),
+        patch("backend.routes.ingest.catalog.invalidate_catalog"),
+    ):
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+        ) as ac:
+            response = await ac.post(
+                "/api/ingest/from-url",
+                json={"url": "https://www.youtube.com/watch?v=abc123"},
+            )
+
+    assert response.status_code == 502
+    assert "Embeddings API request failed" in response.json()["detail"]
+    mock_delete_video.assert_awaited_once_with("v-from-url-1")
+    mock_create_chunk.assert_not_awaited()
