@@ -58,6 +58,29 @@ class TestRRFMerge:
 
         assert [r["id"] for r in result1] == [r["id"] for r in result2]
 
+    def test_rrf_merge_deterministic_with_tied_scores(self):
+        """RRF merge produces deterministic order when two chunks tie on RRF score.
+
+        Two chunks each appearing once at the same rank in different lists will
+        receive identical 1/(k+rank) scores. Without a tiebreaker the final
+        sort order would depend on dict insertion order. The merge must break
+        ties lexicographically by chunk id so identical inputs always yield
+        the same ordering across calls.
+        """
+        # _CHUNK_C ("c3") only in keyword at rank 0 → score = 1/(60+0)
+        # _CHUNK_A ("c1") only in vector  at rank 0 → score = 1/(60+0)
+        # Both tie. Lexicographic id order puts c1 before c3.
+        keyword = [_CHUNK_C]
+        vector = [_CHUNK_A]
+
+        result1 = _rrf_merge(keyword, vector, k=60, top_k=5)
+        result2 = _rrf_merge(keyword, vector, k=60, top_k=5)
+
+        ids1 = [r["id"] for r in result1]
+        ids2 = [r["id"] for r in result2]
+        assert ids1 == ids2
+        assert ids1 == ["c1", "c3"]
+
     def test_rrf_merge_top_k_respected(self):
         """RRF merge returns at most top_k results."""
         keyword = [_CHUNK_A, _CHUNK_B, _CHUNK_C]
@@ -76,7 +99,7 @@ class TestRRFMerge:
         # B is in both lists at ranks (1, 0) → score = 1/(60+1) + 1/(60+0) ≈ 0.0328
         # A is in only keyword at rank 0 → score = 1/(60+0) = 0.0164
         # C is in only vector at rank 1 → score = 1/(60+1) = 0.0164
-        # So B > A = C (tie-break by insertion order)
+        # So B > A = C (ties broken lexicographically by chunk id: c1 < c3)
 
         ids = [r["id"] for r in result]
         assert ids.index("c2") < ids.index("c1")  # B ranks above A

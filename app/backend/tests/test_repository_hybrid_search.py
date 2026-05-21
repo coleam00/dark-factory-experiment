@@ -170,7 +170,9 @@ class TestVectorSearchPg:
 
         call_args = mock_conn.fetch.call_args
         sql = call_args[0][0]
-        assert "ORDER BY distance" in sql
+        # Secondary `id ASC` is required so that tied distances are ordered
+        # deterministically (otherwise RRF merge becomes non-deterministic).
+        assert "ORDER BY distance ASC, id ASC" in sql
 
     async def test_vector_search_pg_json_encodes_embedding(self):
         """vector_search_pg JSON-serializes the embedding list before passing to DB."""
