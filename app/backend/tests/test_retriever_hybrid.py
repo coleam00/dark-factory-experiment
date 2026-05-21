@@ -58,6 +58,25 @@ class TestRRFMerge:
 
         assert [r["id"] for r in result1] == [r["id"] for r in result2]
 
+    def test_rrf_merge_deterministic_with_tied_scores(self):
+        """Chunks with identical RRF scores resolve deterministically by chunk ID."""
+        # Construct inputs so two chunks receive the exact same RRF score:
+        # both appear at the same rank in keyword and vector results.
+        chunk_x = {"id": "cx", "video_id": "v1", "content": "x", "chunk_index": 0, "start_seconds": 0.0, "end_seconds": 1.0, "snippet": ""}
+        chunk_y = {"id": "cy", "video_id": "v1", "content": "y", "chunk_index": 1, "start_seconds": 1.0, "end_seconds": 2.0, "snippet": ""}
+
+        keyword = [chunk_x, chunk_y]  # x at rank 0, y at rank 1
+        vector = [chunk_y, chunk_x]  # y at rank 0, x at rank 1
+
+        # score(x) = 1/(60+0) + 1/(60+1) = 1/60 + 1/61
+        # score(y) = 1/(60+1) + 1/(60+0) = 1/61 + 1/60  → identical
+        results = [_rrf_merge(keyword, vector, k=60, top_k=2) for _ in range(10)]
+        ids_lists = [[r["id"] for r in res] for res in results]
+
+        # All runs must produce the same ordering; tie broken by id ASC ('cx' < 'cy')
+        assert all(ids_list == ids_lists[0] for ids_list in ids_lists)
+        assert ids_lists[0] == ["cx", "cy"]
+
     def test_rrf_merge_top_k_respected(self):
         """RRF merge returns at most top_k results."""
         keyword = [_CHUNK_A, _CHUNK_B, _CHUNK_C]
