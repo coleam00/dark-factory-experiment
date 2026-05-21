@@ -9,11 +9,18 @@ Verifies:
   - Hybrid retriever raises clear error when DATABASE_URL is unset
 """
 
+import asyncio
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from backend.rag.retriever_hybrid import _rrf_merge, retrieve_hybrid
+import backend.rag.retriever_hybrid as retriever_hybrid_module
+from backend.rag.retriever_hybrid import (
+    _get_video_meta,
+    _rrf_merge,
+    invalidate_cache,
+    retrieve_hybrid,
+)
 
 # Minimal chunk fixtures for RRF testing
 _CHUNK_A = {
@@ -223,3 +230,173 @@ class TestRetrieveHybrid:
 
         result = _rrf_merge(keyword, vector, k=60, top_k=5)
         assert result[0]["id"] == "c_concept"
+
+
+class TestVideoCacheSingleFlight:
+    """Regression tests for bounded single-flight video metadata cache."""
+
+    async def test_concurrent_misses_collapse_to_single_get_video_call(self):
+        """Concurrent misses for the same video_id result in a single DB call."""
+        event = asyncio.Event()
+
+        async def slow_get_video(video_id):
+            await event.wait()
+            return {
+                "title": "Cached Video",
+                "url": "https://example.com",
+                "source_type": "youtube",
+                "lesson_url": "",
+            }
+
+        with (
+            patch(
+                "backend.rag.retriever_hybrid.repository.keyword_search",
+                new_callable=AsyncMock,
+            ) as mock_kw,
+            patch(
+                "backend.rag.retriever_hybrid.repository.vector_search_pg",
+                new_callable=AsyncMock,
+            ) as mock_vec,
+            patch(
+                "backend.rag.retriever_hybrid.repository.get_video",
+                new_callable=AsyncMock,
+                side_effect=slow_get_video,
+            ) as mock_get_video,
+        ):
+            mock_kw.return_value = [_CHUNK_A]
+            mock_vec.return_value = [_CHUNK_A]
+
+            tasks = [
+                asyncio.create_task(retrieve_hybrid("q", [0.1] * 1536, top_k=5))
+                for _ in range(5)
+            ]
+            await asyncio.sleep(0)
+            event.set()
+            results = await asyncio.gather(*tasks)
+
+            assert mock_get_video.call_count == 1
+            for result in results:
+                assert result[0]["video_title"] == "Cached Video"
+
+    async def test_distinct_video_ids_are_not_serialized(self):
+        """Misses on distinct video_ids do not block each other."""
+        events = {
+            "v1": asyncio.Event(),
+            "v2": asyncio.Event(),
+        }
+        order = []
+
+        async def slow_get_video(video_id):
+            order.append(video_id)
+            await events[video_id].wait()
+            return {"title": f"Video {video_id}", "url": "", "source_type": "youtube", "lesson_url": ""}
+
+        with patch(
+            "backend.rag.retriever_hybrid.repository.get_video",
+            new_callable=AsyncMock,
+            side_effect=slow_get_video,
+        ):
+            task_v1 = asyncio.create_task(_get_video_meta("v1"))
+            task_v2 = asyncio.create_task(_get_video_meta("v2"))
+            await asyncio.sleep(0)
+
+            events["v2"].set()
+            await asyncio.sleep(0)
+
+            assert not task_v1.done()
+            assert task_v2.done()
+            assert task_v2.result()["title"] == "Video v2"
+
+            events["v1"].set()
+            assert (await task_v1)["title"] == "Video v1"
+            assert order == ["v1", "v2"]
+
+    async def test_cache_hit_is_synchronous(self):
+        """A cache hit returns without calling repository.get_video."""
+        retriever_hybrid_module._video_cache["v1"] = {
+            "title": "Preloaded",
+            "url": "",
+            "source_type": "youtube",
+            "lesson_url": "",
+        }
+
+        with patch(
+            "backend.rag.retriever_hybrid.repository.get_video",
+            new_callable=AsyncMock,
+        ) as mock_get_video:
+            result = await _get_video_meta("v1")
+            assert result["title"] == "Preloaded"
+            assert mock_get_video.call_count == 0
+
+    async def test_cache_evicts_lru_when_over_max_size(self, monkeypatch):
+        """The cache respects MAX_VIDEO_CACHE_SIZE and evicts LRU entries."""
+        monkeypatch.setattr(retriever_hybrid_module, "MAX_VIDEO_CACHE_SIZE", 3)
+
+        async def fake_get_video(video_id):
+            return {
+                "title": f"Video {video_id}",
+                "url": "",
+                "source_type": "youtube",
+                "lesson_url": "",
+            }
+
+        with patch(
+            "backend.rag.retriever_hybrid.repository.get_video",
+            new_callable=AsyncMock,
+            side_effect=fake_get_video,
+        ):
+            for i in range(4):
+                await _get_video_meta(f"v{i}")
+
+            assert len(retriever_hybrid_module._video_cache) == 3
+            assert "v0" not in retriever_hybrid_module._video_cache
+            assert list(retriever_hybrid_module._video_cache.keys())[-1] == "v3"
+
+            # Touch v1 to make it recently used
+            await _get_video_meta("v1")
+            # Add v4
+            await _get_video_meta("v4")
+
+            assert len(retriever_hybrid_module._video_cache) == 3
+            assert "v2" not in retriever_hybrid_module._video_cache
+            assert "v1" in retriever_hybrid_module._video_cache
+            assert list(retriever_hybrid_module._video_cache.keys())[-1] == "v4"
+
+    async def test_invalidate_cache_clears_inflight(self):
+        """invalidate_cache drops pending in-flight futures safely."""
+        event = asyncio.Event()
+
+        async def slow_get_video(video_id):
+            await event.wait()
+            return {"title": "Late Video", "url": "", "source_type": "youtube", "lesson_url": ""}
+
+        with patch(
+            "backend.rag.retriever_hybrid.repository.get_video",
+            new_callable=AsyncMock,
+            side_effect=slow_get_video,
+        ):
+            task = asyncio.create_task(_get_video_meta("v1"))
+            await asyncio.sleep(0)
+
+            invalidate_cache()
+            assert retriever_hybrid_module._video_cache_inflight == {}
+
+            event.set()
+            result = await task
+            assert result["title"] == "Late Video"
+
+    async def test_get_video_failure_propagates_to_waiters(self):
+        """An exception from repository.get_video is propagated to all waiters."""
+        with patch(
+            "backend.rag.retriever_hybrid.repository.get_video",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("db down"),
+        ):
+            task1 = asyncio.create_task(_get_video_meta("v1"))
+            task2 = asyncio.create_task(_get_video_meta("v1"))
+            await asyncio.sleep(0)
+
+            results = await asyncio.gather(task1, task2, return_exceptions=True)
+            assert all(
+                isinstance(r, RuntimeError) and str(r) == "db down" for r in results
+            )
