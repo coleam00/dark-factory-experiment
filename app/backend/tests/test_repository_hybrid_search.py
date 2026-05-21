@@ -93,6 +93,22 @@ class TestKeywordSearch:
         args = call_args[0]
         assert args[2] == 3
 
+    async def test_keyword_search_orders_by_rank_descending_with_tiebreaker(self):
+        """keyword_search SQL orders by ts_rank descending, with id ASC tiebreaker."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])
+
+        mock_acquire = AsyncMock()
+        mock_acquire.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_acquire.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(repository, "_acquire", return_value=mock_acquire):
+            await repository.keyword_search("test", top_k=5)
+
+        call_args = mock_conn.fetch.call_args
+        sql = call_args[0][0]
+        assert "ORDER BY rank DESC, id ASC" in sql
+
 
 class TestVectorSearchPg:
     """Tests for vector_search_pg() SQL execution."""
@@ -157,7 +173,7 @@ class TestVectorSearchPg:
         assert result == []
 
     async def test_vector_search_pg_orders_by_distance_ascending(self):
-        """vector_search_pg SQL orders by cosine distance ascending (nearest first)."""
+        """vector_search_pg SQL orders by cosine distance ascending, with id ASC tiebreaker."""
         mock_conn = AsyncMock()
         mock_conn.fetch = AsyncMock(return_value=[])
 
@@ -170,7 +186,7 @@ class TestVectorSearchPg:
 
         call_args = mock_conn.fetch.call_args
         sql = call_args[0][0]
-        assert "ORDER BY distance" in sql
+        assert "ORDER BY distance ASC, id ASC" in sql
 
     async def test_vector_search_pg_json_encodes_embedding(self):
         """vector_search_pg JSON-serializes the embedding list before passing to DB."""

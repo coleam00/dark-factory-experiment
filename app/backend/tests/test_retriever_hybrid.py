@@ -76,10 +76,27 @@ class TestRRFMerge:
         # B is in both lists at ranks (1, 0) → score = 1/(60+1) + 1/(60+0) ≈ 0.0328
         # A is in only keyword at rank 0 → score = 1/(60+0) = 0.0164
         # C is in only vector at rank 1 → score = 1/(60+1) = 0.0164
-        # So B > A = C (tie-break by insertion order)
+        # So B > A = C (tie-break by chunk_id ascending)
 
         ids = [r["id"] for r in result]
         assert ids.index("c2") < ids.index("c1")  # B ranks above A
+
+    def test_rrf_merge_breaks_ties_deterministically(self):
+        """Tied RRF scores resolve by chunk_id ASC and are stable across input permutations."""
+        # A and C both appear only in keyword at rank 0 / vector at rank 0 respectively,
+        # giving identical RRF scores: 1/(60+0) = 0.01639...
+        # B does not appear; the tie is between A (id="c1") and C (id="c3").
+        # Determinism requires "c1" before "c3" regardless of input permutation.
+        result1 = _rrf_merge([_CHUNK_A], [_CHUNK_C], k=60, top_k=5)
+        result2 = _rrf_merge([_CHUNK_C], [_CHUNK_A], k=60, top_k=5)
+
+        ids1 = [r["id"] for r in result1]
+        ids2 = [r["id"] for r in result2]
+
+        # Both orderings of identical-score chunks resolve to the same id order.
+        assert ids1 == ids2
+        # Tiebreak is lexicographic by chunk_id ascending.
+        assert ids1 == ["c1", "c3"]
 
     def test_rrf_merge_empty_keyword_returns_vector_ranked(self):
         """Empty keyword list returns vector results sorted by vector rank."""

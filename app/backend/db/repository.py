@@ -280,7 +280,7 @@ async def keyword_search(
             FROM chunks
             WHERE search_vector @@ plainto_tsquery($1)
               AND source_type = ANY($3::text[])
-            ORDER BY rank DESC
+            ORDER BY rank DESC, id ASC
             LIMIT $2
             """,
             query,
@@ -326,7 +326,7 @@ async def vector_search_pg(
                    embedding::vector <=> $1::vector AS distance
             FROM chunks
             WHERE source_type = ANY($3::text[])
-            ORDER BY distance
+            ORDER BY distance ASC, id ASC
             LIMIT $2
             """,
             embedding_json,
