@@ -9,11 +9,18 @@ Verifies:
   - Hybrid retriever raises clear error when DATABASE_URL is unset
 """
 
+import asyncio
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from backend.rag.retriever_hybrid import _rrf_merge, retrieve_hybrid
+from backend.rag.retriever_hybrid import (
+    MAX_VIDEO_CACHE_SIZE,
+    _inflight,
+    _rrf_merge,
+    _video_cache,
+    retrieve_hybrid,
+)
 
 # Minimal chunk fixtures for RRF testing
 _CHUNK_A = {
@@ -223,3 +230,155 @@ class TestRetrieveHybrid:
 
         result = _rrf_merge(keyword, vector, k=60, top_k=5)
         assert result[0]["id"] == "c_concept"
+
+    async def test_single_flight_concurrent_misses(self):
+        """Concurrent misses for the same video_id result in exactly one DB call."""
+        call_count = 0
+
+        async def slow_get_video(video_id: str):
+            nonlocal call_count
+            call_count += 1
+            await asyncio.sleep(0.05)
+            return {
+                "title": f"Video {video_id}",
+                "url": f"https://youtube.com/watch?v={video_id}",
+            }
+
+        with (
+            patch(
+                "backend.rag.retriever_hybrid.repository.keyword_search",
+                new_callable=AsyncMock,
+            ) as mock_kw,
+            patch(
+                "backend.rag.retriever_hybrid.repository.vector_search_pg",
+                new_callable=AsyncMock,
+            ) as mock_vec,
+            patch(
+                "backend.rag.retriever_hybrid.repository.get_video",
+                new_callable=AsyncMock,
+            ) as mock_video,
+        ):
+            chunk = {
+                "id": "c1",
+                "video_id": "v_same",
+                "content": "test",
+                "chunk_index": 0,
+                "start_seconds": 0.0,
+                "end_seconds": 10.0,
+                "snippet": "",
+            }
+            mock_kw.return_value = [chunk]
+            mock_vec.return_value = [chunk]
+            mock_video.side_effect = slow_get_video
+
+            results = await asyncio.gather(
+                retrieve_hybrid("q1", [0.1] * 1536, top_k=5),
+                retrieve_hybrid("q2", [0.1] * 1536, top_k=5),
+            )
+
+            assert call_count == 1
+            assert len(results[0]) == 1
+            assert len(results[1]) == 1
+            assert results[0][0]["video_title"] == results[1][0]["video_title"]
+
+    async def test_cache_bounded_lru_eviction(self):
+        """Cache size is bounded and oldest entries are evicted."""
+        with (
+            patch(
+                "backend.rag.retriever_hybrid.repository.keyword_search",
+                new_callable=AsyncMock,
+            ) as mock_kw,
+            patch(
+                "backend.rag.retriever_hybrid.repository.vector_search_pg",
+                new_callable=AsyncMock,
+            ) as mock_vec,
+            patch(
+                "backend.rag.retriever_hybrid.repository.get_video",
+                new_callable=AsyncMock,
+            ) as mock_video,
+        ):
+            call_count = 0
+
+            async def counting_get_video(video_id: str):
+                nonlocal call_count
+                call_count += 1
+                return {
+                    "title": f"Video {video_id}",
+                    "url": f"https://youtube.com/watch?v={video_id}",
+                }
+
+            mock_video.side_effect = counting_get_video
+
+            # Fill cache to exactly MAX_VIDEO_CACHE_SIZE
+            for i in range(MAX_VIDEO_CACHE_SIZE):
+                chunk = {
+                    "id": f"c{i}",
+                    "video_id": f"v{i}",
+                    "content": "test",
+                    "chunk_index": 0,
+                    "start_seconds": 0.0,
+                    "end_seconds": 10.0,
+                    "snippet": "",
+                }
+                mock_kw.return_value = [chunk]
+                mock_vec.return_value = [chunk]
+                await retrieve_hybrid("q", [0.1] * 1536, top_k=5)
+
+            assert len(_video_cache) == MAX_VIDEO_CACHE_SIZE
+
+            # One more distinct video should trigger eviction
+            extra_chunk = {
+                "id": "c_extra",
+                "video_id": "v_extra",
+                "content": "test",
+                "chunk_index": 0,
+                "start_seconds": 0.0,
+                "end_seconds": 10.0,
+                "snippet": "",
+            }
+            mock_kw.return_value = [extra_chunk]
+            mock_vec.return_value = [extra_chunk]
+            await retrieve_hybrid("q", [0.1] * 1536, top_k=5)
+
+            assert len(_video_cache) == MAX_VIDEO_CACHE_SIZE
+            # The oldest key (v0) should have been evicted
+            assert "v0" not in _video_cache
+            assert "v_extra" in _video_cache
+
+    async def test_cache_hit_avoids_second_db_call(self):
+        """A cached video_id does not trigger repository.get_video again."""
+        with (
+            patch(
+                "backend.rag.retriever_hybrid.repository.keyword_search",
+                new_callable=AsyncMock,
+            ) as mock_kw,
+            patch(
+                "backend.rag.retriever_hybrid.repository.vector_search_pg",
+                new_callable=AsyncMock,
+            ) as mock_vec,
+            patch(
+                "backend.rag.retriever_hybrid.repository.get_video",
+                new_callable=AsyncMock,
+            ) as mock_video,
+        ):
+            chunk = {
+                "id": "c1",
+                "video_id": "v_cached",
+                "content": "test",
+                "chunk_index": 0,
+                "start_seconds": 0.0,
+                "end_seconds": 10.0,
+                "snippet": "",
+            }
+            mock_kw.return_value = [chunk]
+            mock_vec.return_value = [chunk]
+            mock_video.return_value = {
+                "title": "Cached Video",
+                "url": "https://youtube.com/watch?v=cached",
+            }
+
+            await retrieve_hybrid("q", [0.1] * 1536, top_k=5)
+            assert mock_video.call_count == 1
+
+            await retrieve_hybrid("q", [0.1] * 1536, top_k=5)
+            assert mock_video.call_count == 1

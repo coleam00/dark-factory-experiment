@@ -16,8 +16,9 @@ cosine fallback).
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 
 from backend.config import HYBRID_K_CONSTANT, HYBRID_OVERFETCH_FACTOR, KEYWORD_LANGUAGE
 from backend.db import repository
@@ -25,7 +26,9 @@ from backend.db import repository
 logger = logging.getLogger(__name__)
 
 # Module-level video metadata cache (populated on demand per chunk result)
-_video_cache: dict[str, dict[str, str]] = {}
+MAX_VIDEO_CACHE_SIZE = 256
+_video_cache: OrderedDict[str, dict[str, str]] = OrderedDict()
+_inflight: dict[str, asyncio.Future[dict[str, str]]] = {}
 
 
 def invalidate_cache() -> None:
@@ -116,29 +119,52 @@ async def retrieve_hybrid(
     results: list[dict] = []
     for chunk in merged:
         video_id = chunk["video_id"]
-        if video_id not in _video_cache:
-            video = await repository.get_video(video_id)
-            if video:
-                _video_cache[video_id] = {
-                    "title": video.get("title", ""),
-                    "url": video.get("url", "") or "",
-                    "source_type": video.get("source_type", "youtube") or "youtube",
-                    "lesson_url": video.get("lesson_url", "") or "",
-                }
-            else:
-                logger.warning(
-                    "Video not found for video_id=%s, chunk_id=%s",
-                    video_id,
-                    chunk.get("id", "?"),
-                )
-                _video_cache[video_id] = {
-                    "title": "Unknown Video",
-                    "url": "",
-                    "source_type": "youtube",
-                    "lesson_url": "",
-                }
 
-        video_meta = _video_cache[video_id]
+        # --- bounded LRU cache with single-flight fetch ---
+        if video_id in _video_cache:
+            # Hit path: promote to most-recently-used (no await)
+            _video_cache.move_to_end(video_id)
+            video_meta = _video_cache[video_id]
+        elif video_id in _inflight:
+            # Wait path: another task is already fetching this video
+            await _inflight[video_id]
+            video_meta = _video_cache[video_id]
+        else:
+            # Miss (leader) path: we are responsible for fetching
+            future: asyncio.Future[dict[str, str]] = asyncio.get_running_loop().create_future()
+            _inflight[video_id] = future
+            try:
+                video = await repository.get_video(video_id)
+                if video:
+                    entry = {
+                        "title": video.get("title", ""),
+                        "url": video.get("url", "") or "",
+                        "source_type": video.get("source_type", "youtube") or "youtube",
+                        "lesson_url": video.get("lesson_url", "") or "",
+                    }
+                else:
+                    logger.warning(
+                        "Video not found for video_id=%s, chunk_id=%s",
+                        video_id,
+                        chunk.get("id", "?"),
+                    )
+                    entry = {
+                        "title": "Unknown Video",
+                        "url": "",
+                        "source_type": "youtube",
+                        "lesson_url": "",
+                    }
+                _video_cache[video_id] = entry
+                _video_cache.move_to_end(video_id)
+                if len(_video_cache) > MAX_VIDEO_CACHE_SIZE:
+                    _video_cache.popitem(last=False)
+                future.set_result(entry)
+                video_meta = entry
+            except Exception as exc:
+                future.set_exception(exc)
+                raise
+            finally:
+                _inflight.pop(video_id, None)
         results.append(
             {
                 "chunk_id": chunk["id"],
