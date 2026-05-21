@@ -126,9 +126,10 @@ async def retrieve_hybrid(
             _video_cache.move_to_end(video_id)
             video_meta = _video_cache[video_id]
         elif video_id in _inflight:
-            # Wait path: another task is already fetching this video
-            await _inflight[video_id]
-            video_meta = _video_cache[video_id]
+            # Wait path: another task is already fetching this video; use the
+            # value carried by the future directly so we are not vulnerable to
+            # a concurrent LRU eviction or a mid-wait invalidate_cache() call.
+            video_meta = await _inflight[video_id]
         else:
             # Miss (leader) path: we are responsible for fetching
             future: asyncio.Future[dict[str, str]] = asyncio.get_running_loop().create_future()
