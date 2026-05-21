@@ -388,3 +388,72 @@ async def test_ingest_from_url_empty_chunks_returns_stored_no_chunks():
     data = response.json()
     assert data["status"] == "stored_no_chunks"
     assert data["chunks_created"] == 0
+
+
+async def test_ingest_from_url_embedding_failure_deletes_orphan_video():
+    """embed_batch raising → 502 and the orphan video row is deleted."""
+    mock_video = {
+        "id": "v-orphan-1",
+        "title": "Fake Title",
+        "description": "Fake Description",
+        "url": "https://www.youtube.com/watch?v=abc123",
+        "transcript": "Hello world.",
+    }
+
+    fake_helper = AsyncMock(
+        return_value={
+            "youtube_video_id": "abc123",
+            "title": "Fake Title",
+            "description": "Fake Description",
+            "transcript": "Hello world.",
+            "segments": [],
+        }
+    )
+
+    with (
+        patch(
+            "backend.routes.ingest.fetch_video_for_ingest",
+            new=fake_helper,
+        ),
+        patch(
+            "backend.routes.ingest.repository.create_video",
+            new_callable=AsyncMock,
+            return_value=mock_video,
+        ) as mock_create_video,
+        patch(
+            "backend.routes.ingest.chunk_video_fallback",
+            return_value=(
+                [
+                    {
+                        "content": "chunk 1",
+                        "start_seconds": 0.0,
+                        "end_seconds": 1.0,
+                        "snippet": "chunk 1",
+                    }
+                ],
+                False,
+            ),
+        ),
+        patch(
+            "backend.routes.ingest.embed_batch",
+            side_effect=RuntimeError("embedding down"),
+        ) as mock_embed,
+        patch(
+            "backend.routes.ingest.repository.delete_video",
+            new_callable=AsyncMock,
+        ) as mock_delete_video,
+    ):
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+        ) as ac:
+            response = await ac.post(
+                "/api/ingest/from-url",
+                json={"url": "https://www.youtube.com/watch?v=abc123"},
+            )
+
+    assert response.status_code == 502
+    assert "Embeddings API request failed" in response.json()["detail"]
+    mock_create_video.assert_awaited_once()
+    mock_embed.assert_called_once()
+    mock_delete_video.assert_awaited_once_with("v-orphan-1")
