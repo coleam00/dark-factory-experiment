@@ -16,22 +16,90 @@ cosine fallback).
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 
 from backend.config import HYBRID_K_CONSTANT, HYBRID_OVERFETCH_FACTOR, KEYWORD_LANGUAGE
 from backend.db import repository
 
 logger = logging.getLogger(__name__)
 
-# Module-level video metadata cache (populated on demand per chunk result)
-_video_cache: dict[str, dict[str, str]] = {}
+# Maximum number of video metadata entries to retain in the LRU cache.
+MAX_CACHE_SIZE = 256
+
+
+class BoundedVideoCache:
+    """LRU-bounded video metadata cache with per-key async single-flight.
+
+    Cache hits are O(1) lock-free dict lookups. On miss, concurrent callers
+    for the same ``video_id`` share a single downstream fetch via a per-key
+    ``asyncio.Lock`` — distinct ``video_id`` keys never serialize against
+    each other.
+    """
+
+    def __init__(self, maxsize: int) -> None:
+        self._maxsize = maxsize
+        self._data: OrderedDict[str, dict[str, str]] = OrderedDict()
+        self._locks: dict[str, asyncio.Lock] = {}
+
+    def get(self, video_id: str) -> dict[str, str] | None:
+        value = self._data.get(video_id)
+        if value is not None:
+            self._data.move_to_end(video_id)
+        return value
+
+    def _store(self, video_id: str, value: dict[str, str]) -> None:
+        self._data[video_id] = value
+        self._data.move_to_end(video_id)
+        while len(self._data) > self._maxsize:
+            self._data.popitem(last=False)
+
+    @asynccontextmanager
+    async def get_or_lock(
+        self, video_id: str
+    ) -> AsyncIterator[tuple[dict[str, str] | None, Callable[[dict[str, str]], None]]]:
+        """Cache-or-fetch coordination.
+
+        Yields ``(cached_value_or_None, release_fn)``. On a hit the value is
+        returned directly and ``release_fn`` is a no-op. On a miss the per-key
+        lock is acquired; the caller must call ``release_fn(value)`` once the
+        downstream fetch succeeds so waiters wake up to a populated cache. If
+        ``release_fn`` is never called (exception path) the lock is still
+        released by the surrounding ``async with`` and the next caller retries.
+        """
+        cached = self.get(video_id)
+        if cached is not None:
+            yield cached, lambda _value: None
+            return
+
+        lock = self._locks.setdefault(video_id, asyncio.Lock())
+        async with lock:
+            cached_after = self.get(video_id)
+            if cached_after is not None:
+                yield cached_after, lambda _value: None
+                return
+
+            def _release(value: dict[str, str]) -> None:
+                self._store(video_id, value)
+                self._locks.pop(video_id, None)
+
+            yield None, _release
+
+    def invalidate(self) -> None:
+        self._data.clear()
+        self._locks.clear()
+
+
+# Module-level video metadata cache (populated on demand per chunk result).
+_video_cache = BoundedVideoCache(maxsize=MAX_CACHE_SIZE)
 
 
 def invalidate_cache() -> None:
     """Clear the video metadata cache."""
-    global _video_cache
-    _video_cache.clear()
+    _video_cache.invalidate()
     logger.info("Hybrid retriever video cache invalidated.")
 
 
@@ -116,29 +184,32 @@ async def retrieve_hybrid(
     results: list[dict] = []
     for chunk in merged:
         video_id = chunk["video_id"]
-        if video_id not in _video_cache:
-            video = await repository.get_video(video_id)
-            if video:
-                _video_cache[video_id] = {
-                    "title": video.get("title", ""),
-                    "url": video.get("url", "") or "",
-                    "source_type": video.get("source_type", "youtube") or "youtube",
-                    "lesson_url": video.get("lesson_url", "") or "",
-                }
+        async with _video_cache.get_or_lock(video_id) as (cached, release):
+            if cached is not None:
+                video_meta = cached
             else:
-                logger.warning(
-                    "Video not found for video_id=%s, chunk_id=%s",
-                    video_id,
-                    chunk.get("id", "?"),
-                )
-                _video_cache[video_id] = {
-                    "title": "Unknown Video",
-                    "url": "",
-                    "source_type": "youtube",
-                    "lesson_url": "",
-                }
+                video = await repository.get_video(video_id)
+                if video:
+                    video_meta = {
+                        "title": video.get("title", ""),
+                        "url": video.get("url", "") or "",
+                        "source_type": video.get("source_type", "youtube") or "youtube",
+                        "lesson_url": video.get("lesson_url", "") or "",
+                    }
+                else:
+                    logger.warning(
+                        "Video not found for video_id=%s, chunk_id=%s",
+                        video_id,
+                        chunk.get("id", "?"),
+                    )
+                    video_meta = {
+                        "title": "Unknown Video",
+                        "url": "",
+                        "source_type": "youtube",
+                        "lesson_url": "",
+                    }
+                release(video_meta)
 
-        video_meta = _video_cache[video_id]
         results.append(
             {
                 "chunk_id": chunk["id"],

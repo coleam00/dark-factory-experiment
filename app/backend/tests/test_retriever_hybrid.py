@@ -9,6 +9,7 @@ Verifies:
   - Hybrid retriever raises clear error when DATABASE_URL is unset
 """
 
+import asyncio
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -205,6 +206,56 @@ class TestRetrieveHybrid:
         # (even though vector prefers unrelated, keyword strongly prefers MCP)
         ids = [r["id"] for r in result]
         assert ids.index("c_mcp") < ids.index("c_unrelated")
+
+    async def test_retrieve_hybrid_single_flight_for_uncached_video(self):
+        """Two concurrent retrieve_hybrid() calls for the same uncached video_id
+        must result in exactly one repository.get_video() call (single-flight).
+
+        Regression test for issue #227: the previous module-level dict cache
+        admitted a thundering-herd race where concurrent misses both fetched.
+        """
+
+        async def slow_get_video(_video_id: str) -> dict:
+            await asyncio.sleep(0.05)
+            return {
+                "title": "Test Video",
+                "url": "https://youtube.com/watch?v=abc",
+                "source_type": "youtube",
+                "lesson_url": "",
+            }
+
+        with (
+            patch(
+                "backend.rag.retriever_hybrid.repository.keyword_search",
+                new_callable=AsyncMock,
+            ) as mock_kw,
+            patch(
+                "backend.rag.retriever_hybrid.repository.vector_search_pg",
+                new_callable=AsyncMock,
+            ) as mock_vec,
+            patch(
+                "backend.rag.retriever_hybrid.repository.get_video",
+                new_callable=AsyncMock,
+                side_effect=slow_get_video,
+            ) as mock_video,
+        ):
+            mock_kw.return_value = [_CHUNK_A]
+            mock_vec.return_value = [_CHUNK_A]
+
+            results = await asyncio.gather(
+                retrieve_hybrid("test query", [0.1] * 1536, top_k=5),
+                retrieve_hybrid("test query", [0.1] * 1536, top_k=5),
+            )
+
+            # Single-flight: both concurrent misses share a single fetch.
+            assert mock_video.await_count == 1
+
+            # Both retrievals return the same metadata-hydrated result.
+            assert len(results) == 2
+            for result in results:
+                assert len(result) >= 1
+                assert result[0]["video_title"] == "Test Video"
+                assert result[0]["video_url"] == "https://youtube.com/watch?v=abc"
 
     async def test_conceptual_query_relies_on_vector_path(self):
         """A conceptual query with no exact terms still works via vector search."""

@@ -28,10 +28,15 @@ from backend import rate_limit, signup_rate_limit
 
 @pytest.fixture(autouse=True)
 def reset_retriever_hybrid_cache():
-    """Ensure the module-level hybrid video cache is clean before and after every test."""
-    retriever_hybrid_module._video_cache.clear()
+    """Ensure the module-level hybrid video cache is clean before and after every test.
+
+    ``_video_cache`` is a ``BoundedVideoCache`` whose ``invalidate()`` clears
+    both the LRU data and any in-flight single-flight locks, preventing test
+    state leak.
+    """
+    retriever_hybrid_module._video_cache.invalidate()
     yield
-    retriever_hybrid_module._video_cache.clear()
+    retriever_hybrid_module._video_cache.invalidate()
 
 
 @pytest.fixture
