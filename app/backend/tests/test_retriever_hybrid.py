@@ -102,6 +102,20 @@ class TestRRFMerge:
         result = _rrf_merge([], [], k=60, top_k=5)
         assert result == []
 
+    def test_rrf_merge_breaks_ties_deterministically(self):
+        """When two chunks receive identical RRF scores, the result order must
+        be stable regardless of which input list saw the chunk first."""
+        keyword = [_CHUNK_A]
+        vector = [_CHUNK_B]
+
+        result1 = _rrf_merge(keyword, vector, k=60, top_k=5)
+        result2 = _rrf_merge(vector, keyword, k=60, top_k=5)
+
+        order1 = [r["id"] for r in result1]
+        order2 = [r["id"] for r in result2]
+        assert order1 == order2
+        assert order1 == ["c1", "c2"]
+
 
 class TestRetrieveHybrid:
     """Integration tests for retrieve_hybrid()."""

@@ -48,6 +48,7 @@ class TestKeywordSearch:
         assert "ts_rank" in sql
         assert "search_vector" in sql
         assert "@@" in sql  # tsvector match operator
+        assert "ORDER BY rank DESC, id ASC" in sql
 
         # Verify positional args: query string and top_k
         args = call_args[0]
@@ -170,7 +171,7 @@ class TestVectorSearchPg:
 
         call_args = mock_conn.fetch.call_args
         sql = call_args[0][0]
-        assert "ORDER BY distance" in sql
+        assert "ORDER BY distance, id ASC" in sql
 
     async def test_vector_search_pg_json_encodes_embedding(self):
         """vector_search_pg JSON-serializes the embedding list before passing to DB."""
