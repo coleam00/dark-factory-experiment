@@ -537,6 +537,42 @@ describe('conversationId reset — state clears on navigation', () => {
   });
 });
 
+describe('mid-stream error payload', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('does not call onComplete when a mid-stream error payload is received', async () => {
+    const sseChunks = [
+      'data: "hello"\n\n',
+      'data: {"error":"rate limited"}\n\n',
+      'data: "world"\n\n',
+    ];
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: makeSseStream(sseChunks),
+      }),
+    );
+
+    const onComplete = vi.fn();
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await expect(
+      act(async () => {
+        await result.current.startStream('conv-1', 'hi', onComplete);
+      }),
+    ).rejects.toThrow('rate limited');
+
+    expect(onComplete).not.toHaveBeenCalled();
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.streamingContent).toBe('');
+  });
+});
+
 describe('sources event — hook state via renderHook', () => {
   beforeEach(() => {
     vi.clearAllMocks();
