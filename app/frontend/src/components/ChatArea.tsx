@@ -323,6 +323,10 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
   const [failedMessageText, setFailedMessageText] = useState<string | null>(null);
   // Track the temp user message ID so we can remove it on failure
   const pendingUserMsgIdRef = useRef<string | null>(null);
+  // Track the temp assistant message ID added by onComplete so a failed send
+  // can remove it too — otherwise a ghost assistant bubble with stream-only
+  // sources lingers in the live view but never gets persisted (issue #277).
+  const pendingAssistantMsgIdRef = useRef<string | null>(null);
   // Citation modal state
   const [selectedCitation, setSelectedCitation] = useState<Citation | null>(null);
 
@@ -505,9 +509,11 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
             created_at: new Date().toISOString(),
             sources: sources.length > 0 ? sources : undefined,
           };
+          pendingAssistantMsgIdRef.current = assistantMsg.id;
           setMessages((prev) => [...prev, assistantMsg]);
         });
         pendingUserMsgIdRef.current = null;
+        pendingAssistantMsgIdRef.current = null;
         // Pull fresh quota counter so the sidebar updates after each send.
         refreshAuth();
         // Refresh conversations list so sidebar shows auto-generated title.
@@ -518,6 +524,15 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
           const removedId = pendingUserMsgIdRef.current;
           setMessages((prev) => prev.filter((m) => m.id !== removedId));
           pendingUserMsgIdRef.current = null;
+        }
+
+        // Remove any ghost assistant message added by onComplete. On a clean
+        // stream onComplete runs before the throw, so this clears the bubble
+        // whose stream-only sources would otherwise disagree with reload (#277).
+        if (pendingAssistantMsgIdRef.current) {
+          const removedAssistId = pendingAssistantMsgIdRef.current;
+          setMessages((prev) => prev.filter((m) => m.id !== removedAssistId));
+          pendingAssistantMsgIdRef.current = null;
         }
 
         // Intentional abort (navigation or user cancel) — no error toast

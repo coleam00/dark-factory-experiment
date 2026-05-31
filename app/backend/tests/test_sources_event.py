@@ -1038,6 +1038,235 @@ class TestRefusalSourcesSuppressionIntegration:
         assert "data: [DONE]" in output
 
 
+class TestInterruptedStreamSourcesConsistency:
+    """Regression tests for issue #277 — the sources persisted with an answer
+    must match what the live stream emitted, whether the answer completed
+    cleanly or was interrupted mid-flight.
+
+    The fix routes both the live SSE ``event: sources`` emission and the
+    post-stream DB persist through the single ``_finalize_sources`` helper, so
+    they can never diverge (no more reliance on a list mutated in place inside
+    the ``[DONE]`` branch).
+    """
+
+    async def test_error_mid_stream_persists_no_sources(self) -> None:
+        """If the stream errors before ``[DONE]`` (no tool chunks accumulated),
+        the persisted assistant row must have ``sources=None`` — matching the
+        live view, which never received a sources event."""
+        import json
+        from unittest.mock import AsyncMock, patch
+        from uuid import uuid4
+
+        from httpx import ASGITransport, AsyncClient
+
+        from backend.auth.tokens import encode_token
+        from backend.main import app
+
+        partial_text = "Here is the start of an answer"
+        partial_chunk = f"data: {json.dumps(partial_text)}\n\n"
+        error_chunk = 'data: {"error": "upstream model flaked"}\n\n'
+
+        async def mock_stream_chat(
+            messages,
+            tools=None,
+            tool_executor=None,
+            max_tool_calls=0,
+            final_text_out=None,
+            **_kwargs,
+        ):
+            # Some tokens stream, then the upstream errors — no [DONE], and the
+            # final-text buffer is never populated.
+            yield partial_chunk
+            yield error_chunk
+
+        test_user_id = str(uuid4())
+        test_conv_id = str(uuid4())
+        valid_token = encode_token(test_user_id)
+
+        async def mock_get_user_by_id(user_id):
+            return {
+                "id": test_user_id,
+                "email": "test@example.com",
+                "password_hash": "hashed",
+                "created_at": "2026-01-01T00:00:00Z",
+            }
+
+        async def mock_get_conversation(conv_id, user_id):
+            return {
+                "id": test_conv_id,
+                "user_id": test_user_id,
+                "title": "Test",
+                "created_at": "2026-01-01T00:00:00Z",
+            }
+
+        mock_create = AsyncMock(side_effect=[{"id": str(uuid4())}, {"id": str(uuid4())}])
+
+        async def mock_list_messages(conv_id, user_id):
+            return []
+
+        async def mock_list_videos():
+            return [{"id": "v1", "title": "Test Video", "url": "u"}]
+
+        with (
+            patch("backend.auth.dependencies.users_repo.get_user_by_id", mock_get_user_by_id),
+            patch("backend.db.repository.get_conversation", mock_get_conversation),
+            patch("backend.db.repository.create_message", mock_create),
+            patch("backend.db.repository.list_messages", mock_list_messages),
+            patch("backend.db.repository.list_videos", mock_list_videos),
+            patch("backend.routes.messages.stream_chat", mock_stream_chat),
+        ):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                response = await client.post(
+                    f"/api/conversations/{test_conv_id}/messages",
+                    json={"content": "a question"},
+                    headers={"Cookie": f"session={valid_token}"},
+                )
+
+        output = response.text
+        # No [DONE] reached → no sources event ever emitted live.
+        assert "event: sources" not in output, f"unexpected sources event in: {output}"
+
+        # User msg, then assistant msg in finally.
+        assert mock_create.call_count == 2, f"expected 2 calls, got {mock_create.call_count}"
+        assistant_kwargs = mock_create.call_args_list[1].kwargs
+        assert assistant_kwargs["role"] == "assistant"
+        assert assistant_kwargs["sources"] is None, (
+            f"interrupted stream with no tool chunks must persist sources=None; "
+            f"got {assistant_kwargs['sources']!r}"
+        )
+
+    async def test_persisted_sources_match_emitted_after_done(self) -> None:
+        """When the stream reaches ``[DONE]`` and the tool chunks contain
+        duplicate same-video entries, the sources persisted to the DB must
+        deep-equal the deduped/collapsed/capped list emitted in the live
+        ``event: sources`` payload — not the raw uncollapsed accumulator."""
+        import json
+        from unittest.mock import AsyncMock, patch
+        from uuid import uuid4
+
+        from httpx import ASGITransport, AsyncClient
+
+        from backend.auth.tokens import encode_token
+        from backend.main import app
+
+        answer_text = "The video explains how this works in detail."
+        answer_chunk = f"data: {json.dumps(answer_text)}\n\n"
+        done_chunk = "data: [DONE]\n\n"
+
+        # Two chunks from the SAME video — collapse-by-video must reduce these
+        # to a single chip both live and in the persisted row.
+        tool_chunks = [
+            {
+                "chunk_id": "c1",
+                "video_id": "v1",
+                "video_title": "Test Video",
+                "video_url": "https://youtube.com/watch?v=abc",
+                "start_seconds": 10.0,
+                "end_seconds": 20.0,
+                "snippet": "First segment",
+            },
+            {
+                "chunk_id": "c2",
+                "video_id": "v1",
+                "video_title": "Test Video",
+                "video_url": "https://youtube.com/watch?v=abc",
+                "start_seconds": 30.0,
+                "end_seconds": 40.0,
+                "snippet": "Second segment",
+            },
+        ]
+
+        async def mock_stream_chat(
+            messages,
+            tools=None,
+            tool_executor=None,
+            max_tool_calls=0,
+            final_text_out=None,
+            **_kwargs,
+        ):
+            if tool_executor is not None:
+                await tool_executor("search_videos", json.dumps({"query": "test"}))
+            yield answer_chunk
+            if final_text_out is not None:
+                final_text_out.append(answer_text)
+            yield done_chunk
+
+        async def mock_execute_tool(
+            name, raw_args, video_id_whitelist=None, embedding_cache=None, is_member=False
+        ):
+            return {"ok": True, "text": "context", "chunks": tool_chunks}
+
+        test_user_id = str(uuid4())
+        test_conv_id = str(uuid4())
+        valid_token = encode_token(test_user_id)
+
+        async def mock_get_user_by_id(user_id):
+            return {
+                "id": test_user_id,
+                "email": "test@example.com",
+                "password_hash": "hashed",
+                "created_at": "2026-01-01T00:00:00Z",
+            }
+
+        async def mock_get_conversation(conv_id, user_id):
+            return {
+                "id": test_conv_id,
+                "user_id": test_user_id,
+                "title": "Test",
+                "created_at": "2026-01-01T00:00:00Z",
+            }
+
+        mock_create = AsyncMock(side_effect=[{"id": str(uuid4())}, {"id": str(uuid4())}])
+
+        async def mock_list_messages(conv_id, user_id):
+            return []
+
+        async def mock_list_videos():
+            return [{"id": "v1", "title": "Test Video", "url": "https://youtube.com/watch?v=abc"}]
+
+        with (
+            patch("backend.auth.dependencies.users_repo.get_user_by_id", mock_get_user_by_id),
+            patch("backend.db.repository.get_conversation", mock_get_conversation),
+            patch("backend.db.repository.create_message", mock_create),
+            patch("backend.db.repository.list_messages", mock_list_messages),
+            patch("backend.db.repository.list_videos", mock_list_videos),
+            patch("backend.routes.messages.stream_chat", mock_stream_chat),
+            patch("backend.routes.messages.execute_tool", mock_execute_tool),
+        ):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                response = await client.post(
+                    f"/api/conversations/{test_conv_id}/messages",
+                    json={"content": "question about video"},
+                    headers={"Cookie": f"session={valid_token}"},
+                )
+
+        output = response.text
+
+        # Extract the JSON payload from the live `event: sources` SSE block.
+        emitted_sources = None
+        for block in output.split("\n\n"):
+            lines = block.split("\n")
+            if lines and lines[0] == "event: sources":
+                data_line = next(line for line in lines if line.startswith("data: "))
+                emitted_sources = json.loads(data_line[len("data: ") :])
+                break
+
+        assert emitted_sources is not None, f"no sources event emitted: {output}"
+        # Collapse-by-video reduced the two same-video chunks to one chip.
+        assert len(emitted_sources) == 1, f"expected one collapsed chip, got {emitted_sources}"
+
+        # The persisted assistant row must carry exactly the emitted list.
+        assert mock_create.call_count == 2, f"expected 2 calls, got {mock_create.call_count}"
+        assistant_kwargs = mock_create.call_args_list[1].kwargs
+        assert assistant_kwargs["role"] == "assistant"
+        assert assistant_kwargs["sources"] == emitted_sources, (
+            f"persisted sources must match live-emitted sources; "
+            f"persisted={assistant_kwargs['sources']!r} emitted={emitted_sources!r}"
+        )
+
+
 class TestChunkExpansionIntegration:
     """Integration tests for chunk expansion in the SSE streaming path.
 

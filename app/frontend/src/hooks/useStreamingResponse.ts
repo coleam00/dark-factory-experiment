@@ -203,8 +203,16 @@ export function useStreamingResponse(conversationId: string | null) {
           }
         }
 
-        // Stream completed successfully
-        onComplete({ fullText, sources });
+        // Only finalize the assistant message when the stream completed
+        // cleanly. On a mid-stream error the inner loop sets `streamError` and
+        // breaks the parts loop, but the outer reader still drains to
+        // `done: true`; calling onComplete here would inject a ghost assistant
+        // bubble whose sources disagree with what the saved message has on
+        // reload (issue #277). The `if (streamError) throw` below propagates
+        // the error to ChatArea's catch so it can clean up the optimistic rows.
+        if (!streamError) {
+          onComplete({ fullText, sources });
+        }
       } finally {
         // Always reset streaming state — React 18 batches this with the onComplete
         // state updates, ensuring a seamless transition to the persisted message.
