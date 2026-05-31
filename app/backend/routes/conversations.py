@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from backend.auth.dependencies import get_current_user
@@ -26,8 +26,18 @@ class ConversationRename(BaseModel):
 
 
 @router.get("/conversations")
-async def list_conversations(current_user: dict[str, Any] = Depends(get_current_user)):
-    return await repository.list_conversations(user_id=str(current_user["id"]))
+async def list_conversations(
+    start_date: str | None = Query(None),
+    end_date: str | None = Query(None),
+    video_id: str | None = Query(None),
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
+    return await repository.list_conversations(
+        user_id=str(current_user["id"]),
+        start_date=start_date,
+        end_date=end_date,
+        video_id=video_id,
+    )
 
 
 @router.post("/conversations", status_code=201)

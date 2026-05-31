@@ -143,7 +143,23 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 // Conversations
-export const getConversations = () => request<Conversation[]>('/conversations');
+export interface ConversationFilters {
+  /** Inclusive lower bound on last-activity, ISO 8601 string. */
+  startDate?: string;
+  /** Inclusive upper bound on last-activity, ISO 8601 string. */
+  endDate?: string;
+  /** Only conversations citing this video id. */
+  videoId?: string;
+}
+
+export const getConversations = (filters?: ConversationFilters) => {
+  const p = new URLSearchParams();
+  if (filters?.startDate) p.set('start_date', filters.startDate);
+  if (filters?.endDate) p.set('end_date', filters.endDate);
+  if (filters?.videoId) p.set('video_id', filters.videoId);
+  const qs = p.toString();
+  return request<Conversation[]>(`/conversations${qs ? `?${qs}` : ''}`);
+};
 export const searchConversations = (q: string) =>
   request<Conversation[]>(`/conversations/search?q=${encodeURIComponent(q)}`);
 export const createConversation = () =>

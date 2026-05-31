@@ -450,22 +450,59 @@ async def get_conversation(conv_id: str, user_id: str) -> dict | None:
     return dict(row) if row else None
 
 
-async def list_conversations(user_id: str) -> list[dict]:
-    async with _acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT c.*,
-                   (SELECT content
-                    FROM messages
-                    WHERE conversation_id = c.id
-                    ORDER BY created_at DESC
-                    LIMIT 1) AS preview
-            FROM conversations c
-            WHERE c.user_id = $1
-            ORDER BY c.updated_at DESC
-            """,
-            user_id,
+async def list_conversations(
+    user_id: str,
+    *,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    video_id: str | None = None,
+) -> list[dict]:
+    """List a user's conversations, newest-first.
+
+    Optional filters (combine with AND, all layered on top of the mandatory
+    owner scope):
+      - start_date / end_date: inclusive bounds compared against
+        ``updated_at`` (the "last activity" column the list is ordered by),
+        passed as ISO 8601 strings parsed by Postgres.
+      - video_id: only conversations that cite the given video in any
+        message's ``sources`` JSONB array, via ``@>`` containment.
+
+    Only placeholder *indices* are interpolated into the SQL text; every
+    *value* is bound through ``params`` (no f-string SQL injection).
+    """
+    conditions = ["c.user_id = $1"]
+    params: list[object] = [user_id]
+
+    if start_date is not None:
+        params.append(start_date)
+        conditions.append(f"c.updated_at >= ${len(params)}")
+    if end_date is not None:
+        params.append(end_date)
+        conditions.append(f"c.updated_at <= ${len(params)}")
+    if video_id is not None:
+        params.append(json.dumps([{"video_id": video_id}]))
+        conditions.append(
+            f"""EXISTS (
+                SELECT 1 FROM messages m
+                WHERE m.conversation_id = c.id
+                  AND m.sources @> ${len(params)}::jsonb
+            )"""
         )
+
+    where_clause = "\n              AND ".join(conditions)
+    sql = f"""
+        SELECT c.*,
+               (SELECT content
+                FROM messages
+                WHERE conversation_id = c.id
+                ORDER BY created_at DESC
+                LIMIT 1) AS preview
+        FROM conversations c
+        WHERE {where_clause}
+        ORDER BY c.updated_at DESC
+    """
+    async with _acquire() as conn:
+        rows = await conn.fetch(sql, *params)
     return [dict(r) for r in rows]
 
 

@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { type Conversation, getConversations, renameConversation } from '../lib/api';
+import {
+  type Conversation,
+  type ConversationFilters,
+  getConversations,
+  renameConversation,
+} from '../lib/api';
 
-export function useConversations(searchQuery?: string) {
+export function useConversations(searchQuery?: string, filters?: ConversationFilters) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -9,11 +14,15 @@ export function useConversations(searchQuery?: string) {
   // when the user types faster than the network replies.
   const fetchIdRef = useRef(0);
 
+  // Stable serialization so the load callback only changes when the date/video
+  // filter values actually change (not on every render's new object identity).
+  const filtersKey = JSON.stringify(filters ?? {});
+
   const load = useCallback(async () => {
     const myId = ++fetchIdRef.current;
     try {
       setLoading(true);
-      const data = await getConversations();
+      const data = await getConversations(filters);
       if (myId === fetchIdRef.current) setConversations(data);
     } catch (e) {
       if (myId === fetchIdRef.current) {
@@ -22,7 +31,8 @@ export function useConversations(searchQuery?: string) {
     } finally {
       if (myId === fetchIdRef.current) setLoading(false);
     }
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtersKey]);
 
   useEffect(() => {
     load();

@@ -132,6 +132,59 @@ describe('useConversations', () => {
     });
   });
 
+  describe('server-side filters', () => {
+    it('forwards the filters object to getConversations', async () => {
+      const spy = vi
+        .spyOn(api, 'getConversations')
+        .mockResolvedValue([] as api.Conversation[]);
+
+      const filters: api.ConversationFilters = {
+        startDate: '2026-01-01T00:00:00.000Z',
+        videoId: 'vid-9',
+      };
+      renderHook(() => useConversations('', filters));
+
+      await waitFor(() => expect(spy).toHaveBeenCalled());
+      expect(spy).toHaveBeenCalledWith(filters);
+    });
+
+    it('re-fetches when the filter values change', async () => {
+      const spy = vi
+        .spyOn(api, 'getConversations')
+        .mockResolvedValue([] as api.Conversation[]);
+
+      const { rerender } = renderHook(
+        ({ filters }: { filters: api.ConversationFilters }) => useConversations('', filters),
+        { initialProps: { filters: { videoId: 'vid-1' } } },
+      );
+
+      await waitFor(() => expect(spy).toHaveBeenCalledWith({ videoId: 'vid-1' }));
+
+      rerender({ filters: { videoId: 'vid-2' } });
+
+      await waitFor(() => expect(spy).toHaveBeenCalledWith({ videoId: 'vid-2' }));
+    });
+
+    it('does not re-fetch when a new filters object has identical values', async () => {
+      const spy = vi
+        .spyOn(api, 'getConversations')
+        .mockResolvedValue([] as api.Conversation[]);
+
+      const { rerender } = renderHook(
+        ({ filters }: { filters: api.ConversationFilters }) => useConversations('', filters),
+        { initialProps: { filters: { videoId: 'vid-1' } } },
+      );
+
+      await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+
+      // New object identity, same values — stable serialization should prevent a refetch.
+      rerender({ filters: { videoId: 'vid-1' } });
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(spy).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('client-side search', () => {
     it('filters conversations by title case-insensitively', async () => {
       const conversations = [
