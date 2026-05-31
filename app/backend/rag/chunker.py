@@ -162,9 +162,12 @@ def chunk_video_timestamped(segments: list[TimestampedSegment]) -> tuple[list[di
 
             # Distribute timestamps evenly across sub-chunks when HybridChunker
             # splits a segment into multiple pieces (no worse than fallback's
-            # proportional timestamps, which are explicitly accepted).
-            if len(sub_chunks) > 1:
-                duration = end_s - start_s
+            # proportional timestamps, which are explicitly accepted). When the
+            # segment has zero or negative duration (e.g. the final Supadata
+            # segment with no explicit end), even distribution is meaningless, so
+            # leave each sub-chunk on the original [start_s, end_s] boundary.
+            duration = end_s - start_s
+            if len(sub_chunks) > 1 and duration > 0:
                 step = duration / len(sub_chunks)
                 for i, sc in enumerate(sub_chunks):
                     sc["start_seconds"] = start_s + i * step
