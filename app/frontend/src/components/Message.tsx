@@ -15,6 +15,10 @@ interface MessageProps {
   onCitationClick?: (citation: Citation) => void;
   /** Current tool-call status during streaming (ephemeral progress indicator) */
   streamingStatus?: StreamingStatus | null;
+  /** Whether the regenerate button should be shown */
+  canRegenerate?: boolean;
+  /** Called when the user clicks regenerate */
+  onRegenerate?: () => void;
 }
 
 // ── Typing indicator (3 pulsing dots) ────────────────────────────
@@ -167,6 +171,8 @@ export function Message({
   sources,
   onCitationClick,
   streamingStatus,
+  canRegenerate,
+  onRegenerate,
 }: MessageProps) {
   const isUser = role === 'user';
   const hasSources = !isUser && Array.isArray(sources) && sources.length > 0;
@@ -204,6 +210,29 @@ export function Message({
           <>
             <MarkdownRenderer content={content} />
             {hasSources && <SourceCitations sources={sources} onCitationClick={onCitationClick} />}
+            {!isUser && canRegenerate && onRegenerate && !isStreaming && (
+              <button
+                onClick={onRegenerate}
+                className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: '#94a3b8',
+                  fontSize: 12,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  padding: 0,
+                  marginTop: 8,
+                  transition: 'color 0.15s',
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.color = '#f1f5f9')}
+                onMouseLeave={(e) => (e.currentTarget.style.color = '#94a3b8')}
+              >
+                ⟳ Regenerate
+              </button>
+            )}
           </>
         )}
       </div>

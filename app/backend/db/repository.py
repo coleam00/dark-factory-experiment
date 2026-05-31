@@ -603,6 +603,22 @@ async def list_messages(conversation_id: str, user_id: str) -> list[dict]:
     return results
 
 
+async def delete_message(message_id: str, conversation_id: str, user_id: str) -> bool:
+    """Delete a message scoped to the conversation owner."""
+    async with _acquire() as conn:
+        result = await conn.execute(
+            """
+            DELETE FROM messages
+            WHERE id = $1 AND conversation_id = $2
+              AND EXISTS (SELECT 1 FROM conversations WHERE id = $2 AND user_id = $3)
+            """,
+            message_id,
+            conversation_id,
+            user_id,
+        )
+        return result != "DELETE 0"  # type: ignore[no-any-return]
+
+
 # ---------------------------------------------------------------------------
 # Channel sync runs
 # ---------------------------------------------------------------------------

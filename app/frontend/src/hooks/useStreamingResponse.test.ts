@@ -614,3 +614,104 @@ describe('sources event — hook state via renderHook', () => {
     expect(onComplete).toHaveBeenCalledWith(expect.objectContaining({ sources: [] }));
   });
 });
+
+describe('startRegenerate', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('POSTs to the regenerate URL with no body and accumulates content', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: makeSseStream([
+        'data: "Regenerated"\n\n',
+        'data: [DONE]\n\n',
+      ]),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const onComplete = vi.fn();
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await act(async () => {
+      await result.current.startRegenerate('conv-1', 'msg-1', onComplete);
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/conversations/conv-1/messages/msg-1/regenerate',
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'include',
+        headers: undefined,
+        body: undefined,
+      }),
+    );
+    expect(onComplete).toHaveBeenCalledWith(
+      expect.objectContaining({ fullText: 'Regenerated', sources: [] }),
+    );
+  });
+
+  it('parses sources event during regenerate', async () => {
+    const citation = {
+      chunk_id: 'chunk-1',
+      video_id: 'vid-1',
+      video_title: 'Test Video',
+      video_url: 'https://www.youtube.com/watch?v=abc123',
+      start_seconds: 10,
+      end_seconds: 20,
+      snippet: 'Test snippet text',
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: makeSseStream([
+          `event: sources\ndata: ${JSON.stringify([citation])}\n\n`,
+          'data: "Answer"\n\n',
+          'data: [DONE]\n\n',
+        ]),
+      }),
+    );
+
+    const onComplete = vi.fn();
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await act(async () => {
+      await result.current.startRegenerate('conv-1', 'msg-1', onComplete);
+    });
+
+    expect(onComplete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fullText: 'Answer',
+        sources: [expect.objectContaining({ chunk_id: 'chunk-1' })],
+      }),
+    );
+  });
+
+  it('surfaces RateLimitError on 429', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 429,
+        json: async () => ({
+          error: 'rate_limit_exceeded',
+          limit: 25,
+          window_hours: 24,
+          reset_at: new Date().toISOString(),
+        }),
+        text: async () => '',
+      }),
+    );
+
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await expect(
+      act(async () => {
+        await result.current.startRegenerate('conv-1', 'msg-1', vi.fn());
+      }),
+    ).rejects.toThrow('rate_limit_exceeded');
+  });
+});

@@ -42,10 +42,10 @@ export function useStreamingResponse(conversationId: string | null) {
     }
   }, []);
 
-  const startStream = useCallback(
+  const runStream = useCallback(
     async (
-      conversationId: string,
-      userMessage: string,
+      url: string,
+      body: string | undefined,
       onComplete: (result: StreamResult) => void,
     ): Promise<void> => {
       setIsStreaming(true);
@@ -61,11 +61,11 @@ export function useStreamingResponse(conversationId: string | null) {
         const abortController = new AbortController();
         streamAbortRef.current = abortController;
 
-        const res = await fetch(`/api/conversations/${conversationId}/messages`, {
+        const res = await fetch(url, {
           method: 'POST',
           credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content: userMessage }),
+          headers: body ? { 'Content-Type': 'application/json' } : undefined,
+          body,
           signal: abortController.signal,
         });
 
@@ -218,12 +218,43 @@ export function useStreamingResponse(conversationId: string | null) {
     [],
   );
 
+  const startStream = useCallback(
+    async (
+      conversationId: string,
+      userMessage: string,
+      onComplete: (result: StreamResult) => void,
+    ): Promise<void> => {
+      return runStream(
+        `/api/conversations/${conversationId}/messages`,
+        JSON.stringify({ content: userMessage }),
+        onComplete,
+      );
+    },
+    [runStream],
+  );
+
+  const startRegenerate = useCallback(
+    async (
+      conversationId: string,
+      messageId: string,
+      onComplete: (result: StreamResult) => void,
+    ): Promise<void> => {
+      return runStream(
+        `/api/conversations/${conversationId}/messages/${messageId}/regenerate`,
+        undefined,
+        onComplete,
+      );
+    },
+    [runStream],
+  );
+
   return {
     streamingContent,
     streamingSources,
     streamingStatus,
     isStreaming,
     startStream,
+    startRegenerate,
     abortStream,
   };
 }

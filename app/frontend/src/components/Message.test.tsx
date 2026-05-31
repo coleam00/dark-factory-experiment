@@ -149,3 +149,78 @@ describe('Message — citation chip segment_count label', () => {
     expect(screen.queryByText(/segments/)).not.toBeInTheDocument();
   });
 });
+
+describe('Message — regenerate button', () => {
+  it('renders regenerate button when canRegenerate is true on assistant message', () => {
+    const onRegenerate = vi.fn();
+    render(
+      <Message
+        role="assistant"
+        content="Answer text."
+        isStreaming={false}
+        streamingStatus={null}
+        canRegenerate={true}
+        onRegenerate={onRegenerate}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /Regenerate/ })).toBeInTheDocument();
+  });
+
+  it('does not render regenerate button on user messages', () => {
+    render(
+      <Message
+        role="user"
+        content="Hello"
+        isStreaming={false}
+        streamingStatus={null}
+        canRegenerate={true}
+        onRegenerate={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: /Regenerate/ })).not.toBeInTheDocument();
+  });
+
+  it('hides regenerate button while streaming', () => {
+    render(
+      <Message
+        role="assistant"
+        content=""
+        isStreaming={true}
+        streamingStatus={null}
+        canRegenerate={true}
+        onRegenerate={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: /Regenerate/ })).not.toBeInTheDocument();
+  });
+
+  it('hides regenerate button when canRegenerate is false', () => {
+    render(
+      <Message
+        role="assistant"
+        content="Answer text."
+        isStreaming={false}
+        streamingStatus={null}
+        canRegenerate={false}
+        onRegenerate={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: /Regenerate/ })).not.toBeInTheDocument();
+  });
+
+  it('calls onRegenerate when clicked', () => {
+    const onRegenerate = vi.fn();
+    render(
+      <Message
+        role="assistant"
+        content="Answer text."
+        isStreaming={false}
+        streamingStatus={null}
+        canRegenerate={true}
+        onRegenerate={onRegenerate}
+      />,
+    );
+    screen.getByRole('button', { name: /Regenerate/ }).click();
+    expect(onRegenerate).toHaveBeenCalledTimes(1);
+  });
+});

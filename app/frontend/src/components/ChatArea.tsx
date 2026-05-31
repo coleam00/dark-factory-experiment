@@ -301,6 +301,7 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
     streamingStatus,
     isStreaming,
     startStream,
+    startRegenerate,
     abortStream,
   } = useStreamingResponse(conversationId || null);
   const { addToast } = useToast();
@@ -583,6 +584,48 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
     handleSend(text);
   }, [failedMessageText, handleSend]);
 
+  // ── Regenerate handler ──
+  const handleRegenerate = useCallback(
+    async (messageId: string) => {
+      if (!conversationId || isStreaming) return;
+      const old = messages.find((m) => m.id === messageId);
+      setInlineError(null);
+      setMessages((prev) => prev.filter((m) => m.id !== messageId));
+      try {
+        await startRegenerate(conversationId, messageId, ({ fullText, sources }) => {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `temp-assistant-${Date.now()}`,
+              conversation_id: conversationId,
+              role: 'assistant',
+              content: fullText,
+              created_at: new Date().toISOString(),
+              sources: sources.length ? sources : undefined,
+            },
+          ]);
+        });
+        refreshAuth();
+      } catch (e) {
+        if (old) setMessages((prev) => [...prev, old]);
+        if (e instanceof DOMException && e.name === 'AbortError') {
+          return;
+        }
+        if (e instanceof RateLimitError) {
+          const friendly = `You've hit your daily message limit (${e.limit}/day). Resets at ${formatResetTime(e.resetAt)}.`;
+          setInlineError(friendly);
+          addToast(friendly, 'error');
+          refreshAuth();
+          return;
+        }
+        const errMsg = e instanceof Error ? e.message : 'Failed to regenerate';
+        setInlineError('Failed to get a response. Please try again.');
+        addToast(errMsg || 'Network error — regeneration failed', 'error');
+      }
+    },
+    [conversationId, isStreaming, messages, setMessages, startRegenerate, refreshAuth, addToast],
+  );
+
   // ── Starter click handler ──
   const handleStarterClick = useCallback((text: string) => {
     chatInputRef.current?.setInputText(text);
@@ -613,6 +656,8 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
       addToast(`Export failed: ${msg}`, 'error');
     }
   }, [conversation, messages, addToast]);
+
+  const lastId = messages[messages.length - 1]?.id;
 
   return (
     <div
@@ -715,6 +760,8 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
                   content={msg.content}
                   sources={msg.sources}
                   onCitationClick={handleCitationClick}
+                  canRegenerate={!isStreaming && msg.role === 'assistant' && msg.id === lastId}
+                  onRegenerate={() => handleRegenerate(msg.id)}
                 />
               ))
             )}
