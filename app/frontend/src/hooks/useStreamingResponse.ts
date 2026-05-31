@@ -56,6 +56,9 @@ export function useStreamingResponse(conversationId: string | null) {
       let fullText = '';
       let sources: Citation[] = [];
       let streamError: Error | null = null;
+      // Set when a mid-stream error payload arrives so the outer reader loop
+      // exits immediately instead of draining the rest of the stream.
+      let streamAborted = false;
 
       try {
         const abortController = new AbortController();
@@ -184,6 +187,7 @@ export function useStreamingResponse(conversationId: string | null) {
                 // Use default message
               }
               streamError = new Error(errMsg);
+              streamAborted = true;
               break;
             } else if (data) {
               // Tokens are JSON-encoded strings to safely handle newlines/special chars
@@ -201,10 +205,17 @@ export function useStreamingResponse(conversationId: string | null) {
               setStreamingContent(fullText);
             }
           }
+
+          // A mid-stream error aborts the stream — stop reading immediately
+          // instead of looping back to reader.read() and draining the rest.
+          if (streamAborted) break;
         }
 
-        // Stream completed successfully
-        onComplete({ fullText, sources });
+        // Only fire onComplete on a clean stream — never commit partial text
+        // from a mid-stream error as a successful answer.
+        if (!streamError) {
+          onComplete({ fullText, sources });
+        }
       } finally {
         // Always reset streaming state — React 18 batches this with the onComplete
         // state updates, ensuring a seamless transition to the persisted message.

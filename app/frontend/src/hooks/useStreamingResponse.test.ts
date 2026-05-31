@@ -537,6 +537,55 @@ describe('conversationId reset — state clears on navigation', () => {
   });
 });
 
+describe('mid-stream error — partial text is not committed as success', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('rejects, skips onComplete, and still runs finally cleanup on a {"error"} payload', async () => {
+    // A normal token lands first, then the server emits a mid-stream error.
+    // The accumulated partial text must NOT be committed via onComplete.
+    const sseChunks = [
+      'data: "Partial answer"\n\n',
+      'data: {"error":"Mid-stream failure"}\n\n',
+      // A trailing [DONE] that some backends still emit after the error — it
+      // must never re-enable the success path once streamError is set.
+      'data: [DONE]\n\n',
+    ];
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: makeSseStream(sseChunks),
+      }),
+    );
+
+    const onComplete = vi.fn();
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    let caught: unknown;
+    await act(async () => {
+      await result.current.startStream('conv-1', 'hi', onComplete).catch((e) => {
+        caught = e;
+      });
+    });
+
+    // streamError is surfaced to the caller.
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toContain('Mid-stream failure');
+
+    // onComplete must NOT fire — the partial text is never committed.
+    expect(onComplete).not.toHaveBeenCalled();
+
+    // finally cleanup still ran exactly once: streaming state is reset.
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.streamingContent).toBe('');
+    expect(result.current.streamingStatus).toBeNull();
+  });
+});
+
 describe('sources event — hook state via renderHook', () => {
   beforeEach(() => {
     vi.clearAllMocks();
