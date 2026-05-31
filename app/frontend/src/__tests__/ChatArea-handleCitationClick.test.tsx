@@ -15,6 +15,9 @@ import type { Citation, Message } from '../lib/api';
 // ── Shared mocks ──────────────────────────────────────────────────────────────
 
 const mockNavigate = vi.fn();
+// Captured at module scope (mock-prefixed so vi.mock hoisting allows the
+// reference) so tests can assert on the toast surfaced by handleCitationClick.
+const mockAddToast = vi.fn();
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual('react-router-dom');
   return { ...actual, useNavigate: () => mockNavigate };
@@ -45,7 +48,7 @@ vi.mock('../hooks/useStreamingResponse', () => ({
 }));
 
 vi.mock('../hooks/useToast', () => ({
-  useToast: () => ({ addToast: vi.fn(), removeToast: vi.fn() }),
+  useToast: () => ({ addToast: mockAddToast, removeToast: vi.fn() }),
 }));
 
 vi.mock('../hooks/useAuth', () => ({
@@ -148,7 +151,7 @@ describe('handleCitationClick', () => {
     expect(screen.queryByTitle('YouTube video player')).not.toBeInTheDocument();
   });
 
-  it('does nothing when Dynamous citation has no lesson_url', async () => {
+  it('shows an info toast when Dynamous citation has no lesson_url', async () => {
     mockMessages = [makeAssistantMessage(dynaCitationNoUrl)];
 
     render(
@@ -165,7 +168,11 @@ describe('handleCitationClick', () => {
 
     // window.open must NOT be called — no blank tab opened
     expect(openSpy).not.toHaveBeenCalled();
+    // ...and the YouTube-only modal must NOT open for a Dynamous source
     expect(screen.queryByTitle('YouTube video player')).not.toBeInTheDocument();
+    // ...instead the user gets an info toast rather than a silent dead click
+    expect(mockAddToast).toHaveBeenCalledTimes(1);
+    expect(mockAddToast).toHaveBeenCalledWith({ message: expect.any(String), type: 'info' });
   });
 
   it('opens the citation modal for YouTube citations', async () => {

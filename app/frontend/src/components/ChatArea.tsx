@@ -440,15 +440,23 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
   // ── Citation click handler ──
   // Dynamous: open lesson URL directly in a new tab — no modal.
   // YouTube: open the embedded player modal as usual.
-  const handleCitationClick = useCallback((citation: Citation) => {
-    if (citation.source_type === 'dynamous') {
-      if (citation.lesson_url) {
-        window.open(citation.lesson_url, '_blank', 'noopener,noreferrer');
+  const handleCitationClick = useCallback(
+    (citation: Citation) => {
+      if (citation.source_type === 'dynamous') {
+        if (citation.lesson_url) {
+          window.open(citation.lesson_url, '_blank', 'noopener,noreferrer');
+        } else {
+          // No lesson URL on this Dynamous source and the citation modal is
+          // YouTube-only (would show "video unavailable"), so surface a toast
+          // instead of a silent dead click.
+          addToast({ message: 'No lesson URL available for this citation.', type: 'info' });
+        }
+      } else {
+        setSelectedCitation(citation);
       }
-    } else {
-      setSelectedCitation(citation);
-    }
-  }, []);
+    },
+    [addToast],
+  );
 
   // ── Send handler ──
   const handleSend = useCallback(
