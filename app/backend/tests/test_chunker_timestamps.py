@@ -55,6 +55,36 @@ class TestChunkVideoTimestamped:
         # Should not produce any chunks from the empty segment
         assert all("Real content" in c["content"] or "Real content" in c["snippet"] for c in result)
 
+    def test_zero_duration_segment_preserves_boundary(self) -> None:
+        """Zero-duration segment split into >1 sub-chunks keeps original timestamps."""
+        long_text = "word " * 1500  # enough text to force multiple chunks
+        segments = [
+            {"start": 120.0, "end": 120.0, "text": long_text},
+        ]
+        result, _ = chunk_video_timestamped(segments)
+
+        assert len(result) > 1
+        for chunk in result:
+            assert chunk["start_seconds"] == 120.0
+            assert chunk["end_seconds"] == 120.0
+
+    def test_positive_duration_distributes_timestamps(self) -> None:
+        """Positive-duration segment split into >1 sub-chunks distributes timestamps evenly."""
+        long_text = "word " * 1500
+        segments = [
+            {"start": 0.0, "end": 100.0, "text": long_text},
+        ]
+        result, _ = chunk_video_timestamped(segments)
+
+        assert len(result) > 1
+        # First chunk starts at 0, last chunk ends at 100
+        assert result[0]["start_seconds"] == 0.0
+        assert result[-1]["end_seconds"] == 100.0
+        # Check monotonic and evenly spaced
+        for i in range(1, len(result)):
+            assert result[i]["start_seconds"] == result[i - 1]["end_seconds"]
+            assert result[i]["start_seconds"] > result[i - 1]["start_seconds"]
+
 
 class TestChunkVideoFallback:
     def test_produces_monotonic_timestamps(self) -> None:
