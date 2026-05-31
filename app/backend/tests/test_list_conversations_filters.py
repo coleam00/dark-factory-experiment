@@ -151,9 +151,7 @@ async def test_date_range_filters_by_updated_at():
     # (T-1d / T-10d / T-40d relative to a fixed anchor — never wall-clock now).
     # ... create_conversation + direct UPDATE of updated_at ...
     # ... attach assistant messages with sources referencing video ids ...
-    results = await repository.list_conversations(
-        user_id, start_date="...", end_date="..."
-    )
+    results = await repository.list_conversations(user_id, start_date="...", end_date="...")
     # assert only the in-range conversation is returned
     assert isinstance(results, list)
 
