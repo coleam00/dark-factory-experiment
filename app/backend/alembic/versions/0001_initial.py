@@ -159,7 +159,7 @@ def upgrade() -> None:
             id TEXT PRIMARY KEY,
             sync_run_id TEXT NOT NULL REFERENCES channel_sync_runs(id) ON DELETE CASCADE,
             youtube_video_id TEXT NOT NULL,
-            status TEXT NOT NULL CHECK (status IN ('pending', 'ingested', 'error')),
+            status TEXT NOT NULL CHECK (status IN ('pending', 'ingested', 'error', 'skipped')),
             error_message TEXT,
             created_at TIMESTAMPTZ NOT NULL
         )

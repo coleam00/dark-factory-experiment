@@ -145,7 +145,7 @@ def make_mock_transcript(text):
 async def test_sync_channel_idempotent_skips_existing_videos():
     """
     If a video is already in the DB (matched by youtube_video_id in URL),
-    it is skipped and counted as 'new' (already ingested = already counted).
+    it is skipped and must NOT be counted in videos_new.
     """
     # Pre-ingest a video so get_video_by_youtube_id returns it
     await repository.create_video(
@@ -181,8 +181,62 @@ async def test_sync_channel_idempotent_skips_existing_videos():
     data = response.json()
     assert data["sync_run_id"]
     assert data["videos_total"] == 2
-    assert data["videos_new"] == 2  # one skipped (already in DB), one "new" (abc...)
+    assert data["videos_new"] == 1  # only abc123def456 is truly new
     assert data["videos_error"] == 0
+
+    # Verify the skipped video is recorded with status "skipped"
+    sync_runs = await repository.list_sync_runs(limit=10)
+    sync_videos = await repository.list_sync_videos_for_run(sync_runs[0]["id"])
+    assert len(sync_videos) == 2
+    skipped = next((v for v in sync_videos if v["youtube_video_id"] == "dQw4w9WgXcQ"), None)
+    assert skipped is not None
+    assert skipped["status"] == "skipped"
+
+
+async def test_sync_channel_all_new_failed_with_skip_shows_failed():
+    """
+    Regression for issue #295: when genuinely-new videos all fail and a
+    pre-existing video is skipped, the sync run must surface as 'failed'.
+    """
+    # Pre-ingest a video so it gets skipped
+    await repository.create_video(
+        title="Already ingested",
+        description="Already in DB",
+        url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        transcript="Already ingested transcript.",
+    )
+
+    with patch("backend.services.supadata._get_client") as mock_get_client:
+        mock_client = AsyncMock()
+        mock_client.youtube.channel.videos = make_mock_channel_videos(
+            ["dQw4w9WgXcQ", "newVideoFails"]
+        )
+        # Simulate a transcript fetch failure for the new video
+        exc = SupadataError(error="server_error", message="Transcript unavailable", details="")
+        exc.status = 500
+        mock_client.transcript = lambda *args, **kwargs: (_ for _ in ()).throw(exc)
+        mock_get_client.return_value = mock_client
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            response = await client.post("/api/channels/sync")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["videos_total"] == 2
+    assert data["videos_new"] == 0
+    assert data["videos_error"] == 1
+    assert data["status"] == "failed"
+
+    # Verify sync_video statuses reflect reality
+    sync_runs = await repository.list_sync_runs(limit=10)
+    sync_videos = await repository.list_sync_videos_for_run(sync_runs[0]["id"])
+    assert len(sync_videos) == 2
+    skipped = next((v for v in sync_videos if v["youtube_video_id"] == "dQw4w9WgXcQ"), None)
+    failed = next((v for v in sync_videos if v["youtube_video_id"] == "newVideoFails"), None)
+    assert skipped is not None and skipped["status"] == "skipped"
+    assert failed is not None and failed["status"] == "error"
 
 
 async def test_sync_channel_returns_sync_run_id():
