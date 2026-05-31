@@ -537,6 +537,46 @@ describe('conversationId reset — state clears on navigation', () => {
   });
 });
 
+describe('mid-stream error — stops promptly and does not fire onComplete', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('rejects and skips onComplete when a mid-stream error payload arrives', async () => {
+    const sseChunks = [
+      'data: "Hello"\n\n',
+      'data: {"error":"upstream failed"}\n\n',
+      // Trailing tokens + [DONE] prove the loop does NOT keep draining
+      'data: " world"\n\n',
+      'data: [DONE]\n\n',
+    ];
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: makeSseStream(sseChunks),
+      }),
+    );
+
+    const onComplete = vi.fn();
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await act(async () => {
+      await expect(
+        result.current.startStream('conv-1', 'hi', onComplete),
+      ).rejects.toThrow('upstream failed');
+    });
+
+    expect(onComplete).not.toHaveBeenCalled();
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.streamingContent).toBe('');
+    expect(result.current.streamingSources).toHaveLength(0);
+    expect(result.current.streamingStatus).toBeNull();
+  });
+});
+
 describe('sources event — hook state via renderHook', () => {
   beforeEach(() => {
     vi.clearAllMocks();
