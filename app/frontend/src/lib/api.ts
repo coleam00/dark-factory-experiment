@@ -180,6 +180,45 @@ export const ingestVideo = (body: IngestVideoBody) =>
     body: JSON.stringify(body),
   });
 
+// Share links (issue #278)
+export interface ShareLinkResponse {
+  token: string;
+  url_path: string;
+}
+
+export interface SharedMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  sources?: Citation[];
+}
+
+export interface SharedConversation {
+  title: string;
+  messages: SharedMessage[];
+}
+
+export const createShareLink = (id: string) =>
+  request<ShareLinkResponse>(`/conversations/${id}/share`, { method: 'POST', body: '{}' });
+
+export const revokeShareLink = async (id: string): Promise<void> => {
+  const res = await fetch(`${BASE}/conversations/${id}/share`, {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    throw new ApiError(res.status, await parseErrorDetail(res));
+  }
+};
+
+export const getSharedConversation = async (token: string): Promise<SharedConversation> => {
+  const res = await fetch(`/api/share/${token}`);
+  if (!res.ok) {
+    throw new ApiError(res.status, await parseErrorDetail(res));
+  }
+  return res.json() as Promise<SharedConversation>;
+};
+
 // Health
 export const getHealth = () =>
   request<{ status: string; video_count: number; chunk_count: number; db_path: string }>('/health');

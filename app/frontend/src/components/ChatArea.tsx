@@ -10,6 +10,7 @@ import { exportConversationAsMarkdown } from '../lib/exportMarkdown';
 import { ChatInput, type ChatInputHandle } from './ChatInput';
 import { CitationModal } from './CitationModal';
 import { Message } from './Message';
+import { ShareDialog } from './ShareDialog';
 
 function formatResetTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -325,6 +326,7 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
   const pendingUserMsgIdRef = useRef<string | null>(null);
   // Citation modal state
   const [selectedCitation, setSelectedCitation] = useState<Citation | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
 
   // ── Auto-scroll logic ──
   // Defer scroll to the next paint cycle so streaming DOM updates are applied first.
@@ -638,53 +640,103 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
           position: 'relative',
         }}
       >
-        {/* ── Export button (visible when conversation is active) ── */}
+        {/* ── Export + Share buttons (visible when conversation is active) ── */}
         {conversation && messages.length > 0 && (
-          <button
-            onClick={handleExport}
-            title="Export conversation as Markdown"
+          <div
             style={{
               position: 'absolute',
               top: 12,
               right: 24,
-              background: '#1e293b',
-              border: '1px solid rgba(255,255,255,0.08)',
-              borderRadius: 7,
-              color: '#94a3b8',
-              cursor: 'pointer',
-              padding: '5px 8px',
               display: 'flex',
-              alignItems: 'center',
-              gap: 5,
-              fontSize: 12,
+              gap: 8,
               zIndex: 5,
-              transition: 'background 0.15s, color 0.15s',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = '#1e293b';
-              e.currentTarget.style.color = '#f1f5f9';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = '#1e293b';
-              e.currentTarget.style.color = '#94a3b8';
             }}
           >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 13 13"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.6"
-              strokeLinecap="round"
-              strokeLinejoin="round"
+            <button
+              onClick={() => setShareOpen(true)}
+              title="Share conversation"
+              style={{
+                background: '#1e293b',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: 7,
+                color: '#94a3b8',
+                cursor: 'pointer',
+                padding: '5px 8px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                fontSize: 12,
+                transition: 'background 0.15s, color 0.15s',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = '#1e293b';
+                e.currentTarget.style.color = '#f1f5f9';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = '#1e293b';
+                e.currentTarget.style.color = '#94a3b8';
+              }}
             >
-              <path d="M2,9 L2,11.5 A0.5,0.5 0 0,0 2.5,12 L10.5,12 A0.5,0.5 0 0,0 11,11.5 L11,9" />
-              <polyline points="6.5,1 6.5,8.5" />
-              <polyline points="3.5,5.5 6.5,8.5 9.5,5.5" />
-            </svg>
-            Export
-          </button>
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 13 13"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="4" cy="6.5" r="2.5" />
+                <circle cx="9" cy="3.5" r="2" />
+                <circle cx="9" cy="9.5" r="2" />
+                <line x1="6" y1="5" x2="7.5" y2="4.2" />
+                <line x1="6" y1="8" x2="7.5" y2="8.8" />
+              </svg>
+              Share
+            </button>
+            <button
+              onClick={handleExport}
+              title="Export conversation as Markdown"
+              style={{
+                background: '#1e293b',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: 7,
+                color: '#94a3b8',
+                cursor: 'pointer',
+                padding: '5px 8px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                fontSize: 12,
+                transition: 'background 0.15s, color 0.15s',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = '#1e293b';
+                e.currentTarget.style.color = '#f1f5f9';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = '#1e293b';
+                e.currentTarget.style.color = '#94a3b8';
+              }}
+            >
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 13 13"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M2,9 L2,11.5 A0.5,0.5 0 0,0 2.5,12 L10.5,12 A0.5,0.5 0 0,0 11,11.5 L11,9" />
+                <polyline points="6.5,1 6.5,8.5" />
+                <polyline points="3.5,5.5 6.5,8.5 9.5,5.5" />
+              </svg>
+              Export
+            </button>
+          </div>
         )}
 
         {showEmpty && <EmptyState onStarterClick={handleStarterClick} />}
@@ -778,6 +830,15 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
       {/* ── Citation modal ── */}
       {selectedCitation && (
         <CitationModal citation={selectedCitation} onClose={() => setSelectedCitation(null)} />
+      )}
+
+      {/* ── Share dialog ── */}
+      {conversationId && (
+        <ShareDialog
+          conversationId={conversationId}
+          open={shareOpen}
+          onClose={() => setShareOpen(false)}
+        />
       )}
     </div>
   );

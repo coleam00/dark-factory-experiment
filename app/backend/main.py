@@ -103,7 +103,7 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 # Routes (imported here to keep main.py clean)
 # ---------------------------------------------------------------------------
-from backend.routes import admin, auth, channels, conversations, ingest, messages  # noqa: E402
+from backend.routes import admin, auth, channels, conversations, ingest, messages, share  # noqa: E402
 
 # Auth routes are public (signup/login don't require a session; /me and /logout
 # rely on their own dependency/cookie behaviour).
@@ -114,6 +114,8 @@ app.include_router(auth.router, prefix="/api")
 _auth_required = [Depends(get_current_user)]
 app.include_router(conversations.router, prefix="/api", dependencies=_auth_required)
 app.include_router(messages.router, prefix="/api", dependencies=_auth_required)
+app.include_router(share.share_router, prefix="/api", dependencies=_auth_required)
+app.include_router(share.public_share_router, prefix="/api")
 
 # Library-mutation routes (ingest a video, backfill the whole channel) and
 # admin routes — all gated on get_current_admin. These endpoints write to the

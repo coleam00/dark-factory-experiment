@@ -7,6 +7,7 @@ import { AuthProvider, useAuth } from './hooks/useAuth';
 import { AdminVideos } from './pages/AdminVideos';
 import { Login } from './pages/Login';
 import { NotFound } from './pages/NotFound';
+import { SharedConversation } from './pages/SharedConversation';
 import { Signup } from './pages/Signup';
 
 // ── Auth guard ───────────────────────────────────────────────────
@@ -102,6 +103,7 @@ function App() {
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
+            <Route path="/share/:token" element={<SharedConversation />} />
             <Route
               path="/"
               element={

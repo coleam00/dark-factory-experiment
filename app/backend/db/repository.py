@@ -745,3 +745,75 @@ async def list_sync_videos_for_run(sync_run_id: str) -> list[dict]:
             sync_run_id,
         )
     return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Share tokens (issue #278)
+# ---------------------------------------------------------------------------
+
+
+async def set_conversation_share_token(conversation_id: str, user_id: str, token: str) -> bool:
+    """Mint/rotate a share token for a conversation. Returns False if not owner."""
+    async with _acquire() as conn:
+        result = await conn.execute(
+            """
+            UPDATE conversations
+            SET share_token = $1, share_created_at = $2
+            WHERE id = $3 AND user_id = $4
+            """,
+            token,
+            _now(),
+            conversation_id,
+            user_id,
+        )
+        return result != "UPDATE 0"  # type: ignore[no-any-return]
+
+
+async def clear_conversation_share_token(conversation_id: str, user_id: str) -> bool:
+    """Revoke a share token. Returns False if not owner."""
+    async with _acquire() as conn:
+        result = await conn.execute(
+            """
+            UPDATE conversations
+            SET share_token = NULL, share_created_at = NULL
+            WHERE id = $1 AND user_id = $2
+            """,
+            conversation_id,
+            user_id,
+        )
+        return result != "UPDATE 0"  # type: ignore[no-any-return]
+
+
+async def get_conversation_by_share_token(token: str) -> dict | None:
+    """Return the conversation for a share token (no auth; read-only)."""
+    async with _acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id, title, created_at, updated_at
+            FROM conversations
+            WHERE share_token = $1
+            """,
+            token,
+        )
+    return dict(row) if row else None
+
+
+async def list_messages_for_share_token(token: str) -> list[dict]:
+    """Return messages for a shared conversation, ordered oldest first."""
+    async with _acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT m.id, m.role, m.content, m.created_at, m.sources
+            FROM messages m
+            JOIN conversations c ON c.id = m.conversation_id
+            WHERE c.share_token = $1
+            ORDER BY m.created_at ASC
+            """,
+            token,
+        )
+    results = []
+    for r in rows:
+        d = dict(r)
+        d["sources"] = json.loads(d["sources"]) if d.get("sources") else None
+        results.append(d)
+    return results
