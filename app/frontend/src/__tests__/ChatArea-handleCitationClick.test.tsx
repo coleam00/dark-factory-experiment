@@ -3,7 +3,7 @@
  *
  * Dynamous citations → window.open(lesson_url, '_blank', 'noopener,noreferrer')
  * YouTube citations  → opens CitationModal (setSelectedCitation)
- * Missing lesson_url → does nothing (no blank tab)
+ * Missing lesson_url → info toast (no blank tab)
  */
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -44,8 +44,10 @@ vi.mock('../hooks/useStreamingResponse', () => ({
   }),
 }));
 
+const addToastRef = { current: vi.fn() };
+
 vi.mock('../hooks/useToast', () => ({
-  useToast: () => ({ addToast: vi.fn(), removeToast: vi.fn() }),
+  useToast: () => ({ addToast: addToastRef.current, removeToast: vi.fn() }),
 }));
 
 vi.mock('../hooks/useAuth', () => ({
@@ -116,6 +118,7 @@ describe('handleCitationClick', () => {
     Element.prototype.scrollIntoView = vi.fn();
     openSpy = vi.fn();
     vi.stubGlobal('open', openSpy);
+    addToastRef.current = vi.fn();
   });
 
   afterEach(() => {
@@ -148,7 +151,7 @@ describe('handleCitationClick', () => {
     expect(screen.queryByTitle('YouTube video player')).not.toBeInTheDocument();
   });
 
-  it('does nothing when Dynamous citation has no lesson_url', async () => {
+  it('shows an info toast when Dynamous citation has no lesson_url', async () => {
     mockMessages = [makeAssistantMessage(dynaCitationNoUrl)];
 
     render(
@@ -165,6 +168,46 @@ describe('handleCitationClick', () => {
 
     // window.open must NOT be called — no blank tab opened
     expect(openSpy).not.toHaveBeenCalled();
+    expect(addToastRef.current).toHaveBeenCalledWith(
+      'This lesson does not have an external link.',
+      'info',
+    );
+    expect(screen.queryByTitle('YouTube video player')).not.toBeInTheDocument();
+  });
+
+  it('shows an info toast when Dynamous citation has an empty lesson_url', async () => {
+    const dynaCitationEmptyUrl: Citation = {
+      chunk_id: 'c4',
+      video_id: 'v4',
+      video_title: 'Lesson Three',
+      video_url: 'https://community.dynamous.ai/c/module/v4',
+      start_seconds: 0,
+      end_seconds: 5,
+      snippet: '',
+      source_type: 'dynamous',
+      lesson_url: '',
+      is_cited: true,
+    };
+
+    mockMessages = [makeAssistantMessage(dynaCitationEmptyUrl)];
+
+    render(
+      <MemoryRouter>
+        <ChatArea conversationId="conv-1" />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Lesson Three/i)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText(/Lesson Three/i));
+
+    expect(openSpy).not.toHaveBeenCalled();
+    expect(addToastRef.current).toHaveBeenCalledWith(
+      'This lesson does not have an external link.',
+      'info',
+    );
     expect(screen.queryByTitle('YouTube video player')).not.toBeInTheDocument();
   });
 

@@ -444,11 +444,13 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
     if (citation.source_type === 'dynamous') {
       if (citation.lesson_url) {
         window.open(citation.lesson_url, '_blank', 'noopener,noreferrer');
+      } else {
+        addToast('This lesson does not have an external link.', 'info');
       }
     } else {
       setSelectedCitation(citation);
     }
-  }, []);
+  }, [addToast]);
 
   // ── Send handler ──
   const handleSend = useCallback(
