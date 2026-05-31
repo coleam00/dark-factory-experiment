@@ -211,9 +211,9 @@ async def create_message(
                         cited_ids = extract_cited_chunk_ids(final_text_raw)
                         for chunk in source_citations:
                             chunk["is_cited"] = chunk.get("chunk_id") in cited_ids
-                        # Collapse same-video chunks (issue #208): keep one
-                        # entry per video_id, choosing the earliest-cited
-                        # timestamp as the representative.
+                        # Collapse same-video chunks (issue #208/#276): videos
+                        # with ≥2 cited moments fan out to one chip each;
+                        # single-cited and uncited groups collapse to one entry.
                         source_citations[:] = _collapse_by_video(source_citations)
                         # Cap fallback (issue #176): cited pass through, non-cited sliced.
                         cited = [c for c in source_citations if c.get("is_cited")]
