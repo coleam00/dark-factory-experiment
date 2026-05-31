@@ -10,6 +10,7 @@ import { exportConversationAsMarkdown } from '../lib/exportMarkdown';
 import { ChatInput, type ChatInputHandle } from './ChatInput';
 import { CitationModal } from './CitationModal';
 import { Message } from './Message';
+import { VideoExplorer } from './VideoExplorer';
 
 function formatResetTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -325,6 +326,9 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
   const pendingUserMsgIdRef = useRef<string | null>(null);
   // Citation modal state
   const [selectedCitation, setSelectedCitation] = useState<Citation | null>(null);
+  // Video scope picker state (only for not-yet-created conversations)
+  const [selectedVideoIds, setSelectedVideoIds] = useState<string[]>([]);
+  const [showVideoPicker, setShowVideoPicker] = useState(false);
 
   // ── Auto-scroll logic ──
   // Defer scroll to the next paint cycle so streaming DOM updates are applied first.
@@ -459,7 +463,9 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
       if (!conversationId) {
         if (isStreaming) return;
         try {
-          const conv = await createConversation();
+          const conv = await createConversation(
+            selectedVideoIds.length > 0 ? selectedVideoIds : undefined,
+          );
           navigate(`/c/${conv.id}`, {
             state: { initialMessage: content } satisfies ConvLocationState,
           });
@@ -556,6 +562,7 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
       addToast,
       refreshAuth,
       refreshConversationsRef,
+      selectedVideoIds,
     ],
   );
 
@@ -766,6 +773,79 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
           zIndex: 2,
         }}
       >
+        {/* Scope chip for active conversation */}
+        {conversation?.video_filter && conversation.video_filter.length > 0 && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              marginBottom: 8,
+            }}
+          >
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '4px 10px',
+                background: 'rgba(59,130,246,0.15)',
+                border: '1px solid rgba(59,130,246,0.3)',
+                borderRadius: 20,
+                fontSize: 12,
+                color: '#93c5fd',
+              }}
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <circle cx="5" cy="5" r="4" />
+                <line x1="11" y1="11" x2="8.5" y2="8.5" />
+              </svg>
+              Scoped to {conversation.video_filter.length} video
+              {conversation.video_filter.length !== 1 ? 's' : ''}
+            </span>
+          </div>
+        )}
+
+        {/* Choose-videos affordance for new conversation */}
+        {!conversationId && (
+          <div style={{ marginBottom: 8 }}>
+            <button
+              onClick={() => setShowVideoPicker(true)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '4px 10px',
+                background: 'transparent',
+                border: '1px solid rgba(255,255,255,0.12)',
+                borderRadius: 20,
+                fontSize: 12,
+                color: '#94a3b8',
+                cursor: 'pointer',
+                transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(59,130,246,0.1)';
+                e.currentTarget.style.color = '#93c5fd';
+                e.currentTarget.style.borderColor = 'rgba(59,130,246,0.3)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'transparent';
+                e.currentTarget.style.color = '#94a3b8';
+                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)';
+              }}
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <rect x="1" y="2" width="10" height="8" rx="1.5" />
+                <polygon points="4.5,4.5 7.5,6 4.5,7.5" fill="currentColor" stroke="none" />
+              </svg>
+              {selectedVideoIds.length > 0
+                ? `${selectedVideoIds.length} video${selectedVideoIds.length !== 1 ? 's' : ''} selected`
+                : 'Choose videos'}
+            </button>
+          </div>
+        )}
+
         <ChatInput
           ref={chatInputRef}
           onSend={handleSend}
@@ -779,6 +859,20 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
       {selectedCitation && (
         <CitationModal citation={selectedCitation} onClose={() => setSelectedCitation(null)} />
       )}
+
+      {/* ── Video scope picker ── */}
+      <VideoExplorer
+        isOpen={showVideoPicker}
+        onClose={() => setShowVideoPicker(false)}
+        selectionMode={true}
+        selectedIds={selectedVideoIds}
+        onToggleSelect={(id) =>
+          setSelectedVideoIds((prev) =>
+            prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id],
+          )
+        }
+        onConfirmSelection={() => setShowVideoPicker(false)}
+      />
     </div>
   );
 }

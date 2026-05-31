@@ -144,6 +144,14 @@ async def create_message(
         # turn won't change behavior mid-flight.
         is_member_for_turn = bool(current_user.get("is_member", False))
 
+        # Scope the conversation to specific videos if a filter was set at
+        # creation time. The filter persists server-side for the lifetime of
+        # the conversation — the client never re-sends it.
+        video_filter = conv.get("video_filter") or None
+        if video_filter:
+            filter_set = set(video_filter)
+            video_id_whitelist = {vid for vid in video_id_whitelist if vid in filter_set}
+
         async def _executor(name: str, raw_args: str) -> str:
             # Pass `None` (not empty set) when the whitelist failed to load so
             # the transcript tool falls back to open lookups instead of rejecting
@@ -155,6 +163,7 @@ async def create_message(
                 video_id_whitelist=whitelist,
                 embedding_cache=embedding_cache,
                 is_member=is_member_for_turn,
+                video_ids=video_filter,
             )
             if result.get("ok") and result.get("chunks"):
                 tool_chunks_acc.extend(result["chunks"])

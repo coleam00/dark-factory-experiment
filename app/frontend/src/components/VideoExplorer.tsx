@@ -33,7 +33,21 @@ function SkeletonCard() {
 }
 
 // ── Video card ───────────────────────────────────────────────────
-function VideoCard({ video, query = '' }: { video: Video; query?: string }) {
+interface VideoCardProps {
+  video: Video;
+  query?: string;
+  selectionMode?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (id: string) => void;
+}
+
+function VideoCard({
+  video,
+  query = '',
+  selectionMode = false,
+  selected = false,
+  onToggleSelect,
+}: VideoCardProps) {
   const titleHref = video.source_type === 'dynamous' ? (video.lesson_url ?? video.url) : video.url;
 
   return (
@@ -42,6 +56,19 @@ function VideoCard({ video, query = '' }: { video: Video; query?: string }) {
       onMouseEnter={(e) => e.currentTarget.classList.add('video-card-hover')}
       onMouseLeave={(e) => e.currentTarget.classList.remove('video-card-hover')}
     >
+      {/* Checkbox in selection mode */}
+      {selectionMode && (
+        <label className="flex items-center gap-2 mb-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={() => onToggleSelect?.(video.id)}
+            className="accent-blue-500"
+          />
+          <span className="text-xs text-slate-400">Select for scoped chat</span>
+        </label>
+      )}
+
       {/* Title */}
       {titleHref ? (
         <a
@@ -106,6 +133,10 @@ function VideoCard({ video, query = '' }: { video: Video; query?: string }) {
 interface VideoExplorerProps {
   isOpen: boolean;
   onClose: () => void;
+  selectionMode?: boolean;
+  selectedIds?: string[];
+  onToggleSelect?: (id: string) => void;
+  onConfirmSelection?: () => void;
 }
 
 const INGEST_FIELDS = [
@@ -125,7 +156,14 @@ const INGEST_FIELDS = [
   },
 ] as const;
 
-export function VideoExplorer({ isOpen, onClose }: VideoExplorerProps) {
+export function VideoExplorer({
+  isOpen,
+  onClose,
+  selectionMode = false,
+  selectedIds = [],
+  onToggleSelect,
+  onConfirmSelection,
+}: VideoExplorerProps) {
   const { user } = useAuth();
   const [videos, setVideos] = useState<Video[]>([]);
   const [loading, setLoading] = useState(false);
@@ -145,6 +183,10 @@ export function VideoExplorer({ isOpen, onClose }: VideoExplorerProps) {
   const closeDialog = () => {
     setIngestOpen(false);
     setIngestError(null);
+  };
+
+  const handleToggleSelect = (id: string) => {
+    onToggleSelect?.(id);
   };
 
   const fetchVideos = useCallback(async () => {
@@ -238,7 +280,9 @@ export function VideoExplorer({ isOpen, onClose }: VideoExplorerProps) {
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 flex-shrink-0">
           <div>
-            <h2 className="m-0 text-base font-semibold text-slate-100">Video Library</h2>
+            <h2 className="m-0 text-base font-semibold text-slate-100">
+              {selectionMode ? 'Choose Videos' : 'Video Library'}
+            </h2>
             {!loading && videos.length > 0 && (
               <p className="mt-0.5 text-xs text-slate-400">
                 {q
@@ -246,10 +290,15 @@ export function VideoExplorer({ isOpen, onClose }: VideoExplorerProps) {
                   : `${videos.length} videos in knowledge base`}
               </p>
             )}
+            {selectionMode && (
+              <p className="mt-0.5 text-xs text-blue-400">
+                {selectedIds.length} video{selectedIds.length !== 1 ? 's' : ''} selected
+              </p>
+            )}
           </div>
           <button
             onClick={onClose}
-            aria-label="Close video library"
+            aria-label={selectionMode ? 'Close video picker' : 'Close video library'}
             className="bg-transparent border border-white/10 rounded-lg text-slate-400 cursor-pointer p-2 flex items-center justify-center transition-colors duration-150 mr-2 focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
             onMouseEnter={(e) => {
               e.currentTarget.classList.remove('text-slate-400', 'bg-transparent');
@@ -273,13 +322,23 @@ export function VideoExplorer({ isOpen, onClose }: VideoExplorerProps) {
               <line x1="11" y1="3" x2="3" y2="11" />
             </svg>
           </button>
-          {user?.is_admin && (
+          {!selectionMode && user?.is_admin && (
             <button
               onClick={() => setIngestOpen(true)}
               className="px-3 py-1.5 bg-blue-500 border-none rounded-md text-white text-sm cursor-pointer focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
               title="Add new video"
             >
               + Add Video
+            </button>
+          )}
+          {selectionMode && (
+            <button
+              onClick={onConfirmSelection}
+              disabled={selectedIds.length === 0}
+              className="px-3 py-1.5 bg-blue-500 border-none rounded-md text-white text-sm cursor-pointer disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+              title="Start scoped chat"
+            >
+              Start scoped chat
             </button>
           )}
         </div>
@@ -350,7 +409,14 @@ export function VideoExplorer({ isOpen, onClose }: VideoExplorerProps) {
           {!loading &&
             !error &&
             filteredVideos.map((video) => (
-              <VideoCard key={video.id} video={video} query={debouncedQuery} />
+              <VideoCard
+                key={video.id}
+                video={video}
+                query={debouncedQuery}
+                selectionMode={selectionMode}
+                selected={selectedIds.includes(video.id)}
+                onToggleSelect={handleToggleSelect}
+              />
             ))}
         </div>
 

@@ -167,6 +167,21 @@ function ConvItem({
           }}
         >
           {highlightMatch(conv.title, searchQuery)}
+          {conv.video_filter && conv.video_filter.length > 0 && (
+            <span
+              title={`Scoped to ${conv.video_filter.length} video${conv.video_filter.length !== 1 ? 's' : ''}`}
+              style={{
+                display: 'inline-block',
+                marginLeft: 6,
+                width: 7,
+                height: 7,
+                borderRadius: '50%',
+                background: '#3b82f6',
+                verticalAlign: 'middle',
+                flexShrink: 0,
+              }}
+            />
+          )}
         </div>
       )}
 

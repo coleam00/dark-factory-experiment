@@ -253,6 +253,7 @@ async def keyword_search(
     top_k: int,
     language: str = "english",
     allowed_source_types: list[str] | None = None,
+    video_ids: list[str] | None = None,
 ) -> list[dict]:
     """
     Return top-K chunks matching a full-text query using tsvector.
@@ -273,20 +274,38 @@ async def keyword_search(
     if allowed_source_types is None:
         allowed_source_types = ["youtube"]
     async with _acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT id, video_id, content, chunk_index, start_seconds, end_seconds, snippet,
-                   ts_rank(search_vector, plainto_tsquery($1)) AS rank
-            FROM chunks
-            WHERE search_vector @@ plainto_tsquery($1)
-              AND source_type = ANY($3::text[])
-            ORDER BY rank DESC
-            LIMIT $2
-            """,
-            query,
-            top_k,
-            allowed_source_types,
-        )
+        if video_ids:
+            rows = await conn.fetch(
+                """
+                SELECT id, video_id, content, chunk_index, start_seconds, end_seconds, snippet,
+                       ts_rank(search_vector, plainto_tsquery($1)) AS rank
+                FROM chunks
+                WHERE search_vector @@ plainto_tsquery($1)
+                  AND source_type = ANY($3::text[])
+                  AND video_id = ANY($4::text[])
+                ORDER BY rank DESC
+                LIMIT $2
+                """,
+                query,
+                top_k,
+                allowed_source_types,
+                video_ids,
+            )
+        else:
+            rows = await conn.fetch(
+                """
+                SELECT id, video_id, content, chunk_index, start_seconds, end_seconds, snippet,
+                       ts_rank(search_vector, plainto_tsquery($1)) AS rank
+                FROM chunks
+                WHERE search_vector @@ plainto_tsquery($1)
+                  AND source_type = ANY($3::text[])
+                ORDER BY rank DESC
+                LIMIT $2
+                """,
+                query,
+                top_k,
+                allowed_source_types,
+            )
     return [dict(r) for r in rows]
 
 
@@ -294,6 +313,7 @@ async def vector_search_pg(
     query_embedding: list[float],
     top_k: int,
     allowed_source_types: list[str] | None = None,
+    video_ids: list[str] | None = None,
 ) -> list[dict]:
     """
     Return top-K chunks by pgvector cosine similarity.
@@ -320,19 +340,36 @@ async def vector_search_pg(
         allowed_source_types = ["youtube"]
     embedding_json = json.dumps(query_embedding)
     async with _acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT id, video_id, content, chunk_index, start_seconds, end_seconds, snippet,
-                   embedding::vector <=> $1::vector AS distance
-            FROM chunks
-            WHERE source_type = ANY($3::text[])
-            ORDER BY distance
-            LIMIT $2
-            """,
-            embedding_json,
-            top_k,
-            allowed_source_types,
-        )
+        if video_ids:
+            rows = await conn.fetch(
+                """
+                SELECT id, video_id, content, chunk_index, start_seconds, end_seconds, snippet,
+                       embedding::vector <=> $1::vector AS distance
+                FROM chunks
+                WHERE source_type = ANY($3::text[])
+                  AND video_id = ANY($4::text[])
+                ORDER BY distance
+                LIMIT $2
+                """,
+                embedding_json,
+                top_k,
+                allowed_source_types,
+                video_ids,
+            )
+        else:
+            rows = await conn.fetch(
+                """
+                SELECT id, video_id, content, chunk_index, start_seconds, end_seconds, snippet,
+                       embedding::vector <=> $1::vector AS distance
+                FROM chunks
+                WHERE source_type = ANY($3::text[])
+                ORDER BY distance
+                LIMIT $2
+                """,
+                embedding_json,
+                top_k,
+                allowed_source_types,
+            )
     return [dict(r) for r in rows]
 
 
@@ -415,18 +452,23 @@ async def replace_chunks_for_video(
 # ---------------------------------------------------------------------------
 
 
-async def create_conversation(*, user_id: str, title: str = "New Conversation") -> dict:
+async def create_conversation(
+    *, user_id: str, title: str = "New Conversation", video_filter: list[str] | None = None
+) -> dict:
     conv_id = _new_id()
     now = _now()
+    vf = video_filter or None
+    vf_json = json.dumps(vf) if vf is not None else None
     async with _acquire() as conn:
         await conn.execute(
             """
-            INSERT INTO conversations (id, user_id, title, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO conversations (id, user_id, title, video_filter, created_at, updated_at)
+            VALUES ($1, $2, $3, $4::jsonb, $5, $6)
             """,
             conv_id,
             user_id,
             title,
+            vf_json,
             now,
             now,
         )
@@ -434,6 +476,7 @@ async def create_conversation(*, user_id: str, title: str = "New Conversation") 
         "id": conv_id,
         "user_id": user_id,
         "title": title,
+        "video_filter": vf,
         "created_at": now,
         "updated_at": now,
     }
@@ -447,7 +490,11 @@ async def get_conversation(conv_id: str, user_id: str) -> dict | None:
             conv_id,
             user_id,
         )
-    return dict(row) if row else None
+    if not row:
+        return None
+    d = dict(row)
+    d["video_filter"] = json.loads(d["video_filter"]) if d.get("video_filter") else None
+    return d
 
 
 async def list_conversations(user_id: str) -> list[dict]:
@@ -466,7 +513,12 @@ async def list_conversations(user_id: str) -> list[dict]:
             """,
             user_id,
         )
-    return [dict(r) for r in rows]
+    result = []
+    for r in rows:
+        d = dict(r)
+        d["video_filter"] = json.loads(d["video_filter"]) if d.get("video_filter") else None
+        result.append(d)
+    return result
 
 
 async def update_conversation_title(conv_id: str, user_id: str, title: str) -> bool:
