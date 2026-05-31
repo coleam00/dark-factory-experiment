@@ -1,7 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { type Conversation, getConversations, renameConversation } from '../lib/api';
+import {
+  type Conversation,
+  getConversations,
+  searchConversations,
+  renameConversation,
+} from '../lib/api';
 
-export function useConversations(searchQuery?: string) {
+export function useConversations(filters?: {
+  query?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  videoId?: string;
+}) {
+  const { query = '', dateFrom = '', dateTo = '', videoId = '' } = filters ?? {};
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -13,7 +24,26 @@ export function useConversations(searchQuery?: string) {
     const myId = ++fetchIdRef.current;
     try {
       setLoading(true);
-      const data = await getConversations();
+      const trimmedQuery = query.trim();
+      const hasFilters = trimmedQuery || dateFrom || dateTo || videoId;
+
+      let data: Conversation[];
+      if (hasFilters) {
+        // Normalize dateTo to end-of-day UTC so conversations on the
+        // selected end date are included.
+        const apiDateTo = dateTo
+          ? new Date(`${dateTo}T23:59:59.999Z`).toISOString()
+          : undefined;
+        data = await searchConversations(
+          trimmedQuery || undefined,
+          dateFrom || undefined,
+          apiDateTo,
+          videoId || undefined,
+        );
+      } else {
+        data = await getConversations();
+      }
+
       if (myId === fetchIdRef.current) setConversations(data);
     } catch (e) {
       if (myId === fetchIdRef.current) {
@@ -22,7 +52,7 @@ export function useConversations(searchQuery?: string) {
     } finally {
       if (myId === fetchIdRef.current) setLoading(false);
     }
-  }, []);
+  }, [query, dateFrom, dateTo, videoId]);
 
   useEffect(() => {
     load();
@@ -43,12 +73,7 @@ export function useConversations(searchQuery?: string) {
 
   // Filter out conversations with zero messages (preview === null).
   // Keep conversations unfiltered for guard logic in Sidebar.tsx.
-  const withMessages = conversations.filter((c) => c.preview !== null);
-
-  const trimmed = (searchQuery ?? '').trim().toLowerCase();
-  const filteredConversations = trimmed
-    ? withMessages.filter((c) => c.title.toLowerCase().includes(trimmed))
-    : withMessages;
+  const filteredConversations = conversations.filter((c) => c.preview !== null);
 
   return {
     conversations,

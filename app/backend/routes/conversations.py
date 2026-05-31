@@ -6,6 +6,7 @@ belongs to another user returns 404, not 403 — don't leak existence.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -45,14 +46,21 @@ async def create_conversation(
 
 @router.get("/conversations/search")
 async def search_conversations(
-    q: str,
+    q: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    video_id: str | None = None,
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
-    """Title-contains search. Must be declared BEFORE /conversations/{conv_id}
-    or FastAPI routes "search" to the path-parameter handler and returns 404."""
-    return await repository.search_conversations_by_title(
+    """Filtered search by title, date range, and video. Must be declared BEFORE
+    /conversations/{conv_id} or FastAPI routes "search" to the path-parameter
+    handler and returns 404."""
+    return await repository.search_conversations(
         user_id=str(current_user["id"]),
         query=q,
+        date_from=date_from,
+        date_to=date_to,
+        video_id=video_id,
     )
 
 

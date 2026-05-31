@@ -3,7 +3,13 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useConversations } from '../hooks/useConversations';
 import { useToast } from '../hooks/useToast';
-import { type Conversation, createConversation, deleteConversation } from '../lib/api';
+import {
+  type Conversation,
+  type Video,
+  createConversation,
+  deleteConversation,
+  getVideos,
+} from '../lib/api';
 import { VideoExplorer } from './VideoExplorer';
 
 // ── Relative time helper ─────────────────────────────────────────
@@ -413,8 +419,12 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [videoId, setVideoId] = useState('');
+  const [videos, setVideos] = useState<Video[]>([]);
   const { conversations, loading, refetch, rename, filteredConversations } =
-    useConversations(debouncedQuery);
+    useConversations({ query: debouncedQuery, dateFrom, dateTo, videoId });
   const { user, logout } = useAuth();
   const [creatingNew, setCreatingNew] = useState(false);
   const [newChatError, setNewChatError] = useState<string | null>(null);
@@ -430,6 +440,13 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
     const timer = setTimeout(() => setDebouncedQuery(searchQuery), 250);
     return () => clearTimeout(timer);
   }, [searchQuery]);
+
+  // Load videos for the filter dropdown
+  useEffect(() => {
+    getVideos()
+      .then(setVideos)
+      .catch(() => {});
+  }, []);
 
   // Store refetch in the shared ref so ChatArea can trigger it
   useEffect(() => {
@@ -522,6 +539,16 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
     }
   };
 
+  const hasFilters = debouncedQuery.trim() || dateFrom || dateTo || videoId;
+
+  const clearFilters = () => {
+    setSearchQuery('');
+    setDebouncedQuery('');
+    setDateFrom('');
+    setDateTo('');
+    setVideoId('');
+  };
+
   return (
     <>
       <aside className={`sidebar-container${isOpen ? ' open' : ''}`}>
@@ -577,8 +604,8 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
           )}
         </div>
 
-        {/* ── Search conversations ── */}
-        <div style={{ padding: '0 12px 8px' }}>
+        {/* ── Search & filters ── */}
+        <div style={{ padding: '0 12px 8px', display: 'flex', flexDirection: 'column', gap: 8 }}>
           <input
             type="text"
             placeholder="Search conversations..."
@@ -599,6 +626,107 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
             onFocus={(e) => (e.currentTarget.style.borderColor = '#3b82f6')}
             onBlur={(e) => (e.currentTarget.style.borderColor = '#334155')}
           />
+
+          {/* Date range */}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              type="date"
+              aria-label="From date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+              style={{
+                flex: 1,
+                padding: '6px 8px',
+                borderRadius: 8,
+                background: '#1e293b',
+                border: '1px solid #334155',
+                color: '#f1f5f9',
+                fontSize: 12,
+                outline: 'none',
+                transition: 'border-color 0.15s',
+              }}
+              onFocus={(e) => (e.currentTarget.style.borderColor = '#3b82f6')}
+              onBlur={(e) => (e.currentTarget.style.borderColor = '#334155')}
+            />
+            <input
+              type="date"
+              aria-label="To date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+              style={{
+                flex: 1,
+                padding: '6px 8px',
+                borderRadius: 8,
+                background: '#1e293b',
+                border: '1px solid #334155',
+                color: '#f1f5f9',
+                fontSize: 12,
+                outline: 'none',
+                transition: 'border-color 0.15s',
+              }}
+              onFocus={(e) => (e.currentTarget.style.borderColor = '#3b82f6')}
+              onBlur={(e) => (e.currentTarget.style.borderColor = '#334155')}
+            />
+          </div>
+
+          {/* Video filter */}
+          <select
+            aria-label="Filter by video"
+            value={videoId}
+            onChange={(e) => setVideoId(e.target.value)}
+            className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+            style={{
+              width: '100%',
+              padding: '6px 8px',
+              borderRadius: 8,
+              background: '#1e293b',
+              border: '1px solid #334155',
+              color: '#f1f5f9',
+              fontSize: 12,
+              outline: 'none',
+              transition: 'border-color 0.15s',
+              cursor: 'pointer',
+            }}
+            onFocus={(e) => (e.currentTarget.style.borderColor = '#3b82f6')}
+            onBlur={(e) => (e.currentTarget.style.borderColor = '#334155')}
+          >
+            <option value="">All videos</option>
+            {videos.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.title}
+              </option>
+            ))}
+          </select>
+
+          {hasFilters && (
+            <button
+              onClick={clearFilters}
+              className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+              style={{
+                alignSelf: 'flex-start',
+                background: 'transparent',
+                border: '1px solid rgba(255,255,255,0.15)',
+                borderRadius: 6,
+                color: '#94a3b8',
+                cursor: 'pointer',
+                fontSize: 12,
+                padding: '4px 10px',
+                transition: 'color 0.15s, border-color 0.15s',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = '#f1f5f9';
+                e.currentTarget.style.borderColor = 'rgba(239,68,68,0.5)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = '#94a3b8';
+                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.15)';
+              }}
+            >
+              Clear filters
+            </button>
+          )}
         </div>
 
         {/* ── Conversation list ── */}
@@ -630,9 +758,9 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
               >
                 <path d="M6,4 L30,4 A2,2 0 0,1 32,6 L32,24 A2,2 0 0,1 30,26 L10,26 L4,32 L4,6 A2,2 0 0,1 6,4 Z" />
               </svg>
-              {debouncedQuery.trim() ? (
+              {hasFilters ? (
                 <p style={{ margin: 0, fontSize: 13 }}>
-                  No matches for <strong style={{ color: '#94a3b8' }}>"{debouncedQuery}"</strong>
+                  No matches for your filters
                 </p>
               ) : (
                 <>

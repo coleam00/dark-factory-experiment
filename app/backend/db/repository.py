@@ -503,26 +503,63 @@ async def delete_conversation(conv_id: str, user_id: str) -> bool:
         return result != "DELETE 0"  # type: ignore[no-any-return]
 
 
-async def search_conversations_by_title(user_id: str, query: str, limit: int = 20) -> list[dict]:
-    """Return conversations owned by user where title contains substring (case-insensitive).
+async def search_conversations(
+    user_id: str,
+    query: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    video_id: str | None = None,
+    limit: int = 20,
+) -> list[dict]:
+    """Return conversations owned by user, filtered by title, date range, and video.
 
-    Ported from the SQLite era: uses ILIKE in Postgres so the match is
-    case-insensitive in one step (no need to lower() both sides).
+    All filters are optional and compose with AND logic. Results ordered by
+    updated_at DESC.
     """
-    pattern = f"%{query}%"
-    async with _acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT id, title, created_at, updated_at
-            FROM conversations
-            WHERE user_id = $1 AND title ILIKE $2
-            ORDER BY updated_at DESC
-            LIMIT $3
-            """,
-            user_id,
-            pattern,
-            limit,
+    conditions = ["c.user_id = $1"]
+    params: list = [user_id]
+    param_idx = 2
+
+    if query is not None and query.strip():
+        conditions.append(f"c.title ILIKE ${param_idx}")
+        params.append(f"%{query}%")
+        param_idx += 1
+
+    if date_from is not None:
+        conditions.append(f"c.created_at >= ${param_idx}")
+        params.append(date_from)
+        param_idx += 1
+
+    if date_to is not None:
+        conditions.append(f"c.created_at <= ${param_idx}")
+        params.append(date_to)
+        param_idx += 1
+
+    if video_id is not None:
+        conditions.append(
+            f"EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.sources @> ${param_idx}::jsonb)"
         )
+        params.append(json.dumps([{"video_id": video_id}]))
+        param_idx += 1
+
+    params.append(limit)
+
+    where_clause = " AND ".join(conditions)
+    sql = f"""
+        SELECT c.*,
+               (SELECT content
+                FROM messages
+                WHERE conversation_id = c.id
+                ORDER BY created_at DESC
+                LIMIT 1) AS preview
+        FROM conversations c
+        WHERE {where_clause}
+        ORDER BY c.updated_at DESC
+        LIMIT ${param_idx}
+    """
+
+    async with _acquire() as conn:
+        rows = await conn.fetch(sql, *params)
     return [dict(r) for r in rows]
 
 

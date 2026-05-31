@@ -144,8 +144,19 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 // Conversations
 export const getConversations = () => request<Conversation[]>('/conversations');
-export const searchConversations = (q: string) =>
-  request<Conversation[]>(`/conversations/search?q=${encodeURIComponent(q)}`);
+export const searchConversations = (
+  q?: string,
+  dateFrom?: string,
+  dateTo?: string,
+  videoId?: string,
+) => {
+  const params = new URLSearchParams();
+  if (q) params.set('q', q);
+  if (dateFrom) params.set('date_from', dateFrom);
+  if (dateTo) params.set('date_to', dateTo);
+  if (videoId) params.set('video_id', videoId);
+  return request<Conversation[]>(`/conversations/search?${params.toString()}`);
+};
 export const createConversation = () =>
   request<Conversation>('/conversations', { method: 'POST', body: '{}' });
 export const getConversation = (id: string) =>
