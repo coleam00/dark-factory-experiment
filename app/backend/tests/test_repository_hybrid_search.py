@@ -60,6 +60,46 @@ class TestKeywordSearch:
         assert result[0]["id"] == "chunk1"
         assert result[0]["rank"] == 0.9
 
+    async def test_keyword_search_binds_language_into_both_tsquery_calls(self):
+        """Both plainto_tsquery calls carry the bound regconfig ($4), none are bare."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])
+
+        mock_acquire = AsyncMock()
+        mock_acquire.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_acquire.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(repository, "_acquire", return_value=mock_acquire):
+            await repository.keyword_search("hello world", top_k=5)
+
+        call_args = mock_conn.fetch.call_args
+        sql = call_args[0][0]
+
+        # The bound-regconfig form must appear in BOTH the ts_rank and WHERE clauses.
+        # Guards against fixing only the @@ clause and forgetting ts_rank (or vice-versa).
+        assert sql.count("plainto_tsquery($4::regconfig, $1)") == 2
+        # No bare plainto_tsquery($1) — that would fall back to the server GUC.
+        assert "plainto_tsquery($1)" not in sql
+
+    async def test_keyword_search_passes_language_arg(self):
+        """language is bound as the 4th positional arg, defaulting to 'english'."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])
+
+        mock_acquire = AsyncMock()
+        mock_acquire.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_acquire.__aexit__ = AsyncMock(return_value=None)
+
+        # Default language
+        with patch.object(repository, "_acquire", return_value=mock_acquire):
+            await repository.keyword_search("hello world", top_k=5)
+        assert mock_conn.fetch.call_args[0][4] == "english"
+
+        # Explicit non-default language is honored, not hardcoded
+        with patch.object(repository, "_acquire", return_value=mock_acquire):
+            await repository.keyword_search("hello world", top_k=5, language="simple")
+        assert mock_conn.fetch.call_args[0][4] == "simple"
+
     async def test_keyword_search_returns_empty_list_when_no_matches(self):
         """keyword_search returns empty list when DB returns no rows."""
         mock_conn = AsyncMock()
