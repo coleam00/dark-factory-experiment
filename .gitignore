@@ -47,6 +47,10 @@ app/screenshots/test-*
 .pi-loop.json.lock
 *.lock.json
 
+# Claude Code / Archon scheduled-task lock — written by the harness during a
+# session; transient and must never be committed.
+.claude/scheduled_tasks.lock
+
 # Local benchmark logs + scratch issue bodies (never part of a PR)
 .benchmark-logs/
 
