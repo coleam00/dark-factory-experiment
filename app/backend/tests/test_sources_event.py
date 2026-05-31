@@ -1152,3 +1152,280 @@ class TestChunkExpansionIntegration:
         assert "hello world snippet" in output
         assert "Test Video" in output
         assert "data: [DONE]" in output
+
+
+class TestSourcesPersistMatchesLive:
+    """Regression tests for issue #277 — whatever sources are persisted with an
+    assistant message must match exactly what was emitted live in the
+    ``event: sources`` SSE, regardless of whether the answer completed cleanly
+    or was interrupted/errored mid-stream.
+
+    The root-cause fix routes both the live emission and the persisted value
+    through a single ``persisted_sources`` variable in ``event_generator``, so
+    the two can never diverge (the finally block no longer re-derives sources
+    or re-runs the refusal check independently).
+    """
+
+    async def test_interrupted_stream_persists_no_sources_matching_live(self) -> None:
+        """An interrupted/errored stream (one that never yields ``[DONE]``) must
+        persist ``sources=None`` — matching the live view, which showed no
+        source chips because the [DONE] branch that builds and emits them never
+        ran. Before the fix the finally block could independently re-derive a
+        different, longer, duplicate-laden list.
+        """
+        import json
+        from unittest.mock import AsyncMock, patch
+        from uuid import uuid4
+
+        from httpx import ASGITransport, AsyncClient
+
+        from backend.auth.tokens import encode_token
+        from backend.main import app
+
+        partial_chunk = f"data: {json.dumps('Here is a partial ')}\n\n"
+        # Upstream hiccup: stream_chat yields an error payload and exhausts
+        # WITHOUT ever yielding [DONE]. The [DONE] branch (which dedups,
+        # collapses, and emits the sources event) never executes.
+        error_chunk = 'data: {"error": "upstream hiccup"}\n\n'
+
+        # The executor returns multiple chunks from the SAME video — exactly the
+        # would-be duplicate chips a re-derivation bug would have persisted.
+        tool_chunks = [
+            {
+                "chunk_id": "c1",
+                "video_id": "v1",
+                "video_title": "Test Video",
+                "video_url": "https://youtube.com/watch?v=abc",
+                "start_seconds": 10.0,
+                "end_seconds": 20.0,
+                "snippet": "snippet one",
+            },
+            {
+                "chunk_id": "c2",
+                "video_id": "v1",
+                "video_title": "Test Video",
+                "video_url": "https://youtube.com/watch?v=abc",
+                "start_seconds": 30.0,
+                "end_seconds": 40.0,
+                "snippet": "snippet two",
+            },
+        ]
+
+        async def mock_stream_chat(
+            messages,
+            tools=None,
+            tool_executor=None,
+            max_tool_calls=0,
+            final_text_out=None,
+            **_kwargs,
+        ):
+            if tool_executor is not None:
+                await tool_executor("search_videos", json.dumps({"query": "test"}))
+            yield partial_chunk
+            # Interrupted: error payload, NO [DONE], no final_text_out append.
+            yield error_chunk
+
+        async def mock_execute_tool(
+            name, raw_args, video_id_whitelist=None, embedding_cache=None, is_member=False
+        ):
+            return {"ok": True, "text": "context", "chunks": tool_chunks}
+
+        test_user_id = str(uuid4())
+        test_conv_id = str(uuid4())
+        valid_token = encode_token(test_user_id)
+
+        async def mock_get_user_by_id(user_id):
+            return {
+                "id": test_user_id,
+                "email": "test@example.com",
+                "password_hash": "hashed",
+                "created_at": "2026-01-01T00:00:00Z",
+            }
+
+        async def mock_get_conversation(conv_id, user_id):
+            return {
+                "id": test_conv_id,
+                "user_id": test_user_id,
+                "title": "Test",
+                "created_at": "2026-01-01T00:00:00Z",
+            }
+
+        mock_create = AsyncMock(side_effect=[{"id": str(uuid4())}, {"id": str(uuid4())}])
+
+        async def mock_list_messages(conv_id, user_id):
+            return []
+
+        async def mock_list_videos():
+            return [{"id": "v1", "title": "Test Video", "url": "https://youtube.com/watch?v=abc"}]
+
+        with (
+            patch("backend.auth.dependencies.users_repo.get_user_by_id", mock_get_user_by_id),
+            patch("backend.db.repository.get_conversation", mock_get_conversation),
+            patch("backend.db.repository.create_message", mock_create),
+            patch("backend.db.repository.list_messages", mock_list_messages),
+            patch("backend.db.repository.list_videos", mock_list_videos),
+            patch("backend.routes.messages.stream_chat", mock_stream_chat),
+            patch("backend.routes.messages.execute_tool", mock_execute_tool),
+        ):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                response = await client.post(
+                    f"/api/conversations/{test_conv_id}/messages",
+                    json={"content": "tell me something"},
+                    headers={"Cookie": f"session={valid_token}"},
+                )
+
+        output = response.text
+        # The user saw no source chips live (the stream never emitted them).
+        assert "event: sources" not in output, (
+            f"Expected no 'event: sources' for an interrupted stream, got: {output}"
+        )
+        # The persisted assistant row must therefore also carry no sources — not
+        # the uncollapsed, duplicate-laden list a re-derivation bug would save.
+        assert mock_create.call_count == 2, f"expected 2 calls, got {mock_create.call_count}"
+        assistant_kwargs = mock_create.call_args_list[1].kwargs
+        assert assistant_kwargs["role"] == "assistant"
+        assert assistant_kwargs["sources"] is None, (
+            f"interrupted stream should persist sources=None (matching the live "
+            f"view); got {assistant_kwargs['sources']!r}"
+        )
+
+    async def test_completed_stream_persisted_sources_equal_emitted(self) -> None:
+        """A cleanly-completed multi-chunk answer must persist exactly the
+        sources it emitted live — deduplicated and collapsed the same way (one
+        chip per video, no duplicate chunk_ids)."""
+        import json
+        from unittest.mock import AsyncMock, patch
+        from uuid import uuid4
+
+        from httpx import ASGITransport, AsyncClient
+
+        from backend.auth.tokens import encode_token
+        from backend.main import app
+
+        answer_chunk = f"data: {json.dumps('The video explains it.')}\n\n"
+        done_chunk = "data: [DONE]\n\n"
+
+        # Two chunks from the same video (v1) plus one from a second video (v2).
+        # Finalization collapses v1's two chunks into a single chip.
+        tool_chunks = [
+            {
+                "chunk_id": "c1",
+                "video_id": "v1",
+                "video_title": "Video One",
+                "video_url": "https://youtube.com/watch?v=abc",
+                "start_seconds": 10.0,
+                "end_seconds": 20.0,
+                "snippet": "snippet one",
+            },
+            {
+                "chunk_id": "c2",
+                "video_id": "v1",
+                "video_title": "Video One",
+                "video_url": "https://youtube.com/watch?v=abc",
+                "start_seconds": 30.0,
+                "end_seconds": 40.0,
+                "snippet": "snippet two",
+            },
+            {
+                "chunk_id": "c3",
+                "video_id": "v2",
+                "video_title": "Video Two",
+                "video_url": "https://youtube.com/watch?v=def",
+                "start_seconds": 5.0,
+                "end_seconds": 15.0,
+                "snippet": "snippet three",
+            },
+        ]
+
+        async def mock_stream_chat(
+            messages,
+            tools=None,
+            tool_executor=None,
+            max_tool_calls=0,
+            final_text_out=None,
+            **_kwargs,
+        ):
+            if tool_executor is not None:
+                await tool_executor("search_videos", json.dumps({"query": "test"}))
+            yield answer_chunk
+            if final_text_out is not None:
+                final_text_out.append("The video explains it.")
+            yield done_chunk
+
+        async def mock_execute_tool(
+            name, raw_args, video_id_whitelist=None, embedding_cache=None, is_member=False
+        ):
+            return {"ok": True, "text": "context", "chunks": tool_chunks}
+
+        test_user_id = str(uuid4())
+        test_conv_id = str(uuid4())
+        valid_token = encode_token(test_user_id)
+
+        async def mock_get_user_by_id(user_id):
+            return {
+                "id": test_user_id,
+                "email": "test@example.com",
+                "password_hash": "hashed",
+                "created_at": "2026-01-01T00:00:00Z",
+            }
+
+        async def mock_get_conversation(conv_id, user_id):
+            return {
+                "id": test_conv_id,
+                "user_id": test_user_id,
+                "title": "Test",
+                "created_at": "2026-01-01T00:00:00Z",
+            }
+
+        mock_create = AsyncMock(side_effect=[{"id": str(uuid4())}, {"id": str(uuid4())}])
+
+        async def mock_list_messages(conv_id, user_id):
+            return []
+
+        async def mock_list_videos():
+            return [
+                {"id": "v1", "title": "Video One", "url": "https://youtube.com/watch?v=abc"},
+                {"id": "v2", "title": "Video Two", "url": "https://youtube.com/watch?v=def"},
+            ]
+
+        with (
+            patch("backend.auth.dependencies.users_repo.get_user_by_id", mock_get_user_by_id),
+            patch("backend.db.repository.get_conversation", mock_get_conversation),
+            patch("backend.db.repository.create_message", mock_create),
+            patch("backend.db.repository.list_messages", mock_list_messages),
+            patch("backend.db.repository.list_videos", mock_list_videos),
+            patch("backend.routes.messages.stream_chat", mock_stream_chat),
+            patch("backend.routes.messages.execute_tool", mock_execute_tool),
+        ):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                response = await client.post(
+                    f"/api/conversations/{test_conv_id}/messages",
+                    json={"content": "question about video"},
+                    headers={"Cookie": f"session={valid_token}"},
+                )
+
+        output = response.text
+        # Extract the exact `event: sources` JSON payload the client received.
+        assert "event: sources" in output, f"expected a sources event, got: {output}"
+        after = output.split("event: sources\n", 1)[1]
+        data_line = after.split("\n", 1)[0]
+        assert data_line.startswith("data: ")
+        emitted = json.loads(data_line.removeprefix("data: "))
+
+        # The persisted assistant row must carry exactly what was emitted live.
+        assert mock_create.call_count == 2, f"expected 2 calls, got {mock_create.call_count}"
+        assistant_kwargs = mock_create.call_args_list[1].kwargs
+        assert assistant_kwargs["role"] == "assistant"
+        persisted = assistant_kwargs["sources"]
+        assert persisted == emitted, (
+            f"persisted sources must equal the live event verbatim; "
+            f"emitted={emitted!r} persisted={persisted!r}"
+        )
+        # And both must be collapsed/deduplicated: one chip per video_id, no
+        # duplicate chunk_ids.
+        video_ids = [s["video_id"] for s in persisted]
+        assert sorted(video_ids) == ["v1", "v2"], f"expected one chip per video, got {video_ids}"
+        chunk_ids = [s["chunk_id"] for s in persisted]
+        assert len(chunk_ids) == len(set(chunk_ids)), f"duplicate chunk_ids persisted: {chunk_ids}"

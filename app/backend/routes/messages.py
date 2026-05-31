@@ -171,6 +171,11 @@ async def create_message(
     async def event_generator() -> AsyncGenerator[str, None]:
         full_response: list[str] = []
         final_text_buf: list[str] = []
+        # The exact sources list emitted in the live `event: sources` SSE.
+        # Stays None unless we actually emit (refusal / empty / interrupted →
+        # None). The finally block persists THIS verbatim so the saved message
+        # always matches what streamed to the client (issue #277).
+        persisted_sources: list[dict] | None = None
         # Two-tier citations (issue #176): strip `[c:<id>]` markers from the
         # stream; use them at [DONE] to flag is_cited on retrieved chunks.
         marker_stripper = CitationMarkerStripper()
@@ -227,6 +232,7 @@ async def create_message(
                             else _extract_text_from_sse(full_response)
                         )
                         if not _is_refusal(final_text):
+                            persisted_sources = source_citations
                             sources_json = json.dumps(source_citations)
                             yield f"event: sources\ndata: {sources_json}\n\n"
                     full_response.append(sse_chunk)
@@ -256,22 +262,12 @@ async def create_message(
             # can exit cleanly.
             assistant_text = _extract_text_from_sse(full_response)
             if assistant_text:
-                # Apply the same refusal detection used for the live SSE
-                # `event: sources` suppression so reloading the conversation
-                # later doesn't bring the misleading chip back. Prefer the
-                # final-round text when available — it's what the SSE path
-                # checks — and fall back to the full reconstructed text if
-                # the final_text buffer wasn't populated (e.g. pre-tool
-                # flow). If the message is a refusal we persist sources=None
-                # regardless of what the tool calls retrieved; the frontend
-                # renders the chip based on the stored field, so dropping
-                # it here keeps the reload UX consistent with the stream.
-                refusal_check_text = final_text_buf[0] if final_text_buf else assistant_text
-                sources_to_persist: list[dict] | None = (
-                    None
-                    if not source_citations or _is_refusal(refusal_check_text)
-                    else source_citations
-                )
+                # Persist exactly the sources that were emitted live (issue #277).
+                # `persisted_sources` is None when nothing was emitted: refusal,
+                # no chunks, or an interrupted stream that never reached [DONE].
+                # Persisting this verbatim — no second refusal check, no
+                # re-derivation — keeps reload identical to the live view.
+                sources_to_persist: list[dict] | None = persisted_sources
                 try:
                     await asyncio.shield(
                         repository.create_message(
