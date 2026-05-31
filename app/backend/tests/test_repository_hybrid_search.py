@@ -14,7 +14,7 @@ class TestKeywordSearch:
     """Tests for keyword_search() SQL execution."""
 
     async def test_keyword_search_calls_fetch_with_correct_params(self):
-        """keyword_search passes query and top_k as $1, $2 to the SQL query."""
+        """keyword_search passes query, top_k, allowed_source_types, language to SQL."""
         mock_conn = AsyncMock()
         # Return plain dicts (asyncpg rows are dict-like)
         mock_conn.fetch = AsyncMock(
@@ -42,23 +42,44 @@ class TestKeywordSearch:
         mock_conn.fetch.assert_called_once()
         call_args = mock_conn.fetch.call_args
 
-        # Verify SQL contains plainto_tsquery and ts_rank
+        # Verify SQL contains plainto_tsquery and ts_rank with regconfig binding
         sql = call_args[0][0]
-        assert "plainto_tsquery" in sql
         assert "ts_rank" in sql
         assert "search_vector" in sql
         assert "@@" in sql  # tsvector match operator
+        # Both plainto_tsquery call sites must bind $4::regconfig
+        assert sql.count("plainto_tsquery($4::regconfig, $1)") == 2
 
-        # Verify positional args: query string and top_k
+        # Verify positional args: (sql, query, top_k, allowed_source_types, language)
         args = call_args[0]
-        # args is (sql_string, query_string, top_k_int)
         assert args[1] == "hello world"
         assert args[2] == 5
+        assert args[3] == ["youtube"]
+        assert args[4] == "english"
 
         # Verify result shape
         assert len(result) == 1
         assert result[0]["id"] == "chunk1"
         assert result[0]["rank"] == 0.9
+
+    async def test_keyword_search_uses_custom_language(self):
+        """keyword_search passes a non-default language as the regconfig parameter."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])
+
+        mock_acquire = AsyncMock()
+        mock_acquire.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_acquire.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(repository, "_acquire", return_value=mock_acquire):
+            await repository.keyword_search("hello world", top_k=5, language="simple")
+
+        call_args = mock_conn.fetch.call_args
+        sql = call_args[0][0]
+        args = call_args[0]
+
+        assert args[4] == "simple"
+        assert "plainto_tsquery($4::regconfig, $1)" in sql
 
     async def test_keyword_search_returns_empty_list_when_no_matches(self):
         """keyword_search returns empty list when DB returns no rows."""
