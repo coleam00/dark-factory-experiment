@@ -93,6 +93,24 @@ class TestKeywordSearch:
         args = call_args[0]
         assert args[2] == 3
 
+    async def test_keyword_search_with_allowed_video_ids(self):
+        """keyword_search appends video_id = ANY($4::text[]) when allowed_video_ids is provided."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])
+
+        mock_acquire = AsyncMock()
+        mock_acquire.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_acquire.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(repository, "_acquire", return_value=mock_acquire):
+            await repository.keyword_search("hello", top_k=5, allowed_video_ids=["v1", "v2"])
+
+        call_args = mock_conn.fetch.call_args
+        sql = call_args[0][0]
+        assert "video_id = ANY($4::text[])" in sql
+        args = call_args[0]
+        assert args[4] == ["v1", "v2"]
+
 
 class TestVectorSearchPg:
     """Tests for vector_search_pg() SQL execution."""
@@ -191,3 +209,21 @@ class TestVectorSearchPg:
 
         parsed = json.loads(args[1])
         assert parsed == embedding
+
+    async def test_vector_search_with_allowed_video_ids(self):
+        """vector_search_pg appends video_id = ANY($4::text[]) when allowed_video_ids is provided."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])
+
+        mock_acquire = AsyncMock()
+        mock_acquire.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_acquire.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(repository, "_acquire", return_value=mock_acquire):
+            await repository.vector_search_pg([0.1] * 1536, top_k=5, allowed_video_ids=["v1"])
+
+        call_args = mock_conn.fetch.call_args
+        sql = call_args[0][0]
+        assert "video_id = ANY($4::text[])" in sql
+        args = call_args[0]
+        assert args[4] == ["v1"]

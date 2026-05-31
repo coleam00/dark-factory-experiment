@@ -4,8 +4,8 @@ import { useAuth } from '../hooks/useAuth';
 import { useMessages } from '../hooks/useMessages';
 import { useStreamingResponse } from '../hooks/useStreamingResponse';
 import { useToast } from '../hooks/useToast';
-import type { Citation, Message as MessageType } from '../lib/api';
-import { RateLimitError, createConversation } from '../lib/api';
+import type { Citation, Message as MessageType, Video } from '../lib/api';
+import { RateLimitError, createConversation, getVideos } from '../lib/api';
 import { exportConversationAsMarkdown } from '../lib/exportMarkdown';
 import { ChatInput, type ChatInputHandle } from './ChatInput';
 import { CitationModal } from './CitationModal';
@@ -58,9 +58,11 @@ function SkeletonMessages() {
 // ── Empty / landing state ─────────────────────────────────────────
 interface EmptyStateProps {
   onStarterClick: (text: string) => void;
+  onScopeClick?: () => void;
+  scopedCount?: number;
 }
 
-function EmptyState({ onStarterClick }: EmptyStateProps) {
+function EmptyState({ onStarterClick, onScopeClick, scopedCount = 0 }: EmptyStateProps) {
   const starters = [
     'How do I use subagents in Claude Code?',
     'How should I structure an agent team?',
@@ -131,6 +133,159 @@ function EmptyState({ onStarterClick }: EmptyStateProps) {
             {q}
           </button>
         ))}
+      </div>
+      {onScopeClick && (
+        <div style={{ marginTop: 24 }}>
+          <button
+            onClick={onScopeClick}
+            style={{
+              padding: '8px 14px',
+              background: '#1e293b',
+              borderRadius: 8,
+              border: '1px solid rgba(255,255,255,0.08)',
+              color: '#94a3b8',
+              fontSize: 13,
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+            }}
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            >
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            {scopedCount > 0
+              ? `Scoped to ${scopedCount} video${scopedCount > 1 ? 's' : ''}`
+              : 'Scope to specific videos'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Scope picker modal ──────────────────────────────────────────
+interface ScopePickerProps {
+  videos: Video[];
+  selected: string[];
+  onToggle: (id: string) => void;
+  onClear: () => void;
+  onClose: () => void;
+}
+
+function ScopePickerModal({ videos, selected, onToggle, onClear, onClose }: ScopePickerProps) {
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0,0,0,0.5)',
+        zIndex: 50,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: '#1e293b',
+          border: '1px solid rgba(255,255,255,0.1)',
+          borderRadius: 12,
+          width: 420,
+          maxWidth: '90vw',
+          maxHeight: '70vh',
+          display: 'flex',
+          flexDirection: 'column',
+          padding: 20,
+        }}
+      >
+        <h3 style={{ margin: '0 0 12px', fontSize: 16, color: '#f1f5f9' }}>Select videos</h3>
+        <div
+          style={{
+            flex: 1,
+            overflowY: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
+          }}
+        >
+          {videos.length === 0 && (
+            <p style={{ color: '#94a3b8', fontSize: 13, textAlign: 'center' }}>Loading videos…</p>
+          )}
+          {videos.map((v) => (
+            <label
+              key={v.id}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: '8px 10px',
+                borderRadius: 8,
+                cursor: 'pointer',
+                background: selected.includes(v.id) ? 'rgba(59,130,246,0.15)' : 'transparent',
+                border:
+                  '1px solid ' +
+                  (selected.includes(v.id) ? 'rgba(59,130,246,0.3)' : 'rgba(255,255,255,0.06)'),
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={selected.includes(v.id)}
+                onChange={() => onToggle(v.id)}
+                style={{ accentColor: '#3b82f6' }}
+              />
+              <span style={{ fontSize: 13, color: '#e2e8f0' }}>{v.title}</span>
+            </label>
+          ))}
+        </div>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginTop: 12,
+          }}
+        >
+          <button
+            onClick={onClear}
+            style={{
+              padding: '6px 14px',
+              borderRadius: 6,
+              border: '1px solid rgba(255,255,255,0.1)',
+              background: 'transparent',
+              color: '#94a3b8',
+              cursor: 'pointer',
+              fontSize: 13,
+            }}
+          >
+            Clear all
+          </button>
+          <button
+            onClick={onClose}
+            style={{
+              padding: '6px 14px',
+              borderRadius: 6,
+              border: 'none',
+              background: '#3b82f6',
+              color: '#fff',
+              cursor: 'pointer',
+              fontSize: 13,
+            }}
+          >
+            Done
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -312,6 +467,33 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
   const messagesWrapperRef = useRef<HTMLDivElement>(null);
   const autoScrollRef = useRef(true);
 
+  // Scope picker state
+  const [videos, setVideos] = useState<Video[]>([]);
+  const [scopePickerOpen, setScopePickerOpen] = useState(false);
+  const [scopedVideoIds, setScopedVideoIds] = useState<string[]>([]);
+
+  const openScopePicker = useCallback(async () => {
+    setScopePickerOpen(true);
+    if (videos.length === 0) {
+      try {
+        const data = await getVideos();
+        setVideos(data);
+      } catch (e) {
+        addToast('Failed to load videos', 'error');
+      }
+    }
+  }, [videos.length, addToast]);
+
+  const toggleVideoScope = useCallback((id: string) => {
+    setScopedVideoIds((prev) =>
+      prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id]
+    );
+  }, []);
+
+  const clearScopedVideos = useCallback(() => {
+    setScopedVideoIds([]);
+  }, []);
+
   // Reset auto-scroll intent when switching conversations so the new
   // conversation starts pinned to the bottom.
   useEffect(() => {
@@ -459,7 +641,9 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
       if (!conversationId) {
         if (isStreaming) return;
         try {
-          const conv = await createConversation();
+          const conv = await createConversation(
+            scopedVideoIds.length > 0 ? scopedVideoIds : undefined
+          );
           navigate(`/c/${conv.id}`, {
             state: { initialMessage: content } satisfies ConvLocationState,
           });
@@ -556,6 +740,7 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
       addToast,
       refreshAuth,
       refreshConversationsRef,
+      scopedVideoIds,
     ],
   );
 
@@ -687,7 +872,49 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
           </button>
         )}
 
-        {showEmpty && <EmptyState onStarterClick={handleStarterClick} />}
+        {/* ── Scoped indicator (read-only when scope is set) ── */}
+        {conversation?.scoped_video_ids && conversation.scoped_video_ids.length > 0 && (
+          <div
+            style={{
+              position: 'absolute',
+              top: 12,
+              left: 24,
+              zIndex: 5,
+              background: '#1e293b',
+              border: '1px solid rgba(255,255,255,0.08)',
+              borderRadius: 7,
+              padding: '5px 10px',
+              color: '#94a3b8',
+              fontSize: 12,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+            }}
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            >
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            Scoped to {conversation.scoped_video_ids.length} video
+            {conversation.scoped_video_ids.length > 1 ? 's' : ''}
+          </div>
+        )}
+
+        {showEmpty && (
+          <EmptyState
+            onStarterClick={handleStarterClick}
+            onScopeClick={openScopePicker}
+            scopedCount={scopedVideoIds.length}
+          />
+        )}
 
         {showSkeleton && <SkeletonMessages />}
 
@@ -774,6 +1001,17 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
           onStop={abortStream}
         />
       </div>
+
+      {/* ── Scope picker modal ── */}
+      {scopePickerOpen && (
+        <ScopePickerModal
+          videos={videos}
+          selected={scopedVideoIds}
+          onToggle={toggleVideoScope}
+          onClear={clearScopedVideos}
+          onClose={() => setScopePickerOpen(false)}
+        />
+      )}
 
       {/* ── Citation modal ── */}
       {selectedCitation && (

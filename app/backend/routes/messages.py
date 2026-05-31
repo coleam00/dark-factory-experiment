@@ -129,15 +129,19 @@ async def create_message(
     executor = None
     max_tool_calls = 0
     if LLM_TOOLS_ENABLED:
-        try:
-            all_videos = await repository.list_videos()
-            video_id_whitelist: set[str] = {v["id"] for v in all_videos if v.get("id")}
-        except Exception as exc:
-            logger.warning(
-                "Failed to load video whitelist for tool use; transcript tool calls will be unguarded: %s",
-                exc,
-            )
-            video_id_whitelist = set()
+        scoped = conv.get("scoped_video_ids")
+        if scoped:
+            video_id_whitelist: set[str] = set(scoped)
+        else:
+            try:
+                all_videos = await repository.list_videos()
+                video_id_whitelist = {v["id"] for v in all_videos if v.get("id")}
+            except Exception as exc:
+                logger.warning(
+                    "Failed to load video whitelist for tool use; transcript tool calls will be unguarded: %s",
+                    exc,
+                )
+                video_id_whitelist = set()
 
         # Captured at the start of the turn so the entire tool sequence sees
         # consistent ACL — even if /me later flips is_member, the in-flight

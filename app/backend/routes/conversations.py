@@ -19,6 +19,7 @@ router = APIRouter()
 
 class ConversationCreate(BaseModel):
     title: str = "New Conversation"
+    scoped_video_ids: list[str] | None = None
 
 
 class ConversationRename(BaseModel):
@@ -37,9 +38,11 @@ async def create_conversation(
 ):
     """Create a new empty conversation. Body is optional; defaults to title='New Conversation'."""
     title = body.title if body else "New Conversation"
+    scoped_video_ids = body.scoped_video_ids if body else None
     return await repository.create_conversation(
         user_id=str(current_user["id"]),
         title=title,
+        scoped_video_ids=scoped_video_ids,
     )
 
 
