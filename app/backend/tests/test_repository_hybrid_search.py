@@ -49,16 +49,44 @@ class TestKeywordSearch:
         assert "search_vector" in sql
         assert "@@" in sql  # tsvector match operator
 
+        # Both plainto_tsquery calls must carry the regconfig parameter so
+        # query-side tokenization matches the index-side to_tsvector('english').
+        assert sql.count("plainto_tsquery") == 2
+        assert sql.count("plainto_tsquery($4::regconfig, $1)") == 2
+
         # Verify positional args: query string and top_k
         args = call_args[0]
-        # args is (sql_string, query_string, top_k_int)
+        # args is (sql, query, top_k, allowed_source_types, language)
         assert args[1] == "hello world"
         assert args[2] == 5
+        # language binds to $4 with its default value
+        assert args[4] == "english"
 
         # Verify result shape
         assert len(result) == 1
         assert result[0]["id"] == "chunk1"
         assert result[0]["rank"] == 0.9
+
+    async def test_keyword_search_passes_language_to_both_tsquery_calls(self):
+        """A non-default language binds to $4 and reaches both plainto_tsquery calls."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])
+
+        mock_acquire = AsyncMock()
+        mock_acquire.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_acquire.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(repository, "_acquire", return_value=mock_acquire):
+            await repository.keyword_search("test", top_k=5, language="simple")
+
+        call_args = mock_conn.fetch.call_args
+        sql = call_args[0][0]
+        # Guard against the partial fix: ts_rank AND WHERE must both get the regconfig.
+        assert sql.count("plainto_tsquery") == 2
+        assert sql.count("plainto_tsquery($4::regconfig, $1)") == 2
+
+        args = call_args[0]
+        assert args[4] == "simple"
 
     async def test_keyword_search_returns_empty_list_when_no_matches(self):
         """keyword_search returns empty list when DB returns no rows."""
