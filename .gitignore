@@ -45,3 +45,7 @@ app/screenshots/test-*
 # (`reverse_proxy app-blue:8000`) when the file is absent; the
 # upstream.conf.example next to it is the human-readable reference shape.
 deploy/upstream.conf
+
+# Process lock files
+*.lock.json
+.pi-loop.json.lock
