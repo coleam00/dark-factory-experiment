@@ -78,7 +78,8 @@ export function useConversations(
     filtered = filtered.filter((c) => new Date(c.updated_at) <= to);
   }
   if (filters?.videoId) {
-    filtered = filtered.filter((c) => c.video_ids?.includes(filters.videoId));
+    const videoId = filters.videoId;
+    filtered = filtered.filter((c) => c.video_ids?.includes(videoId));
   }
 
   const filteredConversations = filtered;
