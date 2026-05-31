@@ -122,7 +122,6 @@ async def create_message(
     # lists exactly what the model actually read. The video_id whitelist is
     # only consulted by the transcript tool (it guards against hallucinated
     # ids); the search tools ignore it.
-    source_citations: list[dict] = []
     tool_chunks_acc: list[dict] = []
     embedding_cache: dict[str, list[float]] = {}
     tools_param: list[dict] | None = None
@@ -171,6 +170,13 @@ async def create_message(
     async def event_generator() -> AsyncGenerator[str, None]:
         full_response: list[str] = []
         final_text_buf: list[str] = []
+        # The finalized citation list we both stream live and persist. It is
+        # decided once, at the single finalize/emit point in the [DONE] block,
+        # and captured BEFORE the yield that can raise CancelledError on a
+        # client disconnect — so the saved sources always equal what the user
+        # saw, deduplicated and finalized identically, whether the answer
+        # completed cleanly or was interrupted mid-stream (issue #277).
+        sources_to_persist: list[dict] | None = None
         # Two-tier citations (issue #176): strip `[c:<id>]` markers from the
         # stream; use them at [DONE] to flag is_cited on retrieved chunks.
         marker_stripper = CitationMarkerStripper()
@@ -195,40 +201,23 @@ async def create_message(
                         tail_chunk = f"data: {json.dumps(tail)}\n\n"
                         full_response.append(tail_chunk)
                         yield tail_chunk
-                    # Dedup tool-loaded chunks into source_citations (existing).
-                    if tool_chunks_acc:
-                        seen: set[str] = set()
-                        for tc in tool_chunks_acc:
-                            tc_id = tc.get("chunk_id")
-                            if tc_id and tc_id not in seen:
-                                source_citations.append(tc)
-                                seen.add(tc_id)
-                    # Mark is_cited from markers in the raw final-round text.
-                    # Marker IDs that don't match any retrieved chunk are
-                    # silently dropped (hallucinations).
-                    if source_citations:
-                        final_text_raw = final_text_buf[0] if final_text_buf else ""
-                        cited_ids = extract_cited_chunk_ids(final_text_raw)
-                        for chunk in source_citations:
-                            chunk["is_cited"] = chunk.get("chunk_id") in cited_ids
-                        # Collapse same-video chunks (issue #208): keep one
-                        # entry per video_id, choosing the earliest-cited
-                        # timestamp as the representative.
-                        source_citations[:] = _collapse_by_video(source_citations)
-                        # Cap fallback (issue #176): cited pass through, non-cited sliced.
-                        cited = [c for c in source_citations if c.get("is_cited")]
-                        uncited = [c for c in source_citations if not c.get("is_cited")]
-                        source_citations[:] = cited + uncited[:CITATIONS_MAX_COUNT]
-                    # Suppress sources on refusal (existing behaviour).
-                    if source_citations:
-                        final_text = (
-                            final_text_buf[0]
-                            if final_text_buf
-                            else _extract_text_from_sse(full_response)
-                        )
-                        if not _is_refusal(final_text):
-                            sources_json = json.dumps(source_citations)
-                            yield f"event: sources\ndata: {sources_json}\n\n"
+                    # Finalize the citation list ONCE — dedup, is_cited, collapse
+                    # per video, cap — using the shared helper that the persist
+                    # path also relies on, so the two can never disagree.
+                    final_text = (
+                        final_text_buf[0]
+                        if final_text_buf
+                        else _extract_text_from_sse(full_response)
+                    )
+                    finalized = _finalize_source_citations(tool_chunks_acc, final_text)
+                    # Suppress sources on refusal (existing behaviour). Capture
+                    # the persist decision HERE, before the yield below that can
+                    # raise CancelledError on client disconnect, so the saved
+                    # sources are exactly the finalized set we chose to show.
+                    if finalized and not _is_refusal(final_text):
+                        sources_to_persist = finalized
+                        sources_json = json.dumps(finalized)
+                        yield f"event: sources\ndata: {sources_json}\n\n"
                     full_response.append(sse_chunk)
                     yield sse_chunk
                     continue
@@ -256,22 +245,13 @@ async def create_message(
             # can exit cleanly.
             assistant_text = _extract_text_from_sse(full_response)
             if assistant_text:
-                # Apply the same refusal detection used for the live SSE
-                # `event: sources` suppression so reloading the conversation
-                # later doesn't bring the misleading chip back. Prefer the
-                # final-round text when available — it's what the SSE path
-                # checks — and fall back to the full reconstructed text if
-                # the final_text buffer wasn't populated (e.g. pre-tool
-                # flow). If the message is a refusal we persist sources=None
-                # regardless of what the tool calls retrieved; the frontend
-                # renders the chip based on the stored field, so dropping
-                # it here keeps the reload UX consistent with the stream.
-                refusal_check_text = final_text_buf[0] if final_text_buf else assistant_text
-                sources_to_persist: list[dict] | None = (
-                    None
-                    if not source_citations or _is_refusal(refusal_check_text)
-                    else source_citations
-                )
+                # ``sources_to_persist`` was decided at the single finalize/emit
+                # point in the [DONE] block above (None unless we chose to
+                # stream a sources event). Persisting it verbatim — rather than
+                # re-deriving from the raw tool chunks here — guarantees the
+                # saved sources match what the user saw, deduplicated and
+                # refusal-suppressed identically, whether the answer completed
+                # cleanly or was interrupted before [DONE] (issue #277).
                 try:
                     await asyncio.shield(
                         repository.create_message(
@@ -464,6 +444,48 @@ async def _maybe_set_conversation_title(
         else:
             title = first_user_message.strip()
         await repository.update_conversation_title(conv_id, user_id=user_id, title=title)
+
+
+def _finalize_source_citations(
+    tool_chunks: list[dict[str, Any]], final_text: str
+) -> list[dict[str, Any]]:
+    """Turn the raw chunks a turn's tool calls returned into the final,
+    ordered citation list.
+
+    This is the single source of truth for source finalization. Both the live
+    SSE ``event: sources`` emission and the persisted ``sources`` column are
+    derived from its result, so the reload view can never disagree with what
+    streamed — including when the answer is interrupted or errors mid-stream
+    (issue #277).
+
+    Steps, in order:
+      1. Deduplicate by ``chunk_id`` (chunks without one are dropped).
+      2. Flag ``is_cited`` from ``[c:<id>]`` markers in the final-round text;
+         marker ids matching no retrieved chunk are silently ignored.
+      3. Collapse to one entry per ``video_id`` (issue #208).
+      4. Cap the non-cited tail at ``CITATIONS_MAX_COUNT`` (issue #176); cited
+         entries always pass through.
+
+    Returns an empty list when no chunk carries a ``chunk_id``.
+    """
+    deduped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for tc in tool_chunks:
+        tc_id = tc.get("chunk_id")
+        if tc_id and tc_id not in seen:
+            deduped.append(tc)
+            seen.add(tc_id)
+    if not deduped:
+        return []
+
+    cited_ids = extract_cited_chunk_ids(final_text)
+    for chunk in deduped:
+        chunk["is_cited"] = chunk.get("chunk_id") in cited_ids
+
+    collapsed = _collapse_by_video(deduped)
+    cited = [c for c in collapsed if c.get("is_cited")]
+    uncited = [c for c in collapsed if not c.get("is_cited")]
+    return cited + uncited[:CITATIONS_MAX_COUNT]
 
 
 def _collapse_by_video(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
