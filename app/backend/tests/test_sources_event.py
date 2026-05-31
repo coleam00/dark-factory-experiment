@@ -652,6 +652,94 @@ class TestRefusalSourcesSuppressionNegative:
         assert _is_refusal(text) is False
 
 
+class TestCollapseByVideo:
+    """Tests for _collapse_by_video, the same-video citation collapsing step.
+
+    Cited chunks cluster by video_id AND time proximity so two distinct
+    moments from the same video each get their own chip with the correct
+    timestamp (issue #276), while adjacent chunks still merge so the
+    anti-clutter behaviour from issue #208 is preserved.
+    """
+
+    @staticmethod
+    def _chunk(chunk_id: str, video_id: str, start_seconds: float, *, is_cited: bool) -> dict:
+        return {
+            "chunk_id": chunk_id,
+            "video_id": video_id,
+            "video_title": "Test Video",
+            "video_url": "https://youtube.com/watch?v=abc",
+            "start_seconds": start_seconds,
+            "end_seconds": start_seconds + 10.0,
+            "snippet": f"snippet at {start_seconds}",
+            "is_cited": is_cited,
+        }
+
+    def test_two_distinct_cited_moments_same_video(self) -> None:
+        """Two cited chunks 5 minutes apart in one video produce two chips
+        with their own correct timestamps (regression test for issue #276)."""
+        from backend.routes.messages import _collapse_by_video
+
+        chunks = [
+            self._chunk("c1", "vid1", 0.0, is_cited=True),
+            self._chunk("c2", "vid1", 300.0, is_cited=True),
+        ]
+        result = _collapse_by_video(chunks)
+
+        assert len(result) == 2
+        starts = sorted(entry["start_seconds"] for entry in result)
+        assert starts == [0.0, 300.0]
+        # Both chips are cited and each spans exactly one chunk.
+        assert all(entry["is_cited"] for entry in result)
+        assert all(entry["segment_count"] == 1 for entry in result)
+
+    def test_adjacent_cited_chunks_same_video_still_merge(self) -> None:
+        """Two cited chunks 30 seconds apart merge into one chip
+        (guards against re-introducing issue #208 clutter)."""
+        from backend.routes.messages import _collapse_by_video
+
+        chunks = [
+            self._chunk("c1", "vid1", 0.0, is_cited=True),
+            self._chunk("c2", "vid1", 30.0, is_cited=True),
+        ]
+        result = _collapse_by_video(chunks)
+
+        assert len(result) == 1
+        assert result[0]["start_seconds"] == 0.0
+        assert result[0]["segment_count"] == 2
+        assert result[0]["is_cited"] is True
+
+    def test_uncited_chunks_still_collapse_per_video(self) -> None:
+        """Uncited chunks from one video collapse to a single representative
+        regardless of time gaps (unchanged behaviour for the consulted tier)."""
+        from backend.routes.messages import _collapse_by_video
+
+        chunks = [
+            self._chunk("c1", "vid1", 0.0, is_cited=False),
+            self._chunk("c2", "vid1", 300.0, is_cited=False),
+            self._chunk("c3", "vid1", 600.0, is_cited=False),
+        ]
+        result = _collapse_by_video(chunks)
+
+        assert len(result) == 1
+        assert result[0]["is_cited"] is False
+        assert result[0]["start_seconds"] == 0.0
+        assert result[0]["segment_count"] == 3
+
+    def test_cited_entries_precede_uncited(self) -> None:
+        """Cited chips are emitted before uncited ones in the result list."""
+        from backend.routes.messages import _collapse_by_video
+
+        chunks = [
+            self._chunk("u1", "vid2", 0.0, is_cited=False),
+            self._chunk("c1", "vid1", 0.0, is_cited=True),
+        ]
+        result = _collapse_by_video(chunks)
+
+        assert len(result) == 2
+        assert result[0]["is_cited"] is True
+        assert result[1]["is_cited"] is False
+
+
 class TestExtractTextFromSse:
     """Tests for _extract_text_from_sse helper."""
 

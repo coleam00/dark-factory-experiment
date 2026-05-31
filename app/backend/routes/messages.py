@@ -466,43 +466,86 @@ async def _maybe_set_conversation_title(
         await repository.update_conversation_title(conv_id, user_id=user_id, title=title)
 
 
+# Cited chunks from the same video are merged into one chip only when their
+# start timestamps fall within this many seconds of each other. Moments farther
+# apart in the same video get their own chip (issue #276) so every distinct
+# moment the assistant actually used is shown with its own correct timestamp.
+CITED_CLUSTER_GAP_SECONDS = 60.0
+
+
 def _collapse_by_video(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Collapse multiple chunks from the same video into a single citation entry.
+    """Collapse same-video chunks into citation entries.
 
-    After the ``is_cited`` pass, chunks from the same video are redundant in
-    the UI — the user needs one clickable chip per video, not one per 5-second
-    transcript segment (issue #208).
+    Uncited and cited chunks are handled differently:
 
-    For each ``video_id`` group:
-    - ``is_cited`` is True if ANY chunk in the group was cited by the LLM.
-    - ``start_seconds`` is the earliest timestamp among cited chunks (or among
-      all chunks if none were cited), so the deep-link opens near the most
-      relevant moment.
+    - **Uncited** chunks (``is_cited`` falsey) collapse to one entry per
+      ``video_id`` — they only populate "All sources consulted", where one
+      chip per video keeps the list uncluttered (issue #208).
+    - **Cited** chunks (``is_cited`` truthy) collapse per ``video_id`` *and*
+      time proximity: within a video, chunks whose ``start_seconds`` are
+      within ``CITED_CLUSTER_GAP_SECONDS`` of each other merge into one chip,
+      but moments farther apart become separate chips with their own correct
+      timestamps (issue #276). This prevents two nearby transcript segments
+      about the same topic from spawning duplicate chips while still surfacing
+      every distinct moment the assistant referenced.
+
+    For each resulting entry:
+    - ``start_seconds`` is the earliest timestamp in the cluster, so the
+      deep-link opens at the start of the relevant moment.
     - ``segment_count`` records how many chunks were collapsed so the frontend
       can optionally display "(N segments)".
-    - All other fields are taken from the representative chunk.
+    - All other fields are taken from the representative (earliest) chunk.
 
-    Insertion order of videos is preserved (first-seen wins).
+    Cited entries are returned before uncited ones, preserving the convention
+    that "Sources cited" chips precede "All sources consulted" chips. Within
+    each tier, first-seen video order is preserved.
     """
+    cited = [c for c in chunks if c.get("is_cited")]
+    uncited = [c for c in chunks if not c.get("is_cited")]
+
+    cited_entries: list[dict] = []
+    for group in _group_by_video(cited).values():
+        # Cluster by start_seconds proximity so nearby moments merge but
+        # distant moments each get their own chip.
+        ordered = sorted(group, key=lambda c: c.get("start_seconds") or 0.0)
+        cluster: list[dict] = []
+        prev_start: float | None = None
+        for c in ordered:
+            start = c.get("start_seconds") or 0.0
+            if prev_start is not None and start - prev_start > CITED_CLUSTER_GAP_SECONDS:
+                cited_entries.append(_make_entry(cluster, is_cited=True))
+                cluster = []
+            cluster.append(c)
+            prev_start = start
+        if cluster:
+            cited_entries.append(_make_entry(cluster, is_cited=True))
+
+    uncited_entries: list[dict] = [
+        _make_entry(group, is_cited=False) for group in _group_by_video(uncited).values()
+    ]
+
+    return cited_entries + uncited_entries
+
+
+def _group_by_video(chunks: list[dict[str, Any]]) -> dict[str, list[dict]]:
+    """Group chunks by ``video_id``, preserving first-seen order."""
     seen: dict[str, list[dict]] = {}
     for c in chunks:
         vid = c.get("video_id") or ""
         if vid not in seen:
             seen[vid] = []
         seen[vid].append(c)
+    return seen
 
-    collapsed: list[dict] = []
-    for group in seen.values():
-        cited_in_group = [c for c in group if c.get("is_cited")]
-        if cited_in_group:
-            representative = min(cited_in_group, key=lambda c: c.get("start_seconds") or 0.0)
-            is_cited = True
-        else:
-            representative = min(group, key=lambda c: c.get("start_seconds") or 0.0)
-            is_cited = False
-        entry = dict(representative)
-        entry["is_cited"] = is_cited
-        entry["segment_count"] = len(group)
-        collapsed.append(entry)
 
-    return collapsed
+def _make_entry(group: list[dict[str, Any]], *, is_cited: bool) -> dict[str, Any]:
+    """Build a single collapsed citation entry from a group of chunks.
+
+    The representative is the earliest-timestamp chunk; ``segment_count``
+    reflects how many chunks were merged.
+    """
+    representative = min(group, key=lambda c: c.get("start_seconds") or 0.0)
+    entry = dict(representative)
+    entry["is_cited"] = is_cited
+    entry["segment_count"] = len(group)
+    return entry
