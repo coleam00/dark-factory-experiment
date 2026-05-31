@@ -1,9 +1,9 @@
-import { type MutableRefObject, type RefObject, useEffect, useRef, useState } from 'react';
+import { type MutableRefObject, type RefObject, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useConversations } from '../hooks/useConversations';
 import { useToast } from '../hooks/useToast';
-import { type Conversation, createConversation, deleteConversation } from '../lib/api';
+import { type Conversation, type Video, createConversation, deleteConversation, getVideos } from '../lib/api';
 import { VideoExplorer } from './VideoExplorer';
 
 // ── Relative time helper ─────────────────────────────────────────
@@ -413,8 +413,44 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [datePreset, setDatePreset] = useState<'all' | 'week' | 'month' | 'lastMonth' | 'custom'>('all');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
+  const [videoFilter, setVideoFilter] = useState('');
+  const [videos, setVideos] = useState<Video[]>([]);
+
+  const { dateFrom, dateTo } = useMemo(() => {
+    const now = new Date();
+    if (datePreset === 'week') {
+      const d = new Date(now);
+      d.setDate(d.getDate() - 6);
+      d.setHours(0, 0, 0, 0);
+      return { dateFrom: d, dateTo: null };
+    }
+    if (datePreset === 'month') {
+      const d = new Date(now.getFullYear(), now.getMonth(), 1);
+      return { dateFrom: d, dateTo: null };
+    }
+    if (datePreset === 'lastMonth') {
+      const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const end = new Date(now.getFullYear(), now.getMonth(), 0);
+      end.setHours(23, 59, 59, 999);
+      return { dateFrom: d, dateTo: end };
+    }
+    if (datePreset === 'custom') {
+      const from = customFrom ? new Date(customFrom) : null;
+      const to = customTo ? new Date(customTo) : null;
+      return { dateFrom: from, dateTo: to };
+    }
+    return { dateFrom: null, dateTo: null };
+  }, [datePreset, customFrom, customTo]);
+
   const { conversations, loading, refetch, rename, filteredConversations } =
-    useConversations(debouncedQuery);
+    useConversations(debouncedQuery, {
+      dateFrom,
+      dateTo,
+      videoId: videoFilter || null,
+    });
   const { user, logout } = useAuth();
   const [creatingNew, setCreatingNew] = useState(false);
   const [newChatError, setNewChatError] = useState<string | null>(null);
@@ -424,6 +460,11 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
   const [explorerOpen, setExplorerOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const { addToast } = useToast();
+
+  // Fetch video list once for the picker
+  useEffect(() => {
+    getVideos().then(setVideos).catch(() => {});
+  }, []);
 
   // Debounce search query — 250ms per issue #92
   useEffect(() => {
@@ -437,6 +478,15 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
       conversationsRef.current = refetch;
     }
   }, [refetch, conversationsRef]);
+
+  const clearFilters = () => {
+    setSearchQuery('');
+    setDebouncedQuery('');
+    setDatePreset('all');
+    setCustomFrom('');
+    setCustomTo('');
+    setVideoFilter('');
+  };
 
   // ── New Chat ──
   const handleNewChat = async () => {
@@ -601,6 +651,87 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
           />
         </div>
 
+        {/* ── Filters ── */}
+        <div style={{ padding: '0 12px 8px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <select
+            value={datePreset}
+            onChange={(e) => setDatePreset(e.target.value as typeof datePreset)}
+            style={{
+              width: '100%',
+              padding: '6px 8px',
+              borderRadius: 8,
+              background: '#1e293b',
+              border: '1px solid #334155',
+              color: '#f1f5f9',
+              fontSize: 13,
+              outline: 'none',
+            }}
+          >
+            <option value="all">Any time</option>
+            <option value="week">This week</option>
+            <option value="month">This month</option>
+            <option value="lastMonth">Last month</option>
+            <option value="custom">Custom range</option>
+          </select>
+
+          {datePreset === 'custom' && (
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input
+                type="date"
+                value={customFrom}
+                onChange={(e) => setCustomFrom(e.target.value)}
+                style={{
+                  flex: 1,
+                  padding: '6px 8px',
+                  borderRadius: 8,
+                  background: '#1e293b',
+                  border: '1px solid #334155',
+                  color: '#f1f5f9',
+                  fontSize: 13,
+                  outline: 'none',
+                }}
+              />
+              <input
+                type="date"
+                value={customTo}
+                onChange={(e) => setCustomTo(e.target.value)}
+                style={{
+                  flex: 1,
+                  padding: '6px 8px',
+                  borderRadius: 8,
+                  background: '#1e293b',
+                  border: '1px solid #334155',
+                  color: '#f1f5f9',
+                  fontSize: 13,
+                  outline: 'none',
+                }}
+              />
+            </div>
+          )}
+
+          <select
+            value={videoFilter}
+            onChange={(e) => setVideoFilter(e.target.value)}
+            style={{
+              width: '100%',
+              padding: '6px 8px',
+              borderRadius: 8,
+              background: '#1e293b',
+              border: '1px solid #334155',
+              color: '#f1f5f9',
+              fontSize: 13,
+              outline: 'none',
+            }}
+          >
+            <option value="">All videos</option>
+            {videos.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.title}
+              </option>
+            ))}
+          </select>
+        </div>
+
         {/* ── Conversation list ── */}
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {loading ? (
@@ -611,7 +742,7 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
               <SkeletonRow />
             </>
           ) : filteredConversations.length === 0 ? (
-            // Empty state — distinct copy when the user is searching
+            // Empty state — distinct copy when filters are active
             <div
               style={{
                 padding: '40px 16px',
@@ -630,10 +761,38 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
               >
                 <path d="M6,4 L30,4 A2,2 0 0,1 32,6 L32,24 A2,2 0 0,1 30,26 L10,26 L4,32 L4,6 A2,2 0 0,1 6,4 Z" />
               </svg>
-              {debouncedQuery.trim() ? (
-                <p style={{ margin: 0, fontSize: 13 }}>
-                  No matches for <strong style={{ color: '#94a3b8' }}>"{debouncedQuery}"</strong>
-                </p>
+              {debouncedQuery.trim() || datePreset !== 'all' || videoFilter ? (
+                <>
+                  <p style={{ margin: 0, fontSize: 13 }}>
+                    No matches
+                    {debouncedQuery.trim() && (
+                      <> for <strong style={{ color: '#94a3b8' }}>"{debouncedQuery}"</strong></>
+                    )}
+                  </p>
+                  <button
+                    onClick={clearFilters}
+                    className="active:brightness-90 focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+                    style={{
+                      marginTop: 10,
+                      background: 'transparent',
+                      border: '1px solid rgba(59,130,246,0.4)',
+                      borderRadius: 8,
+                      color: '#3b82f6',
+                      cursor: 'pointer',
+                      fontSize: 13,
+                      padding: '7px 16px',
+                      transition: 'background 0.15s, filter 0.15s',
+                    }}
+                    onMouseEnter={(e) =>
+                      (e.currentTarget.style.background = 'rgba(59,130,246,0.1)')
+                    }
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = 'transparent';
+                    }}
+                  >
+                    Clear filters
+                  </button>
+                </>
               ) : (
                 <>
                   <p style={{ margin: 0, fontSize: 13 }}>No conversations yet</p>

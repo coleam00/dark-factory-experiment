@@ -41,6 +41,7 @@ export interface Conversation {
   created_at: string;
   updated_at: string;
   preview?: string | null;
+  video_ids?: string[] | null;
 }
 
 export interface Citation {

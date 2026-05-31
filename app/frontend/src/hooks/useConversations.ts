@@ -1,7 +1,26 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { type Conversation, getConversations, renameConversation } from '../lib/api';
 
-export function useConversations(searchQuery?: string) {
+function startOfDay(d: Date): Date {
+  const result = new Date(d);
+  result.setHours(0, 0, 0, 0);
+  return result;
+}
+
+function endOfDay(d: Date): Date {
+  const result = new Date(d);
+  result.setHours(23, 59, 59, 999);
+  return result;
+}
+
+export function useConversations(
+  searchQuery?: string,
+  filters?: {
+    dateFrom?: Date | null;
+    dateTo?: Date | null;
+    videoId?: string | null;
+  }
+) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -46,9 +65,23 @@ export function useConversations(searchQuery?: string) {
   const withMessages = conversations.filter((c) => c.preview !== null);
 
   const trimmed = (searchQuery ?? '').trim().toLowerCase();
-  const filteredConversations = trimmed
+  let filtered = trimmed
     ? withMessages.filter((c) => c.title.toLowerCase().includes(trimmed))
     : withMessages;
+
+  if (filters?.dateFrom) {
+    const from = startOfDay(filters.dateFrom);
+    filtered = filtered.filter((c) => new Date(c.updated_at) >= from);
+  }
+  if (filters?.dateTo) {
+    const to = endOfDay(filters.dateTo);
+    filtered = filtered.filter((c) => new Date(c.updated_at) <= to);
+  }
+  if (filters?.videoId) {
+    filtered = filtered.filter((c) => c.video_ids?.includes(filters.videoId));
+  }
+
+  const filteredConversations = filtered;
 
   return {
     conversations,

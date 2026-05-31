@@ -215,4 +215,105 @@ describe('useConversations', () => {
       expect(result.current.filteredConversations[0].id).toBe('1');
     });
   });
+
+  describe('date filter', () => {
+    it('keeps conversations within the date range', async () => {
+      const conversations = [
+        { id: '1', title: 'Old Chat', created_at: '', updated_at: '2026-05-01T12:00:00Z', preview: 'Hi', video_ids: null },
+        { id: '2', title: 'Recent Chat', created_at: '', updated_at: '2026-05-20T12:00:00Z', preview: 'Hello', video_ids: null },
+      ];
+      vi.spyOn(api, 'getConversations').mockResolvedValue(conversations as api.Conversation[]);
+
+      const from = new Date('2026-05-15');
+      const to = new Date('2026-05-25');
+      const { result } = renderHook(() => useConversations('', { dateFrom: from, dateTo: to }));
+
+      await waitFor(() => expect(result.current.filteredConversations).toHaveLength(1));
+      expect(result.current.filteredConversations[0].id).toBe('2');
+    });
+
+    it('is inclusive on the bounds', async () => {
+      const conversations = [
+        { id: '1', title: 'Edge Morning', created_at: '', updated_at: '2026-05-15T12:00:00Z', preview: 'A', video_ids: null },
+        { id: '2', title: 'Edge Night', created_at: '', updated_at: '2026-05-16T12:00:00Z', preview: 'B', video_ids: null },
+      ];
+      vi.spyOn(api, 'getConversations').mockResolvedValue(conversations as api.Conversation[]);
+
+      const from = new Date('2026-05-15');
+      const to = new Date('2026-05-16');
+      const { result } = renderHook(() => useConversations('', { dateFrom: from, dateTo: to }));
+
+      await waitFor(() => expect(result.current.filteredConversations).toHaveLength(2));
+    });
+
+    it('drops out-of-range conversations', async () => {
+      const conversations = [
+        { id: '1', title: 'Too old', created_at: '', updated_at: '2026-04-01T12:00:00Z', preview: 'X', video_ids: null },
+      ];
+      vi.spyOn(api, 'getConversations').mockResolvedValue(conversations as api.Conversation[]);
+
+      const from = new Date('2026-05-01');
+      const { result } = renderHook(() => useConversations('', { dateFrom: from }));
+
+      await waitFor(() => expect(result.current.filteredConversations).toHaveLength(0));
+    });
+  });
+
+  describe('video filter', () => {
+    it('keeps conversations that reference the video', async () => {
+      const conversations = [
+        { id: '1', title: 'About A', created_at: '', updated_at: '', preview: 'Hi', video_ids: ['vid-a'] },
+        { id: '2', title: 'About B', created_at: '', updated_at: '', preview: 'Hello', video_ids: ['vid-b'] },
+        { id: '3', title: 'No videos', created_at: '', updated_at: '', preview: 'Hey', video_ids: null },
+      ];
+      vi.spyOn(api, 'getConversations').mockResolvedValue(conversations as api.Conversation[]);
+
+      const { result } = renderHook(() => useConversations('', { videoId: 'vid-a' }));
+
+      await waitFor(() => expect(result.current.filteredConversations).toHaveLength(1));
+      expect(result.current.filteredConversations[0].id).toBe('1');
+    });
+  });
+
+  describe('combined filters', () => {
+    it('applies text, date and video filters with AND', async () => {
+      const conversations = [
+        { id: '1', title: 'Python A', created_at: '', updated_at: '2026-05-20T12:00:00Z', preview: 'Hi', video_ids: ['vid-a'] },
+        { id: '2', title: 'Python B', created_at: '', updated_at: '2026-05-10T12:00:00Z', preview: 'Hi', video_ids: ['vid-a'] },
+        { id: '3', title: 'Rust A', created_at: '', updated_at: '2026-05-20T12:00:00Z', preview: 'Hi', video_ids: ['vid-a'] },
+        { id: '4', title: 'Python A', created_at: '', updated_at: '2026-05-20T12:00:00Z', preview: 'Hi', video_ids: ['vid-b'] },
+      ];
+      vi.spyOn(api, 'getConversations').mockResolvedValue(conversations as api.Conversation[]);
+
+      const from = new Date('2026-05-15');
+      const { result } = renderHook(() => useConversations('python', { dateFrom: from, videoId: 'vid-a' }));
+
+      await waitFor(() => expect(result.current.filteredConversations).toHaveLength(1));
+      expect(result.current.filteredConversations[0].id).toBe('1');
+    });
+
+    it('preserves most-recent-first order', async () => {
+      const conversations = [
+        { id: '1', title: 'Old', created_at: '', updated_at: '2026-05-01T12:00:00Z', preview: 'X', video_ids: ['vid-a'] },
+        { id: '2', title: 'New', created_at: '', updated_at: '2026-05-20T12:00:00Z', preview: 'Y', video_ids: ['vid-a'] },
+      ];
+      vi.spyOn(api, 'getConversations').mockResolvedValue(conversations as api.Conversation[]);
+
+      const { result } = renderHook(() => useConversations('', { videoId: 'vid-a' }));
+
+      await waitFor(() => expect(result.current.filteredConversations).toHaveLength(2));
+      expect(result.current.filteredConversations.map((c) => c.id)).toEqual(['2', '1']);
+    });
+
+    it('excludes empty conversations even when filters match', async () => {
+      const conversations = [
+        { id: '1', title: 'Empty', created_at: '', updated_at: '2026-05-20T12:00:00Z', preview: null, video_ids: ['vid-a'] },
+      ];
+      vi.spyOn(api, 'getConversations').mockResolvedValue(conversations as api.Conversation[]);
+
+      const { result } = renderHook(() => useConversations('', { videoId: 'vid-a' }));
+
+      await waitFor(() => expect(result.current.filteredConversations).toHaveLength(0));
+    });
+  });
 });

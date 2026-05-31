@@ -459,7 +459,13 @@ async def list_conversations(user_id: str) -> list[dict]:
                     FROM messages
                     WHERE conversation_id = c.id
                     ORDER BY created_at DESC
-                    LIMIT 1) AS preview
+                    LIMIT 1) AS preview,
+                   (SELECT array_agg(DISTINCT elem->>'video_id')
+                    FROM messages m
+                    CROSS JOIN LATERAL jsonb_array_elements(m.sources) elem
+                    WHERE m.conversation_id = c.id
+                      AND m.sources IS NOT NULL
+                      AND jsonb_typeof(m.sources) = 'array') AS video_ids
             FROM conversations c
             WHERE c.user_id = $1
             ORDER BY c.updated_at DESC
