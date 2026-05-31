@@ -301,6 +301,7 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
     streamingStatus,
     isStreaming,
     startStream,
+    startRegenerate,
     abortStream,
   } = useStreamingResponse(conversationId || null);
   const { addToast } = useToast();
@@ -323,6 +324,8 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
   const [failedMessageText, setFailedMessageText] = useState<string | null>(null);
   // Track the temp user message ID so we can remove it on failure
   const pendingUserMsgIdRef = useRef<string | null>(null);
+  // Track the message being regenerated so we can restore it on failure
+  const pendingRegenerateMsgRef = useRef<MessageType | null>(null);
   // Citation modal state
   const [selectedCitation, setSelectedCitation] = useState<Citation | null>(null);
 
@@ -583,6 +586,83 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
     handleSend(text);
   }, [failedMessageText, handleSend]);
 
+  // ── Regenerate the last assistant message ──
+  const handleRegenerate = useCallback(
+    async (messageId: string) => {
+      if (!conversationId) return;
+      if (isStreaming) return;
+
+      setInlineError(null);
+      setFailedMessageText(null);
+
+      // Capture the old message before removing it
+      let oldMsg: MessageType | undefined;
+      setMessages((prev) => {
+        oldMsg = prev.find((m) => m.id === messageId);
+        return prev.filter((m) => m.id !== messageId);
+      });
+
+      if (!oldMsg) return;
+      pendingRegenerateMsgRef.current = oldMsg;
+      autoScrollRef.current = true;
+      scrollToBottom();
+
+      try {
+        await startRegenerate(messageId, ({ fullText, sources }) => {
+          const assistantMsg: MessageType = {
+            id: `temp-assistant-${Date.now()}`,
+            conversation_id: conversationId,
+            role: 'assistant',
+            content: fullText,
+            created_at: new Date().toISOString(),
+            sources: sources.length > 0 ? sources : undefined,
+          };
+          setMessages((prev) => [...prev, assistantMsg]);
+        });
+        pendingRegenerateMsgRef.current = null;
+        // Pull fresh quota counter so the sidebar updates after each send.
+        refreshAuth();
+        // Refresh conversations list so sidebar shows auto-generated title.
+        refreshConversationsRef?.current?.();
+      } catch (e) {
+        // Restore the old message on any error/abort
+        if (pendingRegenerateMsgRef.current) {
+          setMessages((prev) => [...prev, pendingRegenerateMsgRef.current!]);
+          pendingRegenerateMsgRef.current = null;
+        }
+
+        // Intentional abort (navigation or user cancel) — no error toast
+        if (e instanceof DOMException && e.name === 'AbortError') {
+          return;
+        }
+
+        if (e instanceof RateLimitError) {
+          // MISSION §10 #1 — daily cap hit.
+          const friendly = `You've hit your daily message limit (${e.limit}/day). Resets at ${formatResetTime(e.resetAt)}.`;
+          setInlineError(friendly);
+          addToast(friendly, 'error');
+          // Sync counter so the sidebar flips to 25/25 with a reset time.
+          refreshAuth();
+          return;
+        }
+
+        const errMsg = e instanceof Error ? e.message : 'Failed to regenerate response';
+        setInlineError('Failed to regenerate response. Please try again.');
+        addToast(errMsg || 'Network error — regeneration failed', 'error');
+      }
+    },
+    [
+      conversationId,
+      isStreaming,
+      setMessages,
+      startRegenerate,
+      scrollToBottom,
+      addToast,
+      refreshAuth,
+      refreshConversationsRef,
+    ],
+  );
+
   // ── Starter click handler ──
   const handleStarterClick = useCallback((text: string) => {
     chatInputRef.current?.setInputText(text);
@@ -708,13 +788,19 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
             {showEmptyInConversation ? (
               <EmptyState onStarterClick={handleStarterClick} />
             ) : (
-              messages.map((msg) => (
+              messages.map((msg, index) => (
                 <Message
                   key={msg.id}
                   role={msg.role}
                   content={msg.content}
                   sources={msg.sources}
                   onCitationClick={handleCitationClick}
+                  isLastAssistant={msg.role === 'assistant' && index === messages.length - 1}
+                  onRegenerate={
+                    msg.role === 'assistant' && index === messages.length - 1
+                      ? () => handleRegenerate(msg.id)
+                      : undefined
+                  }
                 />
               ))
             )}

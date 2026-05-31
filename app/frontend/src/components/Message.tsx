@@ -15,6 +15,10 @@ interface MessageProps {
   onCitationClick?: (citation: Citation) => void;
   /** Current tool-call status during streaming (ephemeral progress indicator) */
   streamingStatus?: StreamingStatus | null;
+  /** True for the last assistant message in the conversation */
+  isLastAssistant?: boolean;
+  /** Called when the user clicks the regenerate button */
+  onRegenerate?: () => void;
 }
 
 // ── Typing indicator (3 pulsing dots) ────────────────────────────
@@ -167,9 +171,12 @@ export function Message({
   sources,
   onCitationClick,
   streamingStatus,
+  isLastAssistant,
+  onRegenerate,
 }: MessageProps) {
   const isUser = role === 'user';
   const hasSources = !isUser && Array.isArray(sources) && sources.length > 0;
+  const showRegenerate = !isUser && !isStreaming && isLastAssistant && !!onRegenerate;
 
   return (
     <div
@@ -204,6 +211,50 @@ export function Message({
           <>
             <MarkdownRenderer content={content} />
             {hasSources && <SourceCitations sources={sources} onCitationClick={onCitationClick} />}
+            {showRegenerate && (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
+                <button
+                  onClick={onRegenerate}
+                  title="Regenerate response"
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid rgba(148,163,184,0.3)',
+                    borderRadius: 6,
+                    color: '#94a3b8',
+                    cursor: 'pointer',
+                    padding: '4px 8px',
+                    fontSize: 12,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.borderColor = 'rgba(59,130,246,0.5)';
+                    e.currentTarget.style.color = '#f1f5f9';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.borderColor = 'rgba(148,163,184,0.3)';
+                    e.currentTarget.style.color = '#94a3b8';
+                  }}
+                >
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 12 12"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M1,6 A5,5 0 1,0 6,1" />
+                    <polyline points="1,6 1,2 5,2" />
+                  </svg>
+                  Regenerate
+                </button>
+              </div>
+            )}
           </>
         )}
       </div>

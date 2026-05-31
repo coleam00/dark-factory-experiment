@@ -218,12 +218,172 @@ export function useStreamingResponse(conversationId: string | null) {
     [],
   );
 
+  const startRegenerate = useCallback(
+    async (
+      messageId: string,
+      onComplete: (result: StreamResult) => void,
+    ): Promise<void> => {
+      setIsStreaming(true);
+      setStreamingContent('');
+      setStreamingSources([]);
+      setStreamingStatus(null);
+
+      let fullText = '';
+      let sources: Citation[] = [];
+      let streamError: Error | null = null;
+
+      try {
+        const abortController = new AbortController();
+        streamAbortRef.current = abortController;
+
+        const res = await fetch(`/api/messages/${messageId}/regenerate`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          signal: abortController.signal,
+        });
+
+        if (res.status === 401) {
+          if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+            const returnTo = window.location.pathname + window.location.search;
+            window.location.assign(`/login?from=${encodeURIComponent(returnTo)}`);
+          }
+          throw new Error('Not authenticated');
+        }
+        if (res.status === 429) {
+          let body: Record<string, unknown> | null = null;
+          try {
+            body = await res.json();
+          } catch (jsonErr) {
+            console.warn('[useStreamingResponse] Failed to parse 429 body:', jsonErr);
+          }
+          if (body && typeof body === 'object' && 'limit' in body) {
+            throw new RateLimitError(
+              body as { limit: number; window_hours: number; reset_at: string },
+            );
+          }
+          throw new Error('Daily message limit reached');
+        }
+        if (!res.ok) {
+          let errorText = '';
+          try {
+            errorText = await res.text();
+          } catch (textErr) {
+            console.warn('[useStreamingResponse] Failed to read error body:', textErr);
+          }
+          throw new Error(`HTTP ${res.status}${errorText ? `: ${errorText}` : ''}`);
+        }
+        if (!res.body) throw new Error('No response body');
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+
+          const parts = buffer.split('\n\n');
+          buffer = parts.pop() ?? '';
+
+          for (const rawEvent of parts) {
+            if (!rawEvent.trim()) continue;
+
+            let eventType = 'message';
+            const dataLines: string[] = [];
+
+            for (const line of rawEvent.split('\n')) {
+              if (line.startsWith('event:')) {
+                eventType = line.slice(6).trim();
+              } else if (line.startsWith('data:')) {
+                const val = line.slice(5);
+                dataLines.push(val.startsWith(' ') ? val.slice(1) : val);
+              }
+            }
+
+            const data = dataLines.join('\n');
+
+            if (eventType === 'sources') {
+              try {
+                const parsed = JSON.parse(data);
+                if (Array.isArray(parsed)) {
+                  sources = parsed;
+                  setStreamingSources(parsed);
+                }
+              } catch (e) {
+                console.warn('[useStreamingResponse] Failed to parse sources event:', e);
+              }
+            } else if (eventType === 'status') {
+              try {
+                const parsed = JSON.parse(data);
+                if (parsed && typeof parsed === 'object' && 'type' in parsed) {
+                  if (parsed.type === 'tool_call_start') {
+                    setStreamingStatus({
+                      tool: String(parsed.tool ?? ''),
+                      subject: String(parsed.subject ?? ''),
+                      label: String(parsed.label ?? ''),
+                    });
+                  } else if (parsed.type === 'tool_call_done') {
+                    if (!parsed.tool || parsed.tool !== streamingStatus?.tool) {
+                      console.warn(
+                        '[useStreamingResponse] tool_call_done mismatch or missing tool:',
+                        parsed,
+                      );
+                    }
+                  }
+                }
+              } catch (e) {
+                console.warn('[useStreamingResponse] Failed to parse status event:', e);
+              }
+            } else if (data === '[DONE]') {
+              // Stream complete — no action needed here
+            } else if (data.startsWith('{"error"')) {
+              let errMsg = 'Stream error from server';
+              try {
+                errMsg = JSON.parse(data).error || errMsg;
+              } catch {
+                // Use default message
+              }
+              streamError = new Error(errMsg);
+              break;
+            } else if (data) {
+              let token = data;
+              try {
+                const parsed = JSON.parse(data);
+                if (typeof parsed === 'string') {
+                  token = parsed;
+                }
+              } catch {
+                // Not JSON-encoded — use raw data (backward compat)
+              }
+              setStreamingStatus(null);
+              fullText += token;
+              setStreamingContent(fullText);
+            }
+          }
+        }
+
+        onComplete({ fullText, sources });
+      } finally {
+        setIsStreaming(false);
+        setStreamingContent('');
+        setStreamingSources([]);
+        setStreamingStatus(null);
+      }
+      if (streamError) throw streamError;
+    },
+    [],
+  );
+
   return {
     streamingContent,
     streamingSources,
     streamingStatus,
     isStreaming,
     startStream,
+    startRegenerate,
     abortStream,
   };
 }

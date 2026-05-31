@@ -237,3 +237,11 @@ export const resyncVideo = (id: string) =>
 
 export const syncChannel = () =>
   request<SyncChannelResponse>('/admin/videos/sync-channel', { method: 'POST' });
+
+// Messages
+export const regenerateMessage = (messageId: string): Promise<Response> =>
+  fetch(`${BASE}/messages/${messageId}/regenerate`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+  });

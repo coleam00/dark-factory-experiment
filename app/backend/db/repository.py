@@ -577,6 +577,43 @@ async def create_message(
     }
 
 
+async def get_message(message_id: str, user_id: str) -> dict | None:
+    """Return a single message only if its conversation belongs to the user."""
+    async with _acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT m.*
+            FROM messages m
+            JOIN conversations c ON c.id = m.conversation_id
+            WHERE m.id = $1 AND c.user_id = $2
+            """,
+            message_id,
+            user_id,
+        )
+    if not row:
+        return None
+    d = dict(row)
+    d["sources"] = json.loads(d["sources"]) if d.get("sources") else None
+    return d
+
+
+async def delete_message(message_id: str, user_id: str) -> bool:
+    """Delete a message. Returns False if it does not belong to the user."""
+    async with _acquire() as conn:
+        result = await conn.execute(
+            """
+            DELETE FROM messages
+            USING conversations
+            WHERE messages.id = $1
+              AND conversations.id = messages.conversation_id
+              AND conversations.user_id = $2
+            """,
+            message_id,
+            user_id,
+        )
+    return result != "DELETE 0"  # type: ignore[no-any-return]
+
+
 async def list_messages(conversation_id: str, user_id: str) -> list[dict]:
     """Return messages only if the conversation belongs to the given user."""
     async with _acquire() as conn:
