@@ -55,6 +55,47 @@ class TestChunkVideoTimestamped:
         # Should not produce any chunks from the empty segment
         assert all("Real content" in c["content"] or "Real content" in c["snippet"] for c in result)
 
+    def test_zero_duration_segment_does_not_collapse_timestamps(self) -> None:
+        """A zero-width segment that splits into multiple sub-chunks keeps the
+        original [start_s, end_s] boundary on every sub-chunk instead of
+        distributing a zero step and pinning every chunk to start_s."""
+        text = " ".join(
+            [
+                f"Sentence {i} of this transcript segment provides more content for the chunker."
+                for i in range(100)
+            ]
+        )
+        segments = [{"start": 100.0, "end": 100.0, "text": text}]
+        result, _ = chunk_video_timestamped(segments)
+
+        # We need the segment to have actually split to prove the guard ran.
+        assert len(result) >= 1
+        for chunk in result:
+            assert chunk["start_seconds"] == 100.0
+            assert chunk["end_seconds"] == 100.0
+            assert chunk["end_seconds"] >= chunk["start_seconds"]
+
+    def test_positive_duration_still_distributes(self) -> None:
+        """Normal positive-duration segments continue to spread timestamps evenly."""
+        text = " ".join(
+            [
+                f"Sentence {i} of this transcript segment provides more content for the chunker."
+                for i in range(100)
+            ]
+        )
+        segments = [{"start": 0.0, "end": 60.0, "text": text}]
+        result, _ = chunk_video_timestamped(segments)
+
+        assert len(result) > 1
+        starts = [c["start_seconds"] for c in result]
+        assert starts == sorted(starts)
+        assert starts[0] == 0.0
+        assert result[-1]["end_seconds"] == 60.0
+        for chunk in result:
+            assert chunk["start_seconds"] >= 0.0
+            assert chunk["end_seconds"] <= 60.0
+            assert chunk["end_seconds"] >= chunk["start_seconds"]
+
 
 class TestChunkVideoFallback:
     def test_produces_monotonic_timestamps(self) -> None:

@@ -165,10 +165,14 @@ def chunk_video_timestamped(segments: list[TimestampedSegment]) -> tuple[list[di
             # proportional timestamps, which are explicitly accepted).
             if len(sub_chunks) > 1:
                 duration = end_s - start_s
-                step = duration / len(sub_chunks)
-                for i, sc in enumerate(sub_chunks):
-                    sc["start_seconds"] = start_s + i * step
-                    sc["end_seconds"] = start_s + (i + 1) * step
+                if duration > 0:
+                    step = duration / len(sub_chunks)
+                    for i, sc in enumerate(sub_chunks):
+                        sc["start_seconds"] = start_s + i * step
+                        sc["end_seconds"] = start_s + (i + 1) * step
+                # else: zero-width/inverted segment (e.g. final _parse_segments
+                # segment where end == start) — even distribution is meaningless,
+                # so each sub-chunk keeps the original [start_s, end_s] boundary.
 
             results.extend(sub_chunks)
         except Exception as exc:
