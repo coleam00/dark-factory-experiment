@@ -191,3 +191,112 @@ class TestVectorSearchPg:
 
         parsed = json.loads(args[1])
         assert parsed == embedding
+
+
+class TestVideoIdsFilter:
+    """Tests for video_ids filter in keyword_search and vector_search_pg (issue #279)."""
+
+    async def test_keyword_search_adds_video_id_clause_when_video_ids_set(self):
+        """keyword_search adds AND video_id = ANY($4::text[]) when video_ids is provided."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])
+        mock_acquire = AsyncMock()
+        mock_acquire.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_acquire.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(repository, "_acquire", return_value=mock_acquire):
+            await repository.keyword_search("test", top_k=5, video_ids=["v1", "v2"])
+
+        call_args = mock_conn.fetch.call_args
+        sql, *args = call_args[0]
+        assert "video_id = ANY($4::text[])" in sql
+        assert "source_type = ANY($3::text[])" in sql
+        assert args[3] == ["v1", "v2"]
+
+    async def test_keyword_search_no_video_id_clause_when_video_ids_none(self):
+        """keyword_search does NOT add video_id clause when video_ids is None."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])
+        mock_acquire = AsyncMock()
+        mock_acquire.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_acquire.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(repository, "_acquire", return_value=mock_acquire):
+            await repository.keyword_search("test", top_k=5, video_ids=None)
+
+        call_args = mock_conn.fetch.call_args
+        sql, *args = call_args[0]
+        assert "video_id = ANY" not in sql
+        assert len(args) == 3  # query, top_k, allowed_source_types
+
+    async def test_keyword_search_no_video_id_clause_for_empty_list(self):
+        """keyword_search treats empty video_ids same as None — no filter clause."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])
+        mock_acquire = AsyncMock()
+        mock_acquire.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_acquire.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(repository, "_acquire", return_value=mock_acquire):
+            await repository.keyword_search("test", top_k=5, video_ids=[])
+
+        call_args = mock_conn.fetch.call_args
+        sql = call_args[0][0]
+        assert "video_id = ANY" not in sql
+
+    async def test_vector_search_pg_adds_video_id_clause_when_video_ids_set(self):
+        """vector_search_pg adds AND video_id = ANY($4::text[]) when video_ids is provided."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])
+        mock_acquire = AsyncMock()
+        mock_acquire.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_acquire.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(repository, "_acquire", return_value=mock_acquire):
+            await repository.vector_search_pg([0.1] * 1536, top_k=5, video_ids=["v1"])
+
+        call_args = mock_conn.fetch.call_args
+        sql, *args = call_args[0]
+        assert "video_id = ANY($4::text[])" in sql
+        assert "source_type = ANY($3::text[])" in sql
+        assert args[3] == ["v1"]
+
+    async def test_vector_search_pg_no_video_id_clause_when_video_ids_none(self):
+        """vector_search_pg does NOT add video_id clause when video_ids is None."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])
+        mock_acquire = AsyncMock()
+        mock_acquire.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_acquire.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(repository, "_acquire", return_value=mock_acquire):
+            await repository.vector_search_pg([0.1] * 1536, top_k=5, video_ids=None)
+
+        call_args = mock_conn.fetch.call_args
+        sql, *args = call_args[0]
+        assert "video_id = ANY" not in sql
+        assert len(args) == 3  # embedding_json, top_k, allowed_source_types
+
+    async def test_source_type_acl_preserved_alongside_video_ids_filter(self):
+        """Both source_type ACL and video_ids filter appear in keyword_search SQL (AND semantics)."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])
+        mock_acquire = AsyncMock()
+        mock_acquire.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_acquire.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(repository, "_acquire", return_value=mock_acquire):
+            await repository.keyword_search(
+                "test",
+                top_k=5,
+                allowed_source_types=["youtube"],
+                video_ids=["some_dynamous_id"],
+            )
+
+        call_args = mock_conn.fetch.call_args
+        sql, *args = call_args[0]
+        # Both clauses present — intersection guards non-member from dynamous chunks
+        assert "source_type = ANY($3::text[])" in sql
+        assert "video_id = ANY($4::text[])" in sql
+        assert "youtube" in args[2]
+        assert args[3] == ["some_dynamous_id"]
