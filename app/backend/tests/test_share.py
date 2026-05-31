@@ -239,17 +239,21 @@ async def test_owner_can_create_share_link(client):
     assert body["url_path"] == f"/share/{body['token']}"
 
 
-async def test_get_shared_conversation_no_auth_returns_data(client):
+async def test_get_shared_conversation_no_auth_returns_data(client, fake_share_repo):
     await _signup(client, "owner2@example.com")
     r = await client.post("/api/conversations", json={"title": "Shared chat"})
     conv_id = r.json()["id"]
 
-    # Seed a message with sources
-    r_msg = await client.post(
-        f"/api/conversations/{conv_id}/messages",
-        json={"content": "hello"},
-    )
-    assert r_msg.status_code == 200
+    # Seed a message directly into the fake store (avoids the messages endpoint
+    # which calls stream_chat and is not wired up in unit-test infrastructure;
+    # see test_rate_limit.py for the skipped integration tests that need it).
+    fake_share_repo["messages"][conv_id].append({
+        "id": str(uuid4()),
+        "role": "user",
+        "content": "hello",
+        "sources": None,
+        "created_at": "2026-05-31T10:05:00+00:00",
+    })
 
     r_share = await client.post(f"/api/conversations/{conv_id}/share")
     token = r_share.json()["token"]
