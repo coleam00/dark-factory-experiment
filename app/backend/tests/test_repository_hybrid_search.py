@@ -51,9 +51,14 @@ class TestKeywordSearch:
 
         # Verify positional args: query string and top_k
         args = call_args[0]
-        # args is (sql_string, query_string, top_k_int)
+        # args is (sql_string, query_string, top_k_int, allowed_source_types, language)
         assert args[1] == "hello world"
         assert args[2] == 5
+
+        # language is bound as the trailing $4 parameter
+        assert args[4] == "english"
+        # regconfig is passed to both plainto_tsquery calls
+        assert sql.count("plainto_tsquery($4::regconfig, $1)") == 2
 
         # Verify result shape
         assert len(result) == 1
@@ -92,6 +97,22 @@ class TestKeywordSearch:
         assert "LIMIT $2" in sql
         args = call_args[0]
         assert args[2] == 3
+
+    async def test_keyword_search_passes_custom_language(self):
+        """keyword_search wires a custom language through as the trailing arg."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])
+
+        mock_acquire = AsyncMock()
+        mock_acquire.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_acquire.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(repository, "_acquire", return_value=mock_acquire):
+            await repository.keyword_search("test", top_k=5, language="simple")
+
+        call_args = mock_conn.fetch.call_args
+        args = call_args[0]
+        assert args[4] == "simple"
 
 
 class TestVectorSearchPg:
