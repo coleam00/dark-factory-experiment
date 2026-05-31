@@ -145,44 +145,89 @@ def make_mock_transcript(text):
 async def test_sync_channel_idempotent_skips_existing_videos():
     """
     If a video is already in the DB (matched by youtube_video_id in URL),
-    it is skipped and counted as 'new' (already ingested = already counted).
+    it is skipped and must NOT be counted as 'new'.
     """
-    # Pre-ingest a video so get_video_by_youtube_id returns it
-    await repository.create_video(
-        title="Already ingested",
-        description="Already in DB",
-        url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-        transcript="Already ingested transcript.",
-    )
+    # Simulate one existing video and one new video
+    async def fake_get(youtube_video_id):
+        if youtube_video_id == "dQw4w9WgXcQ":
+            return {"id": "existing-video-id"}
+        return None
 
-    with patch("backend.services.supadata._get_client") as mock_get_client:
-        mock_client = AsyncMock()
-        mock_client.youtube.channel.videos = make_mock_channel_videos(
-            ["dQw4w9WgXcQ", "abc123def456"]
-        )
-        mock_client.transcript = make_mock_transcript("This is a sample transcript for the video.")
-        mock_get_client.return_value = mock_client
+    with patch("backend.routes.channels.repo.get_video_by_youtube_id", new=fake_get):
+        with patch("backend.services.supadata._get_client") as mock_get_client:
+            mock_client = AsyncMock()
+            mock_client.youtube.channel.videos = make_mock_channel_videos(
+                ["dQw4w9WgXcQ", "abc123def456"]
+            )
+            mock_client.transcript = make_mock_transcript("This is a sample transcript for the video.")
+            mock_get_client.return_value = mock_client
 
-        # Patch where names are bound in channels.py (import = local name)
-        with (
-            patch("backend.routes.channels.chunk_video_timestamped", return_value=([], False)),
-            patch(
-                "backend.routes.channels.chunk_video_fallback",
-                return_value=(["chunk1", "chunk2"], False),
-            ),
-            patch("backend.routes.channels.embed_batch", return_value=[[0.1] * 512]),
-        ):
-            async with AsyncClient(
-                transport=ASGITransport(app=app), base_url="http://test"
-            ) as client:
-                response = await client.post("/api/channels/sync")
+            # Patch where names are bound in channels.py (import = local name)
+            with (
+                patch("backend.routes.channels.chunk_video_timestamped", return_value=([], False)),
+                patch(
+                    "backend.routes.channels.chunk_video_fallback",
+                    return_value=(["chunk1", "chunk2"], False),
+                ),
+                patch("backend.routes.channels.embed_batch", return_value=[[0.1] * 512]),
+            ):
+                async with AsyncClient(
+                    transport=ASGITransport(app=app), base_url="http://test"
+                ) as client:
+                    response = await client.post("/api/channels/sync")
 
     assert response.status_code == 200
     data = response.json()
     assert data["sync_run_id"]
     assert data["videos_total"] == 2
-    assert data["videos_new"] == 2  # one skipped (already in DB), one "new" (abc...)
+    assert data["videos_new"] == 1  # only abc123def456 is truly ingested
     assert data["videos_error"] == 0
+
+
+async def test_sync_channel_skips_do_not_count_as_new_and_failed_run_is_surfaced():
+    """
+    Regression test for issue #295:
+    - Skipped (already-existing) videos must not inflate videos_new.
+    - If all genuinely new videos fail to ingest, the run status must be 'failed'.
+    """
+    existing_ids = {"skip1", "skip2"}
+
+    async def fake_get(youtube_video_id):
+        if youtube_video_id in existing_ids:
+            return {"id": f"existing-{youtube_video_id}"}
+        return None
+
+    def failing_embed(*args, **kwargs):
+        raise RuntimeError("Embedding service unavailable")
+
+    with patch("backend.routes.channels.repo.get_video_by_youtube_id", new=fake_get):
+        with patch("backend.services.supadata._get_client") as mock_get_client:
+            mock_client = AsyncMock()
+            mock_client.youtube.channel.videos = make_mock_channel_videos(
+                ["skip1", "skip2", "new_fail"]
+            )
+            mock_client.transcript = make_mock_transcript("This is a sample transcript for the video.")
+            mock_get_client.return_value = mock_client
+
+            with (
+                patch("backend.routes.channels.chunk_video_timestamped", return_value=([], False)),
+                patch(
+                    "backend.routes.channels.chunk_video_fallback",
+                    return_value=(["chunk1"], False),
+                ),
+                patch("backend.routes.channels.embed_batch", side_effect=failing_embed),
+            ):
+                async with AsyncClient(
+                    transport=ASGITransport(app=app), base_url="http://test"
+                ) as client:
+                    response = await client.post("/api/channels/sync")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["videos_total"] == 3
+    assert data["videos_new"] == 0
+    assert data["videos_error"] == 1
+    assert data["status"] == "failed"
 
 
 async def test_sync_channel_returns_sync_run_id():
