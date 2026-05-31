@@ -1,9 +1,9 @@
 /**
  * Unit tests for ChatArea.handleCitationClick branching logic (issue #216 fix).
  *
- * Dynamous citations → window.open(lesson_url, '_blank', 'noopener,noreferrer')
- * YouTube citations  → opens CitationModal (setSelectedCitation)
- * Missing lesson_url → does nothing (no blank tab)
+ * Dynamous citations       → window.open(lesson_url, '_blank', 'noopener,noreferrer')
+ * YouTube citations        → opens CitationModal (setSelectedCitation)
+ * Missing lesson_url       → informational toast (no blank tab, no modal)
  */
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -44,8 +44,9 @@ vi.mock('../hooks/useStreamingResponse', () => ({
   }),
 }));
 
+const mockAddToast = vi.fn();
 vi.mock('../hooks/useToast', () => ({
-  useToast: () => ({ addToast: vi.fn(), removeToast: vi.fn() }),
+  useToast: () => ({ addToast: mockAddToast, removeToast: vi.fn() }),
 }));
 
 vi.mock('../hooks/useAuth', () => ({
@@ -146,9 +147,11 @@ describe('handleCitationClick', () => {
     );
     // CitationModal must NOT appear
     expect(screen.queryByTitle('YouTube video player')).not.toBeInTheDocument();
+    // No spurious toast on the happy path
+    expect(mockAddToast).not.toHaveBeenCalled();
   });
 
-  it('does nothing when Dynamous citation has no lesson_url', async () => {
+  it('shows a toast when Dynamous citation has no lesson_url', async () => {
     mockMessages = [makeAssistantMessage(dynaCitationNoUrl)];
 
     render(
@@ -166,6 +169,12 @@ describe('handleCitationClick', () => {
     // window.open must NOT be called — no blank tab opened
     expect(openSpy).not.toHaveBeenCalled();
     expect(screen.queryByTitle('YouTube video player')).not.toBeInTheDocument();
+    // Informational toast must fire
+    expect(mockAddToast).toHaveBeenCalledTimes(1);
+    expect(mockAddToast).toHaveBeenCalledWith(
+      expect.stringMatching(/lesson link|not available|no link/i),
+      'info',
+    );
   });
 
   it('opens the citation modal for YouTube citations', async () => {
@@ -189,5 +198,7 @@ describe('handleCitationClick', () => {
     await waitFor(() => {
       expect(screen.getByTitle('YouTube video player')).toBeInTheDocument();
     });
+    // No spurious toast on the YouTube path
+    expect(mockAddToast).not.toHaveBeenCalled();
   });
 });
