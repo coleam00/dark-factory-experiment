@@ -108,6 +108,9 @@ export function useStreamingResponse(conversationId: string | null) {
         let buffer = '';
 
         while (true) {
+          // A mid-stream {"error"} payload only breaks the inner for-loop below; stop
+          // draining the reader promptly here so onComplete never fires with partial text.
+          if (streamError) break;
           const { done, value } = await reader.read();
           if (done) break;
 
@@ -203,8 +206,10 @@ export function useStreamingResponse(conversationId: string | null) {
           }
         }
 
-        // Stream completed successfully
-        onComplete({ fullText, sources });
+        // Stream completed successfully — but not if a mid-stream error aborted it
+        if (!streamError) {
+          onComplete({ fullText, sources });
+        }
       } finally {
         // Always reset streaming state — React 18 batches this with the onComplete
         // state updates, ensuring a seamless transition to the persisted message.

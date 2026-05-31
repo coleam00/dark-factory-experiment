@@ -439,6 +439,55 @@ describe('status event SSE parsing — hook state transitions', () => {
   });
 });
 
+describe('mid-stream error handling', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('stops draining and rejects without calling onComplete on a {"error"} payload', async () => {
+    // Tokens flow, then the server emits a mid-stream error. The trailing token and
+    // [DONE] must never be processed — proving the outer reader loop stopped promptly.
+    const sseChunks = [
+      'data: "Partial answer"\n\n',
+      'data: {"error": "Overloaded"}\n\n',
+      'data: " should never be appended"\n\n',
+      'data: [DONE]\n\n',
+    ];
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: makeSseStream(sseChunks),
+      }),
+    );
+
+    const onComplete = vi.fn();
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    let caught: Error | null = null;
+    await act(async () => {
+      try {
+        await result.current.startStream('conv-1', 'hi', onComplete);
+      } catch (e) {
+        caught = e as Error;
+      }
+    });
+
+    // streamError is surfaced to the caller...
+    expect(caught).toBeInstanceOf(Error);
+    expect(caught?.message).toBe('Overloaded');
+    // ...and the partial answer was never committed as a success.
+    expect(onComplete).not.toHaveBeenCalled();
+    // The finally block still reset all streaming state exactly once.
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.streamingContent).toBe('');
+    expect(result.current.streamingSources).toHaveLength(0);
+    expect(result.current.streamingStatus).toBeNull();
+  });
+});
+
 describe('abortStream', () => {
   beforeEach(() => {
     vi.clearAllMocks();
