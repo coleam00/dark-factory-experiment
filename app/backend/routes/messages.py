@@ -467,22 +467,22 @@ async def _maybe_set_conversation_title(
 
 
 def _collapse_by_video(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Collapse multiple chunks from the same video into a single citation entry.
+    """Collapse multiple chunks from the same video into citation entries.
 
     After the ``is_cited`` pass, chunks from the same video are redundant in
     the UI — the user needs one clickable chip per video, not one per 5-second
     transcript segment (issue #208).
 
     For each ``video_id`` group:
-    - ``is_cited`` is True if ANY chunk in the group was cited by the LLM.
-    - ``start_seconds`` is the earliest timestamp among cited chunks (or among
-      all chunks if none were cited), so the deep-link opens near the most
-      relevant moment.
-    - ``segment_count`` records how many chunks were collapsed so the frontend
-      can optionally display "(N segments)".
-    - All other fields are taken from the representative chunk.
+    - If two or more chunks in the group were cited by the LLM, each cited
+      chunk becomes its own entry so every distinct moment gets a chip
+      (issue #276).  ``segment_count`` is set to 1 for these entries.
+    - If exactly one chunk is cited, that chunk is the representative.
+    - If no chunks are cited, the earliest timestamp is used as the
+      representative (issue #208 anti-flooding).
 
-    Insertion order of videos is preserved (first-seen wins).
+    Insertion order of videos is preserved (first-seen wins).  Intra-group
+    multi-cited entries are ordered by ``start_seconds``.
     """
     seen: dict[str, list[dict]] = {}
     for c in chunks:
@@ -494,15 +494,23 @@ def _collapse_by_video(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     collapsed: list[dict] = []
     for group in seen.values():
         cited_in_group = [c for c in group if c.get("is_cited")]
-        if cited_in_group:
-            representative = min(cited_in_group, key=lambda c: c.get("start_seconds") or 0.0)
-            is_cited = True
+        if len(cited_in_group) >= 2:
+            for c in sorted(cited_in_group, key=lambda c: c.get("start_seconds") or 0.0):
+                entry = dict(c)
+                entry["is_cited"] = True
+                entry["segment_count"] = 1
+                collapsed.append(entry)
+        elif len(cited_in_group) == 1:
+            representative = cited_in_group[0]
+            entry = dict(representative)
+            entry["is_cited"] = True
+            entry["segment_count"] = len(group)
+            collapsed.append(entry)
         else:
             representative = min(group, key=lambda c: c.get("start_seconds") or 0.0)
-            is_cited = False
-        entry = dict(representative)
-        entry["is_cited"] = is_cited
-        entry["segment_count"] = len(group)
-        collapsed.append(entry)
+            entry = dict(representative)
+            entry["is_cited"] = False
+            entry["segment_count"] = len(group)
+            collapsed.append(entry)
 
     return collapsed

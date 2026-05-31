@@ -275,3 +275,37 @@ class TestSseIntegration:
         assert entry["is_cited"] is False
         assert entry["segment_count"] == 3
         assert entry["start_seconds"] == 0.0  # c0, earliest
+
+    async def test_two_cited_same_video_emit_separate_chips(self) -> None:
+        """Two distinct moments from the same video, both cited → two chips
+        with correct timestamps (issue #276)."""
+        chunks = [{**_chunk(f"c{i}", "v1"), "start_seconds": float(i * 10)} for i in range(5)]
+        body = await _post_message(
+            answer_tokens=["Answer [c:c1][c:c3]."],
+            retrieved_chunks=chunks,
+        )
+        payload = _parse_sources(body)
+        assert len(payload) == 2
+        assert all(e["video_id"] == "v1" for e in payload)
+        assert all(e["is_cited"] is True for e in payload)
+        assert all(e["segment_count"] == 1 for e in payload)
+        assert {e["start_seconds"] for e in payload} == {10.0, 30.0}
+        assert {e["chunk_id"] for e in payload} == {"c1", "c3"}
+
+    async def test_two_cited_same_video_same_timestamp(self) -> None:
+        """Two cited chunks from the same video with identical start_seconds
+        still produce two chips (dedup is by chunk_id, not timestamp)."""
+        chunks = [
+            {**_chunk("c1", "v1"), "start_seconds": 20.0},
+            {**_chunk("c2", "v1"), "start_seconds": 20.0},
+        ]
+        body = await _post_message(
+            answer_tokens=["Answer [c:c1][c:c2]."],
+            retrieved_chunks=chunks,
+        )
+        payload = _parse_sources(body)
+        assert len(payload) == 2
+        assert {e["chunk_id"] for e in payload} == {"c1", "c2"}
+        assert all(e["start_seconds"] == 20.0 for e in payload)
+        assert all(e["is_cited"] is True for e in payload)
+        assert all(e["segment_count"] == 1 for e in payload)
