@@ -1152,3 +1152,252 @@ class TestChunkExpansionIntegration:
         assert "hello world snippet" in output
         assert "Test Video" in output
         assert "data: [DONE]" in output
+
+
+class TestSourcesSnapshotRegression:
+    """Regression tests for issue #277 — saved answer's sources must match
+    what was shown live after an interrupted response."""
+
+    async def test_interrupted_done_branch_persists_no_sources(self) -> None:
+        """If processing in the [DONE] branch raises after source_citations
+        is populated but before the sources SSE event is emitted, the
+        persisted message must store sources=None."""
+        import json
+        from unittest.mock import AsyncMock, patch
+        from uuid import uuid4
+
+        from httpx import ASGITransport, AsyncClient
+
+        from backend.auth.tokens import encode_token
+        from backend.main import app
+
+        answer_text = "The video explains that this feature works well."
+        answer_chunk = f"data: {json.dumps(answer_text)}\n\n"
+        done_chunk = "data: [DONE]\n\n"
+
+        source_citations = [
+            {
+                "chunk_id": "c1",
+                "video_id": "v1",
+                "video_title": "Test Video",
+                "video_url": "https://youtube.com/watch?v=abc",
+                "start_seconds": 10.0,
+                "end_seconds": 20.0,
+                "snippet": "Test snippet",
+            }
+        ]
+
+        async def mock_stream_chat(
+            messages,
+            tools=None,
+            tool_executor=None,
+            max_tool_calls=0,
+            final_text_out=None,
+            **_kwargs,
+        ):
+            if tool_executor is not None:
+                await tool_executor("search_videos", json.dumps({"query": "test"}))
+            yield answer_chunk
+            if final_text_out is not None:
+                final_text_out.append(answer_text)
+            yield done_chunk
+
+        async def mock_execute_tool(
+            name, raw_args, video_id_whitelist=None, embedding_cache=None, is_member=False
+        ):
+            return {"ok": True, "text": "context", "chunks": source_citations}
+
+        def raising_collapse(chunks):
+            raise RuntimeError("collapse failed")
+
+        test_user_id = str(uuid4())
+        test_conv_id = str(uuid4())
+        valid_token = encode_token(test_user_id)
+
+        async def mock_get_user_by_id(user_id):
+            return {
+                "id": test_user_id,
+                "email": "test@example.com",
+                "password_hash": "hashed",
+                "created_at": "2026-01-01T00:00:00Z",
+            }
+
+        async def mock_get_conversation(conv_id, user_id):
+            if conv_id == test_conv_id:
+                return {
+                    "id": test_conv_id,
+                    "user_id": test_user_id,
+                    "title": "Test",
+                    "created_at": "2026-01-01T00:00:00Z",
+                }
+            return None
+
+        mock_create = AsyncMock(side_effect=[{"id": str(uuid4())}, {"id": str(uuid4())}])
+
+        async def mock_list_messages(conv_id, user_id):
+            return []
+
+        async def mock_list_videos():
+            return [{"id": "v1", "title": "Test Video", "url": "u"}]
+
+        with (
+            patch("backend.auth.dependencies.users_repo.get_user_by_id", mock_get_user_by_id),
+            patch("backend.db.repository.get_conversation", mock_get_conversation),
+            patch("backend.db.repository.create_message", mock_create),
+            patch("backend.db.repository.list_messages", mock_list_messages),
+            patch("backend.db.repository.list_videos", mock_list_videos),
+            patch("backend.routes.messages.stream_chat", mock_stream_chat),
+            patch("backend.routes.messages.execute_tool", mock_execute_tool),
+            patch("backend.routes.messages._collapse_by_video", raising_collapse),
+        ):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                try:
+                    await client.post(
+                        f"/api/conversations/{test_conv_id}/messages",
+                        json={"content": "question about video"},
+                        headers={"Cookie": f"session={valid_token}"},
+                    )
+                except Exception:
+                    # Generator may raise mid-stream; we only care about the
+                    # persisted state in the finally block.
+                    pass
+
+        # Two create_message calls: user msg, then assistant msg in finally.
+        assert mock_create.call_count == 2, f"expected 2 calls, got {mock_create.call_count}"
+        assistant_kwargs = mock_create.call_args_list[1].kwargs
+        assert assistant_kwargs["role"] == "assistant"
+        assert assistant_kwargs["sources"] is None, (
+            f"interrupted [DONE] should persist sources=None; "
+            f"got {assistant_kwargs['sources']!r}"
+        )
+
+    async def test_emitted_sources_snapshot_matches_persisted(self) -> None:
+        """For a successful completion, the persisted ``sources`` must match
+        the ``event: sources`` SSE payload exactly, and ``copy.deepcopy``
+        must have been used so the persisted list is not a live reference."""
+        import copy
+        import json
+        from unittest.mock import AsyncMock, patch
+        from uuid import uuid4
+
+        from httpx import ASGITransport, AsyncClient
+
+        from backend.auth.tokens import encode_token
+        from backend.main import app
+
+        answer_text = "The video explains that this feature works well."
+        answer_chunk = f"data: {json.dumps(answer_text)}\n\n"
+        done_chunk = "data: [DONE]\n\n"
+
+        source_citations = [
+            {
+                "chunk_id": "c1",
+                "video_id": "v1",
+                "video_title": "Test Video",
+                "video_url": "https://youtube.com/watch?v=abc",
+                "start_seconds": 10.0,
+                "end_seconds": 20.0,
+                "snippet": "Test snippet",
+            }
+        ]
+
+        async def mock_stream_chat(
+            messages,
+            tools=None,
+            tool_executor=None,
+            max_tool_calls=0,
+            final_text_out=None,
+            **_kwargs,
+        ):
+            if tool_executor is not None:
+                await tool_executor("search_videos", json.dumps({"query": "test"}))
+            yield answer_chunk
+            if final_text_out is not None:
+                final_text_out.append(answer_text)
+            yield done_chunk
+
+        async def mock_execute_tool(
+            name, raw_args, video_id_whitelist=None, embedding_cache=None, is_member=False
+        ):
+            return {"ok": True, "text": "context", "chunks": source_citations}
+
+        test_user_id = str(uuid4())
+        test_conv_id = str(uuid4())
+        valid_token = encode_token(test_user_id)
+
+        async def mock_get_user_by_id(user_id):
+            return {
+                "id": test_user_id,
+                "email": "test@example.com",
+                "password_hash": "hashed",
+                "created_at": "2026-01-01T00:00:00Z",
+            }
+
+        async def mock_get_conversation(conv_id, user_id):
+            if conv_id == test_conv_id:
+                return {
+                    "id": test_conv_id,
+                    "user_id": test_user_id,
+                    "title": "Test",
+                    "created_at": "2026-01-01T00:00:00Z",
+                }
+            return None
+
+        mock_create = AsyncMock(side_effect=[{"id": str(uuid4())}, {"id": str(uuid4())}])
+
+        async def mock_list_messages(conv_id, user_id):
+            return []
+
+        async def mock_list_videos():
+            return [{"id": "v1", "title": "Test Video", "url": "u"}]
+
+        deepcopy_calls = []
+        _real_deepcopy = copy.deepcopy
+
+        def tracking_deepcopy(obj, *args, **kwargs):
+            deepcopy_calls.append(obj)
+            return _real_deepcopy(obj, *args, **kwargs)
+
+        with (
+            patch("backend.auth.dependencies.users_repo.get_user_by_id", mock_get_user_by_id),
+            patch("backend.db.repository.get_conversation", mock_get_conversation),
+            patch("backend.db.repository.create_message", mock_create),
+            patch("backend.db.repository.list_messages", mock_list_messages),
+            patch("backend.db.repository.list_videos", mock_list_videos),
+            patch("backend.routes.messages.stream_chat", mock_stream_chat),
+            patch("backend.routes.messages.execute_tool", mock_execute_tool),
+            patch("backend.routes.messages.copy.deepcopy", tracking_deepcopy),
+        ):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                response = await client.post(
+                    f"/api/conversations/{test_conv_id}/messages",
+                    json={"content": "question about video"},
+                    headers={"Cookie": f"session={valid_token}"},
+                )
+
+        output = response.text
+        # Extract the sources event payload
+        sse_payload = None
+        lines = output.split("\n")
+        for i, line in enumerate(lines):
+            if line == "event: sources":
+                data_line = lines[i + 1]
+                assert data_line.startswith("data: ")
+                sse_payload = json.loads(data_line[len("data: "):])
+                break
+
+        assert sse_payload is not None, f"No sources event found in output: {output!r}"
+
+        assert mock_create.call_count == 2
+        assistant_kwargs = mock_create.call_args_list[1].kwargs
+        persisted_sources = assistant_kwargs["sources"]
+
+        # Deep-equal to what was sent in the SSE event
+        assert persisted_sources == sse_payload
+
+        # copy.deepcopy must have been called at least once during [DONE] processing
+        assert len(deepcopy_calls) >= 1, (
+            "Expected copy.deepcopy to be called for the sources snapshot"
+        )

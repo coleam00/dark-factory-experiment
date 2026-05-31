@@ -17,6 +17,7 @@ Orchestrates the tool-driven RAG flow:
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 from collections.abc import AsyncGenerator
@@ -171,6 +172,7 @@ async def create_message(
     async def event_generator() -> AsyncGenerator[str, None]:
         full_response: list[str] = []
         final_text_buf: list[str] = []
+        emitted_sources: list[dict] | None = None
         # Two-tier citations (issue #176): strip `[c:<id>]` markers from the
         # stream; use them at [DONE] to flag is_cited on retrieved chunks.
         marker_stripper = CitationMarkerStripper()
@@ -227,6 +229,7 @@ async def create_message(
                             else _extract_text_from_sse(full_response)
                         )
                         if not _is_refusal(final_text):
+                            emitted_sources = copy.deepcopy(source_citations)
                             sources_json = json.dumps(source_citations)
                             yield f"event: sources\ndata: {sources_json}\n\n"
                     full_response.append(sse_chunk)
@@ -269,8 +272,8 @@ async def create_message(
                 refusal_check_text = final_text_buf[0] if final_text_buf else assistant_text
                 sources_to_persist: list[dict] | None = (
                     None
-                    if not source_citations or _is_refusal(refusal_check_text)
-                    else source_citations
+                    if not emitted_sources or _is_refusal(refusal_check_text)
+                    else emitted_sources
                 )
                 try:
                     await asyncio.shield(
