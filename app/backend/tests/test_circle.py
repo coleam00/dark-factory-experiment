@@ -110,6 +110,20 @@ async def test_inactive_member_returns_false():
 
 
 @respx.mock
+async def test_member_missing_active_field_fails_closed():
+    """A member object with no `active` field must be treated as a non-member.
+
+    Circle's search-result shape does not reliably include `active`; a
+    present-but-unknown-status member must NOT be granted access (fail-closed).
+    """
+    respx.get("https://app.circle.so/api/admin/v2/community_members/search").mock(
+        return_value=httpx.Response(200, json={"id": 999})  # no `active` key
+    )
+
+    assert await circle.verify_paid_member("unknown@example.com") is False
+
+
+@respx.mock
 async def test_records_wrapped_response_handled():
     """Some Circle endpoints wrap a single record in `records: [...]`."""
     respx.get("https://app.circle.so/api/admin/v2/community_members/search").mock(
