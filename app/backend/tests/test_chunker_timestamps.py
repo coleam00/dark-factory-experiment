@@ -39,6 +39,28 @@ class TestChunkVideoTimestamped:
         # The snippet should be the raw segment text (up to 300 chars)
         assert chunk["snippet"] == "Original transcript text here"
 
+    def test_zero_duration_segment_keeps_boundary_when_split(self) -> None:
+        """A zero-duration segment that splits into multiple sub-chunks must not
+        collapse every sub-chunk onto a single instant.
+
+        Regression for issue #245: the final transcript segment can have
+        end == start (and Supadata's last segment can carry duration == 0). When
+        such a segment is long enough to split into more than one sub-chunk, the
+        old even-distribution math computed step == 0 and pinned every sub-chunk
+        to start_s. With duration <= 0 we keep the original [start_s, end_s].
+        """
+        # Long text that HybridChunker (max_tokens=512) splits into >1 sub-chunk.
+        long_text = " ".join(
+            f"Sentence number {i} describes a distinct idea about the topic." for i in range(200)
+        )
+        segments = [{"start": 330.0, "end": 330.0, "text": long_text}]
+        result, _ = chunk_video_timestamped(segments)
+
+        assert len(result) > 1
+        for chunk in result:
+            assert chunk["start_seconds"] == 330.0
+            assert chunk["end_seconds"] == 330.0
+
     def test_empty_segments_returns_empty_list(self) -> None:
         """Empty input returns empty list."""
         result, had_errors = chunk_video_timestamped([])
