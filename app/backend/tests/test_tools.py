@@ -96,7 +96,7 @@ _FAKE_CHUNKS = [
 
 @pytest.mark.asyncio
 async def test_execute_search_hybrid_happy_path(monkeypatch) -> None:
-    async def fake_retrieve(_q, _emb, top_k=5, is_member=False):
+    async def fake_retrieve(_q, _emb, top_k=5, is_member=False, video_ids=None):
         assert top_k == 10
         return _FAKE_CHUNKS
 
@@ -112,7 +112,7 @@ async def test_execute_search_hybrid_happy_path(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_execute_search_keyword_hydrates_raw_chunks(monkeypatch) -> None:
-    async def fake_keyword(_q, top_k=10, language="english", allowed_source_types=None):
+    async def fake_keyword(_q, top_k=10, language="english", allowed_source_types=None, video_ids=None):
         return [
             {
                 "id": "c1",
@@ -140,7 +140,7 @@ async def test_execute_search_keyword_hydrates_raw_chunks(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_execute_search_semantic_embeds_and_hydrates(monkeypatch) -> None:
-    async def fake_vector(_emb, top_k=10, allowed_source_types=None):
+    async def fake_vector(_emb, top_k=10, allowed_source_types=None, video_ids=None):
         return [
             {
                 "id": "c2",
@@ -169,7 +169,7 @@ async def test_execute_search_semantic_embeds_and_hydrates(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_search_empty_results_returns_canned_message(monkeypatch) -> None:
-    async def fake_keyword(_q, top_k=10, language="english", allowed_source_types=None):
+    async def fake_keyword(_q, top_k=10, language="english", allowed_source_types=None, video_ids=None):
         return []
 
     monkeypatch.setattr(tools_module.repository, "keyword_search", fake_keyword)
@@ -257,7 +257,7 @@ async def test_execute_search_hybrid_respects_per_video_cap(monkeypatch) -> None
         for i in range(6)
     ]
 
-    async def fake_retrieve(_q, _emb, top_k=10, is_member=False):
+    async def fake_retrieve(_q, _emb, top_k=10, is_member=False, video_ids=None):
         return many_chunks
 
     monkeypatch.setattr("backend.rag.retriever_hybrid.retrieve_hybrid", fake_retrieve)
@@ -273,7 +273,7 @@ async def test_execute_search_hybrid_respects_per_video_cap(monkeypatch) -> None
 async def test_execute_search_keyword_respects_per_video_cap(monkeypatch) -> None:
     """Cap must be enforced end-to-end inside execute_search_keyword."""
 
-    async def fake_keyword(_q, top_k=10, language="english", allowed_source_types=None):
+    async def fake_keyword(_q, top_k=10, language="english", allowed_source_types=None, video_ids=None):
         return [
             {
                 "id": f"c{i}",
@@ -303,7 +303,7 @@ async def test_execute_search_keyword_respects_per_video_cap(monkeypatch) -> Non
 async def test_execute_search_semantic_respects_per_video_cap(monkeypatch) -> None:
     """Cap must be enforced end-to-end inside execute_search_semantic."""
 
-    async def fake_vector(_emb, top_k=10, allowed_source_types=None):
+    async def fake_vector(_emb, top_k=10, allowed_source_types=None, video_ids=None):
         return [
             {
                 "id": f"c{i}",
@@ -535,6 +535,101 @@ async def test_transcript_chunks_default_youtube_when_metadata_missing(monkeypat
     chunk = result["chunks"][0]
     assert chunk["source_type"] == "youtube"
     assert chunk["lesson_url"] == ""
+
+
+# --- Conversation video scope (issue #279) --------------------------------
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_search_forwards_video_scope(monkeypatch) -> None:
+    """execute_tool('search_videos', ..., video_ids=[...]) reaches
+    retrieve_hybrid with the conversation scope."""
+    captured: dict = {}
+
+    async def fake_retrieve(_q, _emb, top_k=10, is_member=False, video_ids=None):
+        captured["video_ids"] = video_ids
+        return _FAKE_CHUNKS
+
+    monkeypatch.setattr("backend.rag.retriever_hybrid.retrieve_hybrid", fake_retrieve)
+    monkeypatch.setattr("backend.rag.embeddings.embed_text", lambda _s: [0.0] * 1536)
+
+    result = await execute_tool(
+        "search_videos", json.dumps({"query": "rag"}), video_ids=["v1", "v2"]
+    )
+    assert result["ok"] is True
+    assert captured["video_ids"] == ["v1", "v2"]
+
+
+@pytest.mark.asyncio
+async def test_transcript_refuses_video_outside_scope() -> None:
+    """A scoped conversation cannot pull a transcript for an out-of-scope
+    video, even if the whitelist would otherwise allow it (issue #279)."""
+    result = await execute_get_video_transcript(
+        {"video_id": "v2"},
+        video_id_whitelist={"v1", "v2"},
+        video_ids=["v1"],
+    )
+    assert result["ok"] is False
+    assert "not found" in result["error"].lower()
+
+
+@pytest.mark.asyncio
+async def test_transcript_allows_in_scope_video(monkeypatch) -> None:
+    """When the requested video is within the scope, the transcript loads."""
+
+    async def fake_get_video(_v):
+        return {"id": "v1", "title": "Scoped Video", "url": "https://youtu.be/abc"}
+
+    async def fake_list(_v):
+        return [
+            {
+                "id": "c1",
+                "content": "x",
+                "chunk_index": 0,
+                "start_seconds": 0.0,
+                "end_seconds": 5.0,
+                "snippet": "x",
+            }
+        ]
+
+    monkeypatch.setattr(tools_module.repository, "get_video", fake_get_video)
+    monkeypatch.setattr(tools_module.repository, "list_chunks_for_video", fake_list)
+
+    result = await execute_get_video_transcript(
+        {"video_id": "v1"},
+        video_id_whitelist={"v1"},
+        video_ids=["v1"],
+    )
+    assert result["ok"] is True
+    assert result["chunks"][0]["chunk_id"] == "c1"
+
+
+@pytest.mark.asyncio
+async def test_transcript_unscoped_allows_any_whitelisted_video(monkeypatch) -> None:
+    """With no scope (video_ids=None), any whitelisted video is allowed."""
+
+    async def fake_get_video(_v):
+        return {"id": "v9", "title": "Any Video", "url": "https://youtu.be/x"}
+
+    async def fake_list(_v):
+        return [
+            {
+                "id": "c1",
+                "content": "x",
+                "chunk_index": 0,
+                "start_seconds": 0.0,
+                "end_seconds": 5.0,
+                "snippet": "x",
+            }
+        ]
+
+    monkeypatch.setattr(tools_module.repository, "get_video", fake_get_video)
+    monkeypatch.setattr(tools_module.repository, "list_chunks_for_video", fake_list)
+
+    result = await execute_get_video_transcript(
+        {"video_id": "v9"}, video_id_whitelist={"v9"}, video_ids=None
+    )
+    assert result["ok"] is True
 
 
 # --- Formatting / serialization -------------------------------------------

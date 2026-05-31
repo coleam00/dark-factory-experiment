@@ -150,12 +150,17 @@ class TestRetrieveHybrid:
             assert mock_kw.called
             assert mock_vec.called
 
-            # Verify correct arguments passed (over-fetch factor applied)
+            # Verify correct arguments passed (over-fetch factor applied).
+            # video_ids defaults to None (unscoped) when not supplied (issue #279).
             mock_kw.assert_called_once_with(
-                "test query", top_k=fetch_k, language="english", allowed_source_types=["youtube"]
+                "test query",
+                top_k=fetch_k,
+                language="english",
+                allowed_source_types=["youtube"],
+                video_ids=None,
             )
             mock_vec.assert_called_once_with(
-                [0.1] * 1536, top_k=fetch_k, allowed_source_types=["youtube"]
+                [0.1] * 1536, top_k=fetch_k, allowed_source_types=["youtube"], video_ids=None
             )
 
             # Verify result shape has all required citation fields
@@ -167,6 +172,45 @@ class TestRetrieveHybrid:
                 assert "start_seconds" in item
                 assert "end_seconds" in item
                 assert "snippet" in item
+
+    async def test_forwards_video_ids_scope_to_both_searches(self):
+        """retrieve_hybrid forwards a non-empty video_ids scope to both the
+        keyword and vector repository searches (issue #279)."""
+        from backend.config import HYBRID_OVERFETCH_FACTOR
+
+        fetch_k = 5 * HYBRID_OVERFETCH_FACTOR
+        scope = ["v1", "v2"]
+
+        with (
+            patch(
+                "backend.rag.retriever_hybrid.repository.keyword_search",
+                new_callable=AsyncMock,
+            ) as mock_kw,
+            patch(
+                "backend.rag.retriever_hybrid.repository.vector_search_pg",
+                new_callable=AsyncMock,
+            ) as mock_vec,
+            patch(
+                "backend.rag.retriever_hybrid.repository.get_video",
+                new_callable=AsyncMock,
+            ) as mock_video,
+        ):
+            mock_kw.return_value = [_CHUNK_A]
+            mock_vec.return_value = [_CHUNK_A]
+            mock_video.return_value = {"title": "T", "url": "u"}
+
+            await retrieve_hybrid("q", [0.1] * 1536, top_k=5, video_ids=scope)
+
+            mock_kw.assert_called_once_with(
+                "q",
+                top_k=fetch_k,
+                language="english",
+                allowed_source_types=["youtube"],
+                video_ids=scope,
+            )
+            mock_vec.assert_called_once_with(
+                [0.1] * 1536, top_k=fetch_k, allowed_source_types=["youtube"], video_ids=scope
+            )
 
     async def test_rare_exact_term_boosted_by_keyword_path(self):
         """A technical acronym (weak in cosine space) ranks higher via hybrid.

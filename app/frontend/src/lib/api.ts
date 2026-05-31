@@ -41,6 +41,13 @@ export interface Conversation {
   created_at: string;
   updated_at: string;
   preview?: string | null;
+  /**
+   * Per-conversation video scope (issue #279). When present and non-empty,
+   * the assistant's answers and citations only draw from these video ids.
+   * Absent/null means the conversation is unscoped (searches everything).
+   * Immutable once the conversation is created.
+   */
+  video_ids?: string[] | null;
 }
 
 export interface Citation {
@@ -146,8 +153,14 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 export const getConversations = () => request<Conversation[]>('/conversations');
 export const searchConversations = (q: string) =>
   request<Conversation[]>(`/conversations/search?q=${encodeURIComponent(q)}`);
-export const createConversation = () =>
-  request<Conversation>('/conversations', { method: 'POST', body: '{}' });
+// Optionally scope the new conversation to a subset of videos (issue #279).
+// Passing no ids (or an empty list) creates an unscoped conversation that
+// searches the whole library, preserving today's behaviour.
+export const createConversation = (videoIds?: string[]) =>
+  request<Conversation>('/conversations', {
+    method: 'POST',
+    body: JSON.stringify(videoIds?.length ? { video_ids: videoIds } : {}),
+  });
 export const getConversation = (id: string) =>
   request<ConversationWithMessages>(`/conversations/${id}`);
 export const deleteConversation = (id: string) =>

@@ -10,6 +10,7 @@ import { exportConversationAsMarkdown } from '../lib/exportMarkdown';
 import { ChatInput, type ChatInputHandle } from './ChatInput';
 import { CitationModal } from './CitationModal';
 import { Message } from './Message';
+import { VideoScopePicker } from './VideoScopePicker';
 
 function formatResetTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -58,9 +59,14 @@ function SkeletonMessages() {
 // ── Empty / landing state ─────────────────────────────────────────
 interface EmptyStateProps {
   onStarterClick: (text: string) => void;
+  // Optional video-scope picker (issue #279). Only supplied in the top-level
+  // new-chat empty state, where a scope can still be chosen before the
+  // conversation is created. Omitted for the empty state shown inside an
+  // already-created conversation (its scope is fixed at creation).
+  scope?: { selectedIds: string[]; onChange: (ids: string[]) => void };
 }
 
-function EmptyState({ onStarterClick }: EmptyStateProps) {
+function EmptyState({ onStarterClick, scope }: EmptyStateProps) {
   const starters = [
     'How do I use subagents in Claude Code?',
     'How should I structure an agent team?',
@@ -99,6 +105,9 @@ function EmptyState({ onStarterClick }: EmptyStateProps) {
         This AI has access to transcripts from Cole Medin&apos;s YouTube channel and the Dynamous
         course + workshop library.
       </p>
+      {scope && (
+        <VideoScopePicker selectedIds={scope.selectedIds} onChange={scope.onChange} />
+      )}
       <div
         style={{ display: 'flex', flexDirection: 'column', gap: 10, width: '100%', maxWidth: 400 }}
       >
@@ -325,6 +334,15 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
   const pendingUserMsgIdRef = useRef<string | null>(null);
   // Citation modal state
   const [selectedCitation, setSelectedCitation] = useState<Citation | null>(null);
+  // Selected video scope for a brand-new conversation (issue #279). Captured
+  // in the new-chat empty state and passed to createConversation() on first
+  // send. Empty ⇒ unscoped (search everything). Reset when the route changes
+  // so each new chat starts fresh.
+  const [selectedScope, setSelectedScope] = useState<string[]>([]);
+
+  useEffect(() => {
+    setSelectedScope([]);
+  }, [conversationId]);
 
   // ── Auto-scroll logic ──
   // Defer scroll to the next paint cycle so streaming DOM updates are applied first.
@@ -459,7 +477,8 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
       if (!conversationId) {
         if (isStreaming) return;
         try {
-          const conv = await createConversation();
+          // Pass the chosen video scope (issue #279). Empty list ⇒ unscoped.
+          const conv = await createConversation(selectedScope);
           navigate(`/c/${conv.id}`, {
             state: { initialMessage: content } satisfies ConvLocationState,
           });
@@ -556,6 +575,7 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
       addToast,
       refreshAuth,
       refreshConversationsRef,
+      selectedScope,
     ],
   );
 
@@ -687,7 +707,51 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
           </button>
         )}
 
-        {showEmpty && <EmptyState onStarterClick={handleStarterClick} />}
+        {/* ── Scoped-conversation indicator (issue #279) ── */}
+        {/* Read-only: scope is fixed at creation, so there is no edit affordance. */}
+        {conversation && conversation.video_ids && conversation.video_ids.length > 0 && (
+          <div
+            title="This conversation only draws from the videos selected when it was created"
+            style={{
+              position: 'absolute',
+              top: 12,
+              left: 24,
+              background: '#1e293b',
+              border: '1px solid rgba(59,130,246,0.3)',
+              borderRadius: 7,
+              color: '#94a3b8',
+              padding: '5px 8px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              fontSize: 12,
+              zIndex: 5,
+            }}
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 14 14"
+              fill="none"
+              stroke="#3b82f6"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <rect x="1" y="2" width="12" height="10" rx="2" />
+              <polygon points="5,4.5 9.5,7 5,9.5" fill="#3b82f6" stroke="none" />
+            </svg>
+            Scoped to {conversation.video_ids.length} video
+            {conversation.video_ids.length === 1 ? '' : 's'}
+          </div>
+        )}
+
+        {showEmpty && (
+          <EmptyState
+            onStarterClick={handleStarterClick}
+            scope={{ selectedIds: selectedScope, onChange: setSelectedScope }}
+          />
+        )}
 
         {showSkeleton && <SkeletonMessages />}
 

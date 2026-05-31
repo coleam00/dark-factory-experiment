@@ -80,6 +80,12 @@ async def create_message(
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
+    # Per-conversation video scope (issue #279). None/empty ⇒ unscoped (search
+    # the whole library, today's behaviour); a non-empty list restricts every
+    # tool call this turn to those videos. Read once per turn so the scope is
+    # consistent across the whole tool sequence.
+    scoped_video_ids = await repository.get_conversation_video_ids(conv_id, user_id=user_id)
+
     # 2. Enforce the 25 msg / user / 24h cap (MISSION §10 invariant #1).
     #    Must run BEFORE any LLM or DB write so a rate-limited user cannot
     #    consume OpenRouter budget or leave an orphan user-message row. The
@@ -155,6 +161,7 @@ async def create_message(
                 video_id_whitelist=whitelist,
                 embedding_cache=embedding_cache,
                 is_member=is_member_for_turn,
+                video_ids=scoped_video_ids,
             )
             if result.get("ok") and result.get("chunks"):
                 tool_chunks_acc.extend(result["chunks"])

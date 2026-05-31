@@ -19,6 +19,10 @@ router = APIRouter()
 
 class ConversationCreate(BaseModel):
     title: str = "New Conversation"
+    # Optional per-conversation video scope (issue #279). Empty list ⇒ unscoped
+    # (search the whole library); a non-empty list restricts the conversation's
+    # answers and citations to those videos for its lifetime.
+    video_ids: list[str] = []
 
 
 class ConversationRename(BaseModel):
@@ -35,11 +39,18 @@ async def create_conversation(
     body: ConversationCreate | None = None,
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
-    """Create a new empty conversation. Body is optional; defaults to title='New Conversation'."""
+    """Create a new empty conversation. Body is optional; defaults to title='New Conversation'.
+
+    An optional ``video_ids`` list scopes the conversation to those videos
+    (issue #279); omitting it (or sending an empty list) leaves the
+    conversation unscoped — it searches the whole library.
+    """
     title = body.title if body else "New Conversation"
+    video_ids = body.video_ids if body else []
     return await repository.create_conversation(
         user_id=str(current_user["id"]),
         title=title,
+        video_ids=video_ids,
     )
 
 
