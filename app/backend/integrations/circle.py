@@ -64,7 +64,7 @@ async def verify_paid_member(email: str) -> bool:
             member = _extract_member(r.json())
             if member is None:
                 return False
-            if not member.get("active", True):
+            if not member.get("active", False):
                 # Inactive members lose access immediately.
                 return False
             member_id = member.get("id")

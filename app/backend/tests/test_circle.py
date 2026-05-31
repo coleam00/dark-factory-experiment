@@ -110,6 +110,15 @@ async def test_inactive_member_returns_false():
 
 
 @respx.mock
+async def test_member_without_active_field_fails_closed():
+    respx.get("https://app.circle.so/api/admin/v2/community_members/search").mock(
+        return_value=httpx.Response(200, json={"id": 999})
+    )
+
+    assert await circle.verify_paid_member("absent-active@example.com") is False
+
+
+@respx.mock
 async def test_records_wrapped_response_handled():
     """Some Circle endpoints wrap a single record in `records: [...]`."""
     respx.get("https://app.circle.so/api/admin/v2/community_members/search").mock(
