@@ -1,14 +1,15 @@
 """
-Tests for search_conversations_by_title repository function.
+Tests for search_conversations repository function.
 
-NOTE: Tests were written against SQLite `init_db` fixtures. After the
-Postgres/Alembic migration they need a rewrite using a real test Postgres.
-Skipped pending that rewrite.
+NOTE: Tests require a real Postgres instance with the full Alembic schema.
+Skipped pending that environment; un-skip and fill in real fixtures when the
+test-Postgres environment is available (see CLAUDE.md §Testing — snapshot DB).
 """
 
 from __future__ import annotations
 
 import os
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -17,54 +18,68 @@ os.environ.setdefault("JWT_SECRET", "test-secret-please-do-not-use-in-prod")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost:5432/test")
 
 pytestmark = pytest.mark.skip(
-    reason="Tests require SQLite schema.init_db; pending rewrite for asyncpg/Alembic."
+    reason="Tests require a real Postgres instance; pending test-environment setup."
 )
 
 from backend.db.repository import (  # noqa: E402
     create_conversation,
     create_video,
-    search_conversations_by_title,
+    search_conversations,
     search_videos_admin,
 )
 
 
+# ── Title search (ported from the old search_conversations_by_title tests) ───
+
+
 async def test_search_conversations_by_title_case_insensitive():
-    """Search should be case-insensitive using LOWER()."""
+    """Title search should be case-insensitive via ILIKE."""
     user_id = str(uuid4())
     await create_conversation(user_id=user_id, title="Python Tutorial")
     await create_conversation(user_id=user_id, title="JavaScript Guide")
     await create_conversation(user_id=user_id, title="python advanced")
 
-    results = await search_conversations_by_title(user_id, "python")
+    results = await search_conversations(user_id, query="python")
     titles = {r["title"] for r in results}
     assert titles == {"Python Tutorial", "python advanced"}
 
-    results = await search_conversations_by_title(user_id, "PYTHON")
+    results = await search_conversations(user_id, query="PYTHON")
     titles = {r["title"] for r in results}
     assert titles == {"Python Tutorial", "python advanced"}
 
 
 async def test_search_conversations_returns_only_own():
-    """Search should only return conversations owned by the user."""
+    """Search should only return conversations owned by the requesting user."""
     alice_id = str(uuid4())
     bob_id = str(uuid4())
 
     await create_conversation(user_id=alice_id, title="Alice Searchable")
     await create_conversation(user_id=bob_id, title="Bob Searchable")
 
-    results = await search_conversations_by_title(alice_id, "searchable")
+    results = await search_conversations(alice_id, query="searchable")
     titles = {r["title"] for r in results}
     assert titles == {"Alice Searchable"}
     assert "Bob Searchable" not in titles
 
 
-async def test_search_conversations_empty_query():
-    """Empty query should return no results (pattern would be %%)."""
+async def test_search_conversations_empty_query_returns_all():
+    """Empty/blank query should return all conversations for the user (no title filter)."""
     user_id = str(uuid4())
     await create_conversation(user_id=user_id, title="Test Chat")
 
-    results = await search_conversations_by_title(user_id, "")
+    results = await search_conversations(user_id, query="")
     assert isinstance(results, list)
+    assert any(r["title"] == "Test Chat" for r in results)
+
+
+async def test_search_conversations_none_query_returns_all():
+    """None query should return all conversations for the user (no title filter)."""
+    user_id = str(uuid4())
+    await create_conversation(user_id=user_id, title="Test Chat 2")
+
+    results = await search_conversations(user_id, query=None)
+    assert isinstance(results, list)
+    assert any(r["title"] == "Test Chat 2" for r in results)
 
 
 async def test_search_conversations_limit():
@@ -73,17 +88,127 @@ async def test_search_conversations_limit():
     for i in range(5):
         await create_conversation(user_id=user_id, title=f"Chat {i}")
 
-    results = await search_conversations_by_title(user_id, "chat", limit=3)
+    results = await search_conversations(user_id, query="chat", limit=3)
     assert len(results) == 3
 
 
 async def test_search_conversations_no_matches():
-    """Search should return empty list when no matches."""
+    """Search should return an empty list when no conversations match."""
     user_id = str(uuid4())
     await create_conversation(user_id=user_id, title="Python Tutorial")
 
-    results = await search_conversations_by_title(user_id, "javascript")
+    results = await search_conversations(user_id, query="javascript")
     assert results == []
+
+
+# ── Date range filtering ──────────────────────────────────────────────────────
+
+
+async def test_search_conversations_date_from_filters_older():
+    """Conversations created before date_from should not appear."""
+    user_id = str(uuid4())
+    now = datetime.now(UTC)
+
+    old_conv = await create_conversation(user_id=user_id, title="Old")
+    # Back-date the old conversation (requires direct DB update, shown here as intent)
+    # ... seed old_conv with created_at = now - 10 days ...
+    new_conv = await create_conversation(user_id=user_id, title="New")
+
+    cutoff = now - timedelta(days=5)
+    results = await search_conversations(user_id, date_from=cutoff)
+    titles = {r["title"] for r in results}
+    assert "New" in titles
+    assert "Old" not in titles
+
+
+async def test_search_conversations_date_to_filters_newer():
+    """Conversations created after date_to should not appear."""
+    user_id = str(uuid4())
+    now = datetime.now(UTC)
+
+    old_conv = await create_conversation(user_id=user_id, title="Old")
+    new_conv = await create_conversation(user_id=user_id, title="New")
+    # Back-date old_conv and forward-date new_conv in the DB ...
+
+    cutoff = now - timedelta(days=5)
+    results = await search_conversations(user_id, date_to=cutoff)
+    titles = {r["title"] for r in results}
+    assert "Old" in titles
+    assert "New" not in titles
+
+
+async def test_search_conversations_date_range_combined_with_title():
+    """Title query + date range should both apply (AND semantics)."""
+    user_id = str(uuid4())
+    now = datetime.now(UTC)
+
+    # Three conversations: two named "Python", one old, one recent; one named "JavaScript" recent
+    # Seed with appropriate created_at values ...
+
+    cutoff = now - timedelta(days=5)
+    results = await search_conversations(user_id, query="python", date_from=cutoff)
+    # Only the recent Python conversation should appear.
+    assert all("python" in r["title"].lower() for r in results)
+
+
+# ── Video ID filtering ────────────────────────────────────────────────────────
+
+
+async def test_search_conversations_video_id_only():
+    """Filter by video_id returns only conversations whose messages reference that video."""
+    user_id = str(uuid4())
+    video_id_a = "vid_aaa"
+    video_id_b = "vid_bbb"
+
+    conv_with_a = await create_conversation(user_id=user_id, title="About A")
+    conv_with_b = await create_conversation(user_id=user_id, title="About B")
+    # Seed messages with sources=[{"video_id": video_id_a}] for conv_with_a
+    # Seed messages with sources=[{"video_id": video_id_b}] for conv_with_b
+    # ...
+
+    results = await search_conversations(user_id, video_id=video_id_a)
+    titles = {r["title"] for r in results}
+    assert "About A" in titles
+    assert "About B" not in titles
+
+
+async def test_search_conversations_video_id_combined_with_title_and_date():
+    """title + date_from + video_id should all apply simultaneously."""
+    user_id = str(uuid4())
+    now = datetime.now(UTC)
+    target_video_id = "vid_target"
+    cutoff = now - timedelta(days=7)
+
+    # Seed several conversations covering all combinations of (title match / mismatch),
+    # (in-window / outside-window), (references target video / does not).
+    # Only the intersection (matching title, in window, references target video) should appear.
+    # ...
+
+    results = await search_conversations(
+        user_id,
+        query="target",
+        date_from=cutoff,
+        video_id=target_video_id,
+    )
+    assert isinstance(results, list)
+    # Each result must reference the target video and match "target" in title.
+
+
+async def test_search_conversations_no_filters_returns_all_ordered_newest_first():
+    """No filters should return all conversations ordered updated_at DESC."""
+    user_id = str(uuid4())
+    await create_conversation(user_id=user_id, title="First")
+    await create_conversation(user_id=user_id, title="Second")
+    await create_conversation(user_id=user_id, title="Third")
+
+    results = await search_conversations(user_id)
+    assert len(results) >= 3
+    # Verify descending order
+    for i in range(len(results) - 1):
+        assert results[i]["updated_at"] >= results[i + 1]["updated_at"]
+
+
+# ── video admin search (unchanged behavior) ──────────────────────────────────
 
 
 async def test_search_videos_admin_case_insensitive():
