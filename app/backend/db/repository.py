@@ -577,6 +577,43 @@ async def create_message(
     }
 
 
+async def delete_last_assistant_message(conversation_id: str, user_id: str) -> str | None:
+    """Delete the most recent assistant message in a conversation (owner-scoped).
+
+    Used by the regenerate flow (issue #280) to drop the stale answer so the
+    history ends on the user's question before re-streaming a fresh reply.
+
+    Ownership is enforced via a JOIN on conversations.user_id inside the
+    subquery, so a cross-user call can never delete another user's message.
+
+    Returns the deleted message id, or None if the conversation has no
+    assistant message (or doesn't belong to the user).
+    """
+    async with _acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            DELETE FROM messages
+            WHERE id = (
+                SELECT m.id
+                FROM messages m
+                JOIN conversations c ON c.id = m.conversation_id
+                WHERE m.conversation_id = $1
+                  AND c.user_id = $2
+                  AND m.role = 'assistant'
+                ORDER BY m.created_at DESC
+                LIMIT 1
+            )
+            RETURNING id
+            """,
+            conversation_id,
+            user_id,
+        )
+    if row is None:
+        return None
+    await touch_conversation(conversation_id, user_id)
+    return str(row["id"])
+
+
 async def list_messages(conversation_id: str, user_id: str) -> list[dict]:
     """Return messages only if the conversation belongs to the given user."""
     async with _acquire() as conn:

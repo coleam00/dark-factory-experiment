@@ -112,6 +112,84 @@ async def create_message(
     if inserted is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
+    # 4-8. Stream the assistant reply (history load, tool setup, SSE,
+    # persist). Shared with the regenerate endpoint below.
+    return await _build_streaming_response(conv_id, user_id, current_user, title_seed=user_content)
+
+
+# ---------------------------------------------------------------------------
+# POST /api/conversations/{conv_id}/regenerate
+# ---------------------------------------------------------------------------
+
+
+@router.post("/conversations/{conv_id}/regenerate")
+async def regenerate_message(
+    conv_id: str,
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
+    """
+    Regenerate the most recent assistant response (issue #280).
+
+    Deletes the latest assistant message and re-streams a fresh answer to the
+    user's last question. Counts against the daily cap exactly like a normal
+    send (MISSION §10 invariant #1) so regeneration can't be used to bypass it.
+
+    Returns:
+        StreamingResponse (text/event-stream) — identical SSE shape to the
+        normal send endpoint (token chunks → sources event → [DONE]).
+    """
+    user_id = str(current_user["id"])
+
+    # 1. Verify conversation exists AND belongs to current user (404, no leak).
+    conv = await repository.get_conversation(conv_id, user_id=user_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # 2. Enforce the 25 msg / user / 24h cap BEFORE any mutation or LLM work,
+    #    identical to the normal send path. Runs before the delete below so a
+    #    rate-limited user keeps their existing answer (no destructive 429).
+    try:
+        await rate_limit.check_and_record(user_id)
+    except rate_limit.RateLimitExceeded as exc:
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": "rate_limit_exceeded",
+                "limit": rate_limit.DAILY_MESSAGE_CAP,
+                "window_hours": rate_limit.WINDOW_HOURS,
+                "reset_at": exc.reset_at.isoformat(),
+            },
+        )
+
+    # 3. Drop the latest assistant message so the history ends on the user's
+    #    question. 404 if there's no assistant turn to regenerate.
+    deleted_id = await repository.delete_last_assistant_message(
+        conversation_id=conv_id, user_id=user_id
+    )
+    if deleted_id is None:
+        raise HTTPException(status_code=404, detail="No assistant message to regenerate")
+
+    # 4-8. Stream a fresh reply against the preserved history. title_seed=None
+    #      because the conversation already has a title from the first send.
+    return await _build_streaming_response(conv_id, user_id, current_user, title_seed=None)
+
+
+async def _build_streaming_response(
+    conv_id: str,
+    user_id: str,
+    current_user: dict[str, Any],
+    title_seed: str | None,
+) -> StreamingResponse:
+    """Build the SSE StreamingResponse for an assistant turn.
+
+    Shared by the normal send (`create_message`) and regenerate
+    (`regenerate_message`) flows. Both end with the conversation history
+    terminating on the user's question; this helper loads that history, wires
+    the retrieval tools, streams the LLM, and persists the assistant message.
+
+    ``title_seed`` is the user message used to auto-generate the conversation
+    title on first send; pass ``None`` (regenerate) to skip title generation.
+    """
     # 4. Retrieve conversation history for LLM context
     all_messages = await repository.list_messages(conv_id, user_id=user_id)
     llm_messages = [{"role": m["role"], "content": m["content"]} for m in all_messages]
@@ -291,14 +369,17 @@ async def create_message(
                     raise
                 # Title auto-generation is best-effort: client-disconnect swallowed,
                 # unexpected errors logged but not re-raised (message was saved above).
-                try:
-                    await asyncio.shield(
-                        _maybe_set_conversation_title(conv_id, user_id, user_content)
-                    )
-                except asyncio.CancelledError:
-                    pass
-                except Exception as exc:
-                    logger.warning("Failed to update conversation title: %s", exc)
+                # Skipped on regenerate (title_seed is None) — the conversation
+                # already has a title from the original send.
+                if title_seed is not None:
+                    try:
+                        await asyncio.shield(
+                            _maybe_set_conversation_title(conv_id, user_id, title_seed)
+                        )
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception as exc:
+                        logger.warning("Failed to update conversation title: %s", exc)
 
     return StreamingResponse(
         event_generator(),

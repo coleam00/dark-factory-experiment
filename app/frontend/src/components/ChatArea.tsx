@@ -301,6 +301,7 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
     streamingStatus,
     isStreaming,
     startStream,
+    startRegenerate,
     abortStream,
   } = useStreamingResponse(conversationId || null);
   const { addToast } = useToast();
@@ -583,6 +584,89 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
     handleSend(text);
   }, [failedMessageText, handleSend]);
 
+  // ── Regenerate handler ──
+  // Re-runs the user's last question and replaces the most recent assistant
+  // answer with a fresh stream (issue #280). Mirrors handleSend's optimistic
+  // pattern: drop the stale answer, let the streaming bubble render the new
+  // tokens in its place, append the persisted message on completion. On
+  // failure the previous answer is restored so the turn is never left blank.
+  const handleRegenerate = useCallback(async () => {
+    if (!conversationId || isStreaming) return;
+
+    // Find the most recent assistant message — the only one regenerate touches.
+    let snapshot: MessageType | null = null;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'assistant') {
+        snapshot = messages[i];
+        break;
+      }
+    }
+    if (!snapshot) return;
+    const previous = snapshot;
+
+    setInlineError(null);
+    setFailedMessageText(null);
+
+    // Optimistically remove the stale answer; the streaming bubble takes its place.
+    setMessages((prev) => prev.filter((m) => m.id !== previous.id));
+    autoScrollRef.current = true;
+    scrollToBottom();
+
+    let completed = false;
+    try {
+      await startRegenerate(conversationId, ({ fullText, sources }) => {
+        completed = true;
+        const assistantMsg: MessageType = {
+          id: `temp-assistant-${Date.now()}`,
+          conversation_id: conversationId,
+          role: 'assistant',
+          content: fullText,
+          created_at: new Date().toISOString(),
+          sources: sources.length > 0 ? sources : undefined,
+        };
+        setMessages((prev) => [...prev, assistantMsg]);
+      });
+      // Refresh the quota counter so the sidebar reflects the consumed message.
+      refreshAuth();
+    } catch (e) {
+      // Restore the previous answer if no fresh content streamed in, so the
+      // user is never left with a blank turn (rate-limit, network, 401).
+      if (!completed) {
+        setMessages((prev) =>
+          prev.some((m) => m.id === previous.id) ? prev : [...prev, previous],
+        );
+      }
+
+      // Intentional abort (navigation or user cancel) — no error toast.
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        return;
+      }
+
+      if (e instanceof RateLimitError) {
+        // Daily cap hit — the regenerate consumed no answer (429 fires before
+        // the delete), so the restored message above is the real DB state.
+        const friendly = `You've hit your daily message limit (${e.limit}/day). Resets at ${formatResetTime(e.resetAt)}.`;
+        setInlineError(friendly);
+        addToast(friendly, 'error');
+        refreshAuth();
+        return;
+      }
+
+      const errMsg = e instanceof Error ? e.message : 'Failed to regenerate response';
+      setInlineError('Failed to regenerate the response. Please try again.');
+      addToast(errMsg || 'Network error — could not regenerate', 'error');
+    }
+  }, [
+    conversationId,
+    isStreaming,
+    messages,
+    setMessages,
+    startRegenerate,
+    scrollToBottom,
+    addToast,
+    refreshAuth,
+  ]);
+
   // ── Starter click handler ──
   const handleStarterClick = useCallback((text: string) => {
     chatInputRef.current?.setInputText(text);
@@ -601,6 +685,16 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
   // before dispatchedInitialRef fires (#205).
   const showEmptyInConversation =
     messages.length === 0 && !inlineError && !isStreaming && !location.state?.initialMessage;
+
+  // ID of the most recent assistant message — the only bubble that gets a
+  // regenerate action (issue #280). null when the conversation has no
+  // assistant turn yet (e.g. first send still in flight).
+  const lastAssistantId = (() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'assistant') return messages[i].id;
+    }
+    return null;
+  })();
 
   const handleExport = useCallback(() => {
     try {
@@ -715,6 +809,11 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
                   content={msg.content}
                   sources={msg.sources}
                   onCitationClick={handleCitationClick}
+                  // Regenerate is offered only on the latest assistant answer,
+                  // and only while idle (issue #280).
+                  onRegenerate={
+                    !isStreaming && msg.id === lastAssistantId ? handleRegenerate : undefined
+                  }
                 />
               ))
             )}

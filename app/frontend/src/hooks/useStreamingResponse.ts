@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { type Citation, RateLimitError } from '../lib/api';
+import { type Citation, RateLimitError, regenerateResponse } from '../lib/api';
 
 export interface StreamResult {
   fullText: string;
@@ -42,10 +42,15 @@ export function useStreamingResponse(conversationId: string | null) {
     }
   }, []);
 
-  const startStream = useCallback(
+  // Shared SSE consumer for both the normal send and regenerate flows. The
+  // only difference between the two is how the request is issued (`doFetch`);
+  // the 401/429/error handling, token/sources/status parsing, and the
+  // streaming-state reset are identical, so they live here once. The caller's
+  // `doFetch` receives the abort signal so an in-flight stream can be cancelled
+  // via `abortStream`.
+  const runStream = useCallback(
     async (
-      conversationId: string,
-      userMessage: string,
+      doFetch: (signal: AbortSignal) => Promise<Response>,
       onComplete: (result: StreamResult) => void,
     ): Promise<void> => {
       setIsStreaming(true);
@@ -61,13 +66,7 @@ export function useStreamingResponse(conversationId: string | null) {
         const abortController = new AbortController();
         streamAbortRef.current = abortController;
 
-        const res = await fetch(`/api/conversations/${conversationId}/messages`, {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content: userMessage }),
-          signal: abortController.signal,
-        });
+        const res = await doFetch(abortController.signal);
 
         if (res.status === 401) {
           if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
@@ -218,12 +217,43 @@ export function useStreamingResponse(conversationId: string | null) {
     [],
   );
 
+  const startStream = useCallback(
+    (
+      conversationId: string,
+      userMessage: string,
+      onComplete: (result: StreamResult) => void,
+    ): Promise<void> =>
+      runStream(
+        (signal) =>
+          fetch(`/api/conversations/${conversationId}/messages`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content: userMessage }),
+            signal,
+          }),
+        onComplete,
+      ),
+    [runStream],
+  );
+
+  // Regenerate consumes the regenerate SSE stream exactly like a normal send,
+  // but issues no optimistic user message — the user's question is already the
+  // last persisted message. The backend deletes the stale answer and replays
+  // the history, so the stream shape (tokens → sources → [DONE]) is identical.
+  const startRegenerate = useCallback(
+    (conversationId: string, onComplete: (result: StreamResult) => void): Promise<void> =>
+      runStream((signal) => regenerateResponse(conversationId, signal), onComplete),
+    [runStream],
+  );
+
   return {
     streamingContent,
     streamingSources,
     streamingStatus,
     isStreaming,
     startStream,
+    startRegenerate,
     abortStream,
   };
 }

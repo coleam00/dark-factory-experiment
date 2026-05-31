@@ -15,6 +15,63 @@ interface MessageProps {
   onCitationClick?: (citation: Citation) => void;
   /** Current tool-call status during streaming (ephemeral progress indicator) */
   streamingStatus?: StreamingStatus | null;
+  /**
+   * When provided on an assistant message, renders a "Regenerate" action that
+   * re-runs the last question (issue #280). ChatArea passes this only to the
+   * most recent assistant bubble.
+   */
+  onRegenerate?: () => void;
+}
+
+// ── Regenerate action (circular-arrow icon) ───────────────────────
+function RegenerateButton({ onRegenerate }: { onRegenerate: () => void }) {
+  return (
+    <button
+      onClick={onRegenerate}
+      title="Regenerate response"
+      aria-label="Regenerate response"
+      className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 5,
+        marginTop: 10,
+        padding: '4px 10px',
+        background: 'transparent',
+        border: '1px solid rgba(255,255,255,0.12)',
+        borderRadius: 7,
+        color: '#94a3b8',
+        cursor: 'pointer',
+        fontSize: 12,
+        fontFamily: 'inherit',
+        transition: 'background 0.15s, color 0.15s',
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+        e.currentTarget.style.color = '#f1f5f9';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = 'transparent';
+        e.currentTarget.style.color = '#94a3b8';
+      }}
+    >
+      <svg
+        width="13"
+        height="13"
+        viewBox="0 0 13 13"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M11,6.5 A4.5,4.5 0 1,1 9.5,3.2" />
+        <polyline points="11,1.5 11,3.5 9,3.5" />
+      </svg>
+      Regenerate
+    </button>
+  );
 }
 
 // ── Typing indicator (3 pulsing dots) ────────────────────────────
@@ -167,6 +224,7 @@ export function Message({
   sources,
   onCitationClick,
   streamingStatus,
+  onRegenerate,
 }: MessageProps) {
   const isUser = role === 'user';
   const hasSources = !isUser && Array.isArray(sources) && sources.length > 0;
@@ -204,6 +262,7 @@ export function Message({
           <>
             <MarkdownRenderer content={content} />
             {hasSources && <SourceCitations sources={sources} onCitationClick={onCitationClick} />}
+            {onRegenerate && <RegenerateButton onRegenerate={onRegenerate} />}
           </>
         )}
       </div>

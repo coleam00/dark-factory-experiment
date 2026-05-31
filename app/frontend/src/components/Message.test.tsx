@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { Citation } from '../lib/api';
 import { Message } from './Message';
@@ -147,5 +147,44 @@ describe('Message — citation chip segment_count label', () => {
       />,
     );
     expect(screen.queryByText(/segments/)).not.toBeInTheDocument();
+  });
+});
+
+describe('Message — regenerate action (issue #280)', () => {
+  it('renders a Regenerate button on an assistant message when onRegenerate is provided', () => {
+    const onRegenerate = vi.fn();
+    render(
+      <Message role="assistant" content="An answer." onRegenerate={onRegenerate} />,
+    );
+    const btn = screen.getByRole('button', { name: /regenerate response/i });
+    expect(btn).toBeInTheDocument();
+  });
+
+  it('invokes onRegenerate when the button is clicked', () => {
+    const onRegenerate = vi.fn();
+    render(
+      <Message role="assistant" content="An answer." onRegenerate={onRegenerate} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /regenerate response/i }));
+    expect(onRegenerate).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not render a Regenerate button when onRegenerate is absent', () => {
+    render(<Message role="assistant" content="An answer." />);
+    expect(screen.queryByRole('button', { name: /regenerate response/i })).not.toBeInTheDocument();
+  });
+
+  it('does not render a Regenerate button on a user message', () => {
+    const onRegenerate = vi.fn();
+    render(<Message role="user" content="My question." onRegenerate={onRegenerate} />);
+    expect(screen.queryByRole('button', { name: /regenerate response/i })).not.toBeInTheDocument();
+  });
+
+  it('does not render a Regenerate button while the assistant message is still streaming', () => {
+    const onRegenerate = vi.fn();
+    render(
+      <Message role="assistant" content="" isStreaming={true} onRegenerate={onRegenerate} />,
+    );
+    expect(screen.queryByRole('button', { name: /regenerate response/i })).not.toBeInTheDocument();
   });
 });

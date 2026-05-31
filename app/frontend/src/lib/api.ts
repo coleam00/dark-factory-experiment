@@ -158,6 +158,25 @@ export const renameConversation = (id: string, title: string) =>
     body: JSON.stringify({ title }),
   });
 
+/**
+ * Regenerate the most recent assistant response (issue #280).
+ *
+ * POSTs to the regenerate endpoint and returns the raw `Response` so the
+ * SSE hook can read the streaming body directly — mirrors how the normal
+ * send flow consumes `POST /conversations/{id}/messages`. The body is empty;
+ * the server replays the conversation history after dropping the stale answer.
+ */
+export const regenerateResponse = (
+  conversationId: string,
+  signal?: AbortSignal,
+): Promise<Response> =>
+  fetch(`${BASE}/conversations/${conversationId}/regenerate`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    signal,
+  });
+
 // Videos
 export const getVideos = () => request<Video[]>('/videos');
 
