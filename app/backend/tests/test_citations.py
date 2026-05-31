@@ -224,8 +224,9 @@ class TestSseIntegration:
         assert len(payload) == 2 + CITATIONS_MAX_COUNT
 
     async def test_same_video_chunks_collapsed_to_one_citation(self) -> None:
-        """Multiple chunks from the same video collapse into a single citation
-        entry (issue #208). segment_count reflects the original chunk count."""
+        """When only one chunk from a video is cited, the uncited siblings are
+        absorbed and a single cited chip remains (issue #208 / #276). A cited
+        chip represents one chunk, so segment_count is 1."""
         chunks = [{**_chunk(f"c{i}", "v1"), "start_seconds": float(i * 10)} for i in range(5)]
         # Only c2 (start_seconds=20.0) is cited
         body = await _post_message(
@@ -237,9 +238,36 @@ class TestSseIntegration:
         entry = payload[0]
         assert entry["video_id"] == "v1"
         assert entry["is_cited"] is True
-        assert entry["segment_count"] == 5
-        # Representative picks earliest cited chunk → c2 at 20.0s
+        assert entry["segment_count"] == 1
+        # The single cited chunk keeps its own timestamp → c2 at 20.0s
         assert entry["start_seconds"] == 20.0
+
+    async def test_two_nearby_cited_moments_same_video_get_separate_chips(self) -> None:
+        """Two distinct cited moments from one video, close together in the
+        timeline, each get their own correctly-timestamped chip (issue #276).
+        Citing the *later* moment must not be dropped in favour of the earlier."""
+        # Three nearby chunks; cite the first and third (incl. the later one).
+        chunks = [
+            {**_chunk("c0", "v1"), "start_seconds": 100.0},
+            {**_chunk("c1", "v1"), "start_seconds": 105.0},
+            {**_chunk("c2", "v1"), "start_seconds": 110.0},
+        ]
+        body = await _post_message(
+            answer_tokens=["First moment [c:c0]. Later moment [c:c2]."],
+            retrieved_chunks=chunks,
+        )
+        payload = _parse_sources(body)
+        cited = [c for c in payload if c["is_cited"]]
+        # Both cited moments survive as distinct chips.
+        assert len(cited) == 2
+        assert {c["chunk_id"] for c in cited} == {"c0", "c2"}
+        # The later moment is present (not dropped for the earlier one).
+        cited_starts = [c["start_seconds"] for c in cited]
+        assert 100.0 in cited_starts
+        assert 110.0 in cited_starts
+        # Cited chips are ordered chronologically and each is a single segment.
+        assert cited_starts == sorted(cited_starts)
+        assert all(c["segment_count"] == 1 for c in cited)
 
     async def test_collapse_two_videos_preserves_both(self) -> None:
         """Chunks from two different videos collapse to two entries, each with
@@ -255,10 +283,10 @@ class TestSseIntegration:
         assert len(payload) == 2
         by_vid = {e["video_id"]: e for e in payload}
         assert by_vid["v1"]["is_cited"] is True
-        assert by_vid["v1"]["segment_count"] == 3
+        assert by_vid["v1"]["segment_count"] == 1
         assert by_vid["v1"]["start_seconds"] == 5.0  # v1c1
         assert by_vid["v2"]["is_cited"] is True
-        assert by_vid["v2"]["segment_count"] == 3
+        assert by_vid["v2"]["segment_count"] == 1
         assert by_vid["v2"]["start_seconds"] == 0.0  # v2c0
 
     async def test_collapse_uncited_group_picks_earliest_timestamp(self) -> None:

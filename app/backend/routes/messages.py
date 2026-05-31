@@ -211,9 +211,9 @@ async def create_message(
                         cited_ids = extract_cited_chunk_ids(final_text_raw)
                         for chunk in source_citations:
                             chunk["is_cited"] = chunk.get("chunk_id") in cited_ids
-                        # Collapse same-video chunks (issue #208): keep one
-                        # entry per video_id, choosing the earliest-cited
-                        # timestamp as the representative.
+                        # Collapse same-video chunks: each cited chunk gets its
+                        # own chronological chip (issue #276); uncited chunks for
+                        # a video still collapse to one consulted chip (#208).
                         source_citations[:] = _collapse_by_video(source_citations)
                         # Cap fallback (issue #176): cited pass through, non-cited sliced.
                         cited = [c for c in source_citations if c.get("is_cited")]
@@ -467,22 +467,26 @@ async def _maybe_set_conversation_title(
 
 
 def _collapse_by_video(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Collapse multiple chunks from the same video into a single citation entry.
+    """Collapse same-video chunks into citation entries, tier by tier.
 
-    After the ``is_cited`` pass, chunks from the same video are redundant in
-    the UI — the user needs one clickable chip per video, not one per 5-second
-    transcript segment (issue #208).
+    Chunks from the same video are grouped by ``video_id``. How each group is
+    emitted depends on whether the LLM actually cited any of its chunks:
 
-    For each ``video_id`` group:
-    - ``is_cited`` is True if ANY chunk in the group was cited by the LLM.
-    - ``start_seconds`` is the earliest timestamp among cited chunks (or among
-      all chunks if none were cited), so the deep-link opens near the most
-      relevant moment.
-    - ``segment_count`` records how many chunks were collapsed so the frontend
-      can optionally display "(N segments)".
-    - All other fields are taken from the representative chunk.
+    - **Cited chunks (issue #276):** every distinct cited chunk becomes its own
+      citation entry, ordered chronologically by ``start_seconds``. When an
+      answer draws on two nearby moments from the same video, both moments get
+      their own correctly-timestamped chip instead of being merged into one
+      (which previously dropped the later moment). Each cited entry keeps its
+      own chunk's fields and has ``segment_count == 1``. Uncited chunks in a
+      cited video are absorbed (no separate consulted entry for that video).
+    - **Uncited chunks (issue #208):** when no chunk in the group was cited,
+      the group collapses to a single consulted entry — the user needs one
+      clickable chip per video, not one per 5-second transcript segment. The
+      representative is the earliest chunk by ``start_seconds`` and
+      ``segment_count`` records how many chunks were collapsed.
 
-    Insertion order of videos is preserved (first-seen wins).
+    Insertion order of videos is preserved (first-seen wins); cited entries
+    within a video are ordered chronologically.
     """
     seen: dict[str, list[dict]] = {}
     for c in chunks:
@@ -495,14 +499,16 @@ def _collapse_by_video(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for group in seen.values():
         cited_in_group = [c for c in group if c.get("is_cited")]
         if cited_in_group:
-            representative = min(cited_in_group, key=lambda c: c.get("start_seconds") or 0.0)
-            is_cited = True
+            for chunk in sorted(cited_in_group, key=lambda c: c.get("start_seconds") or 0.0):
+                entry = dict(chunk)
+                entry["is_cited"] = True
+                entry["segment_count"] = 1
+                collapsed.append(entry)
         else:
             representative = min(group, key=lambda c: c.get("start_seconds") or 0.0)
-            is_cited = False
-        entry = dict(representative)
-        entry["is_cited"] = is_cited
-        entry["segment_count"] = len(group)
-        collapsed.append(entry)
+            entry = dict(representative)
+            entry["is_cited"] = False
+            entry["segment_count"] = len(group)
+            collapsed.append(entry)
 
     return collapsed
