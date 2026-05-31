@@ -8,6 +8,25 @@ test_tools.py. This file now only covers citation-object shape, SSE format,
 and persistence round-trip.
 """
 
+import asyncio
+import json
+from unittest.mock import AsyncMock, patch
+from uuid import uuid4
+
+import pytest
+
+from backend.auth.dependencies import get_current_user
+from backend.main import app
+
+
+@pytest.fixture
+def bypass_auth():
+    """Satisfy the auth dependency for direct route tests."""
+    stub = {"id": str(uuid4()), "email": "t@t"}
+    app.dependency_overrides[get_current_user] = lambda: stub
+    yield stub
+    app.dependency_overrides.pop(get_current_user, None)
+
 
 class TestCitationObjectShape:
     """Tests that verify citation objects have all required SSE fields."""
@@ -1152,3 +1171,302 @@ class TestChunkExpansionIntegration:
         assert "hello world snippet" in output
         assert "Test Video" in output
         assert "data: [DONE]" in output
+
+
+class TestSourcesLiveVsPersistConsistency:
+    """Regression tests for issue #277: persisted sources must match live SSE."""
+
+    async def test_error_before_done_persists_no_sources(self, bypass_auth) -> None:
+        """If stream_chat errors before [DONE], no sources event is emitted
+        and create_message receives sources=None."""
+        from backend.routes.messages import MessageCreate, create_message
+
+        async def fake_stream(*args, **kwargs):
+            yield f"data: {json.dumps('Hello')}\n\n"
+            raise RuntimeError("model flaked")
+
+        fake_user = bypass_auth
+        fake_conv = {
+            "id": str(uuid4()),
+            "user_id": fake_user["id"],
+            "title": "New Conversation",
+        }
+
+        with (
+            patch(
+                "backend.routes.messages.repository.get_conversation",
+                new_callable=AsyncMock,
+                return_value=fake_conv,
+            ),
+            patch(
+                "backend.routes.messages.repository.create_message",
+                new_callable=AsyncMock,
+                side_effect=[{"id": str(uuid4())}, {"id": str(uuid4())}],
+            ) as mock_create,
+            patch(
+                "backend.routes.messages.repository.list_messages",
+                new_callable=AsyncMock,
+                return_value=[{"role": "user", "content": "hi"}],
+            ),
+            patch(
+                "backend.routes.messages.repository.list_videos",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch(
+                "backend.routes.messages.rate_limit.check_and_record",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "backend.routes.messages.stream_chat",
+                side_effect=fake_stream,
+            ),
+            patch(
+                "backend.routes.messages._maybe_set_conversation_title",
+                new_callable=AsyncMock,
+            ),
+        ):
+            resp = await create_message(
+                conv_id=fake_conv["id"],
+                body=MessageCreate(content="hi"),
+                current_user=fake_user,
+            )
+
+            body_iter = resp.body_iterator
+            chunks = []
+            try:
+                async for chunk in body_iter:
+                    chunks.append(chunk)
+            except Exception:
+                pass
+
+            # Give the shielded save a moment to complete.
+            await asyncio.sleep(0.1)
+
+        assert mock_create.call_count == 2
+        assistant_kwargs = mock_create.call_args_list[1].kwargs
+        assert assistant_kwargs["role"] == "assistant"
+        assert assistant_kwargs["sources"] is None
+        output = "".join(chunks)
+        assert "event: sources" not in output
+
+    async def test_disconnect_after_sources_yield_persists_none(self, bypass_auth) -> None:
+        """Client disconnect at the event: sources yield: sources=None persisted."""
+        from backend.routes.messages import MessageCreate, create_message
+
+        source_citations = [
+            {
+                "chunk_id": "c1",
+                "video_id": "v1",
+                "video_title": "Test Video",
+                "video_url": "https://youtube.com/watch?v=abc",
+                "start_seconds": 10.0,
+                "end_seconds": 20.0,
+                "snippet": "Test snippet",
+            }
+        ]
+
+        async def fake_stream(*args, **kwargs):
+            final_text_out = kwargs.get("final_text_out")
+            tool_executor = kwargs.get("tool_executor")
+            if tool_executor is not None:
+                await tool_executor("search_videos", json.dumps({"query": "test"}))
+            yield f"data: {json.dumps('Hello')}\n\n"
+            if final_text_out is not None:
+                final_text_out.append("Hello")
+            yield "data: [DONE]\n\n"
+
+        fake_user = bypass_auth
+        fake_conv = {
+            "id": str(uuid4()),
+            "user_id": fake_user["id"],
+            "title": "New Conversation",
+        }
+
+        with (
+            patch(
+                "backend.routes.messages.repository.get_conversation",
+                new_callable=AsyncMock,
+                return_value=fake_conv,
+            ),
+            patch(
+                "backend.routes.messages.repository.create_message",
+                new_callable=AsyncMock,
+                side_effect=[{"id": str(uuid4())}, {"id": str(uuid4())}],
+            ) as mock_create,
+            patch(
+                "backend.routes.messages.repository.list_messages",
+                new_callable=AsyncMock,
+                return_value=[{"role": "user", "content": "hi"}],
+            ),
+            patch(
+                "backend.routes.messages.repository.list_videos",
+                new_callable=AsyncMock,
+                return_value=[{"id": "v1", "title": "Test Video", "url": "u"}],
+            ),
+            patch(
+                "backend.routes.messages.rate_limit.check_and_record",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "backend.routes.messages.stream_chat",
+                side_effect=fake_stream,
+            ),
+            patch(
+                "backend.routes.messages.execute_tool",
+                new_callable=AsyncMock,
+                return_value={"ok": True, "text": "context", "chunks": source_citations},
+            ),
+            patch(
+                "backend.routes.messages._maybe_set_conversation_title",
+                new_callable=AsyncMock,
+            ),
+        ):
+            resp = await create_message(
+                conv_id=fake_conv["id"],
+                body=MessageCreate(content="hi"),
+                current_user=fake_user,
+            )
+
+            body_iter = resp.body_iterator
+            chunk = await body_iter.__anext__()
+            assert "Hello" in chunk
+            chunk = await body_iter.__anext__()
+            assert "event: sources" in chunk
+            # Close generator while suspended at the event: sources yield.
+            # The code after that yield (sources_finalized = ...) must NOT run.
+            await body_iter.aclose()
+
+            await asyncio.sleep(0.1)
+
+        assert mock_create.call_count == 2
+        assistant_kwargs = mock_create.call_args_list[1].kwargs
+        assert assistant_kwargs["role"] == "assistant"
+        assert assistant_kwargs["sources"] is None
+
+    async def test_clean_completion_collapses_multiple_chunks_per_video(self) -> None:
+        """Multiple chunks from the same video: live and persisted both show
+        exactly one entry per video_id (no duplicate chips)."""
+        from httpx import ASGITransport, AsyncClient
+
+        from backend.auth.tokens import encode_token
+
+        answer_text = "The video explains it works."
+        answer_chunk = f"data: {json.dumps(answer_text)}\n\n"
+        done_chunk = "data: [DONE]\n\n"
+
+        # Two chunks from the same video
+        source_chunks = [
+            {
+                "chunk_id": "c1",
+                "video_id": "v1",
+                "video_title": "Test Video",
+                "video_url": "https://youtube.com/watch?v=abc",
+                "start_seconds": 10.0,
+                "end_seconds": 20.0,
+                "snippet": "Snippet 1",
+            },
+            {
+                "chunk_id": "c2",
+                "video_id": "v1",
+                "video_title": "Test Video",
+                "video_url": "https://youtube.com/watch?v=abc",
+                "start_seconds": 30.0,
+                "end_seconds": 40.0,
+                "snippet": "Snippet 2",
+            },
+        ]
+
+        async def mock_stream_chat(
+            messages,
+            tools=None,
+            tool_executor=None,
+            max_tool_calls=0,
+            final_text_out=None,
+            **_kwargs,
+        ):
+            if tool_executor is not None:
+                await tool_executor("search_videos", json.dumps({"query": "test"}))
+            yield answer_chunk
+            if final_text_out is not None:
+                final_text_out.append(answer_text)
+            yield done_chunk
+
+        async def mock_execute_tool(
+            name, raw_args, video_id_whitelist=None, embedding_cache=None, is_member=False
+        ):
+            return {"ok": True, "text": "context", "chunks": source_chunks}
+
+        test_user_id = str(uuid4())
+        test_conv_id = str(uuid4())
+        valid_token = encode_token(test_user_id)
+
+        async def mock_get_user_by_id(user_id):
+            return {
+                "id": test_user_id,
+                "email": "test@example.com",
+                "password_hash": "hashed",
+                "created_at": "2026-01-01T00:00:00Z",
+            }
+
+        async def mock_get_conversation(conv_id, user_id):
+            if conv_id == test_conv_id:
+                return {
+                    "id": test_conv_id,
+                    "user_id": test_user_id,
+                    "title": "Test",
+                    "created_at": "2026-01-01T00:00:00Z",
+                }
+            return None
+
+        mock_create = AsyncMock(side_effect=[{"id": str(uuid4())}, {"id": str(uuid4())}])
+
+        async def mock_list_messages(conv_id, user_id):
+            return []
+
+        async def mock_list_videos():
+            return [{"id": "v1", "title": "Test Video", "url": "https://youtube.com/watch?v=abc"}]
+
+        with (
+            patch("backend.auth.dependencies.users_repo.get_user_by_id", mock_get_user_by_id),
+            patch("backend.db.repository.get_conversation", mock_get_conversation),
+            patch("backend.db.repository.create_message", mock_create),
+            patch("backend.db.repository.list_messages", mock_list_messages),
+            patch("backend.db.repository.list_videos", mock_list_videos),
+            patch("backend.routes.messages.stream_chat", mock_stream_chat),
+            patch("backend.routes.messages.execute_tool", mock_execute_tool),
+        ):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                response = await client.post(
+                    f"/api/conversations/{test_conv_id}/messages",
+                    json={"content": "question"},
+                    headers={"Cookie": f"session={valid_token}"},
+                )
+
+        output = response.text
+        assert "event: sources" in output
+
+        # Parse the emitted sources from the SSE payload
+        emitted_sources: list[dict] = []
+        lines = output.split("\n")
+        for i, line in enumerate(lines):
+            if line == "event: sources":
+                data_line = lines[i + 1]
+                if data_line.startswith("data: "):
+                    emitted_sources = json.loads(data_line[6:])
+                break
+
+        assert len(emitted_sources) == 1
+        assert emitted_sources[0]["video_id"] == "v1"
+        assert emitted_sources[0].get("segment_count") == 2
+
+        # Verify persisted sources match exactly
+        assert mock_create.call_count == 2
+        assistant_kwargs = mock_create.call_args_list[1].kwargs
+        persisted_sources = assistant_kwargs["sources"]
+        assert persisted_sources is not None
+        assert len(persisted_sources) == 1
+        assert persisted_sources[0]["video_id"] == "v1"
+        assert persisted_sources[0].get("segment_count") == 2
+        assert emitted_sources == persisted_sources
