@@ -466,10 +466,7 @@ async def _maybe_set_conversation_title(
         await repository.update_conversation_title(conv_id, user_id=user_id, title=title)
 
 
-# Cited chunks from the same video are merged into one chip only when their
-# start timestamps fall within this many seconds of each other. Moments farther
-# apart in the same video get their own chip (issue #276) so every distinct
-# moment the assistant actually used is shown with its own correct timestamp.
+# Cited moments farther apart than this (seconds) get separate chips (issue #276).
 CITED_CLUSTER_GAP_SECONDS = 60.0
 
 
@@ -505,8 +502,6 @@ def _collapse_by_video(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     cited_entries: list[dict] = []
     for group in _group_by_video(cited).values():
-        # Cluster by start_seconds proximity so nearby moments merge but
-        # distant moments each get their own chip.
         ordered = sorted(group, key=lambda c: c.get("start_seconds") or 0.0)
         cluster: list[dict] = []
         prev_start: float | None = None
@@ -539,11 +534,7 @@ def _group_by_video(chunks: list[dict[str, Any]]) -> dict[str, list[dict]]:
 
 
 def _make_entry(group: list[dict[str, Any]], *, is_cited: bool) -> dict[str, Any]:
-    """Build a single collapsed citation entry from a group of chunks.
-
-    The representative is the earliest-timestamp chunk; ``segment_count``
-    reflects how many chunks were merged.
-    """
+    """Build a collapsed citation entry from a group; earliest chunk is the representative."""
     representative = min(group, key=lambda c: c.get("start_seconds") or 0.0)
     entry = dict(representative)
     entry["is_cited"] = is_cited
