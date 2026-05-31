@@ -28,7 +28,12 @@ from pydantic import BaseModel, Field, field_validator
 
 from backend import rate_limit
 from backend.auth.dependencies import get_current_user
-from backend.config import CITATIONS_MAX_COUNT, LLM_TOOLS_ENABLED, LLM_TOOLS_MAX_PER_TURN
+from backend.config import (
+    CITATION_COLLAPSE_PROXIMITY_SECONDS,
+    CITATIONS_MAX_COUNT,
+    LLM_TOOLS_ENABLED,
+    LLM_TOOLS_MAX_PER_TURN,
+)
 from backend.db import repository
 from backend.llm.openrouter import stream_chat
 from backend.rag.citations import (
@@ -467,42 +472,67 @@ async def _maybe_set_conversation_title(
 
 
 def _collapse_by_video(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Collapse multiple chunks from the same video into a single citation entry.
+    """Collapse nearby chunks from the same video into a single citation entry.
 
-    After the ``is_cited`` pass, chunks from the same video are redundant in
-    the UI — the user needs one clickable chip per video, not one per 5-second
-    transcript segment (issue #208).
+    Chunks that are within ``CITATION_COLLAPSE_PROXIMITY_SECONDS`` of each
+    other (measured from the current cluster's end time) merge into one chip.
+    Distinct moments that are farther apart remain separate citations so each
+    gets its own correct deep-link timestamp (issue #276).
 
-    For each ``video_id`` group:
-    - ``is_cited`` is True if ANY chunk in the group was cited by the LLM.
+    Within each cluster:
+    - ``is_cited`` is True if ANY chunk in the cluster was cited by the LLM.
     - ``start_seconds`` is the earliest timestamp among cited chunks (or among
       all chunks if none were cited), so the deep-link opens near the most
       relevant moment.
-    - ``segment_count`` records how many chunks were collapsed so the frontend
-      can optionally display "(N segments)".
+    - ``segment_count`` records how many chunks were collapsed.
     - All other fields are taken from the representative chunk.
 
     Insertion order of videos is preserved (first-seen wins).
     """
-    seen: dict[str, list[dict]] = {}
+    # Group by video_id while preserving first-seen order
+    groups: dict[str, list[dict]] = {}
+    group_order: list[str] = []
     for c in chunks:
         vid = c.get("video_id") or ""
-        if vid not in seen:
-            seen[vid] = []
-        seen[vid].append(c)
+        if vid not in groups:
+            groups[vid] = []
+            group_order.append(vid)
+        groups[vid].append(c)
 
     collapsed: list[dict] = []
-    for group in seen.values():
-        cited_in_group = [c for c in group if c.get("is_cited")]
-        if cited_in_group:
-            representative = min(cited_in_group, key=lambda c: c.get("start_seconds") or 0.0)
-            is_cited = True
-        else:
-            representative = min(group, key=lambda c: c.get("start_seconds") or 0.0)
-            is_cited = False
-        entry = dict(representative)
-        entry["is_cited"] = is_cited
-        entry["segment_count"] = len(group)
-        collapsed.append(entry)
+    for vid in group_order:
+        group = sorted(groups[vid], key=lambda c: c.get("start_seconds") or 0.0)
+
+        clusters: list[list[dict]] = []
+        cluster_ends: list[float] = []
+        for chunk in group:
+            start = chunk.get("start_seconds") or 0.0
+            end = chunk.get("end_seconds") or start
+            if not clusters:
+                clusters.append([chunk])
+                cluster_ends.append(end)
+                continue
+            if start <= cluster_ends[-1] + CITATION_COLLAPSE_PROXIMITY_SECONDS:
+                clusters[-1].append(chunk)
+                if end > cluster_ends[-1]:
+                    cluster_ends[-1] = end
+            else:
+                clusters.append([chunk])
+                cluster_ends.append(end)
+
+        for cluster in clusters:
+            cited_in_cluster = [c for c in cluster if c.get("is_cited")]
+            if cited_in_cluster:
+                representative = min(
+                    cited_in_cluster, key=lambda c: c.get("start_seconds") or 0.0
+                )
+                is_cited = True
+            else:
+                representative = min(cluster, key=lambda c: c.get("start_seconds") or 0.0)
+                is_cited = False
+            entry = dict(representative)
+            entry["is_cited"] = is_cited
+            entry["segment_count"] = len(cluster)
+            collapsed.append(entry)
 
     return collapsed

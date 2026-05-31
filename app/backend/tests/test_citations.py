@@ -226,8 +226,8 @@ class TestSseIntegration:
     async def test_same_video_chunks_collapsed_to_one_citation(self) -> None:
         """Multiple chunks from the same video collapse into a single citation
         entry (issue #208). segment_count reflects the original chunk count."""
-        chunks = [{**_chunk(f"c{i}", "v1"), "start_seconds": float(i * 10)} for i in range(5)]
-        # Only c2 (start_seconds=20.0) is cited
+        chunks = [{**_chunk(f"c{i}", "v1"), "start_seconds": float(i * 5)} for i in range(5)]
+        # Only c2 (start_seconds=10.0) is cited
         body = await _post_message(
             answer_tokens=["Answer [c:c2]."],
             retrieved_chunks=chunks,
@@ -238,8 +238,38 @@ class TestSseIntegration:
         assert entry["video_id"] == "v1"
         assert entry["is_cited"] is True
         assert entry["segment_count"] == 5
-        # Representative picks earliest cited chunk → c2 at 20.0s
-        assert entry["start_seconds"] == 20.0
+        # Representative picks earliest cited chunk → c2 at 10.0s
+        assert entry["start_seconds"] == 10.0
+
+    def test_nearby_same_video_chunks_emit_separate_citations(self) -> None:
+        """Two same-video chunks beyond the proximity threshold produce two
+        distinct citation entries, each with its own correct timestamp (issue #276)."""
+        from backend.config import CITATION_COLLAPSE_PROXIMITY_SECONDS
+        from backend.routes.messages import _collapse_by_video
+
+        gap = CITATION_COLLAPSE_PROXIMITY_SECONDS + 10
+        chunks = [
+            {
+                **_chunk("c1", "v1"),
+                "start_seconds": 0.0,
+                "end_seconds": 5.0,
+                "is_cited": True,
+            },
+            {
+                **_chunk("c2", "v1"),
+                "start_seconds": float(gap),
+                "end_seconds": float(gap + 5.0),
+                "is_cited": True,
+            },
+        ]
+        result = _collapse_by_video(chunks)
+        assert len(result) == 2
+        starts = {c["start_seconds"] for c in result}
+        assert starts == {0.0, float(gap)}
+        for c in result:
+            assert c["video_id"] == "v1"
+            assert c["is_cited"] is True
+            assert c["segment_count"] == 1
 
     async def test_collapse_two_videos_preserves_both(self) -> None:
         """Chunks from two different videos collapse to two entries, each with

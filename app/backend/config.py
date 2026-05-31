@@ -135,6 +135,13 @@ RETRIEVAL_MAX_PER_VIDEO: int = int(os.environ.get("RETRIEVAL_MAX_PER_VIDEO", "3"
 # Cap on non-cited citations (issue #176); cited chunks always pass through.
 CITATIONS_MAX_COUNT: int = int(os.environ.get("CITATIONS_MAX_COUNT", "10"))
 
+# Time-proximity window for collapsing same-video chunks into one citation.
+# Chunks whose start times are within this many seconds merge into a single
+# chip; farther apart remain separate (issue #276).
+CITATION_COLLAPSE_PROXIMITY_SECONDS: int = int(
+    os.environ.get("CITATION_COLLAPSE_PROXIMITY_SECONDS", "30")
+)
+
 # RAG tool-based retrieval — the LLM drives retrieval via tool calls
 # (search_videos, keyword_search_videos, semantic_search_videos,
 # get_video_transcript) rather than receiving pre-retrieved chunks. Disabled
