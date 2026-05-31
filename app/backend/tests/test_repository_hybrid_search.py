@@ -14,7 +14,7 @@ class TestKeywordSearch:
     """Tests for keyword_search() SQL execution."""
 
     async def test_keyword_search_calls_fetch_with_correct_params(self):
-        """keyword_search passes query and top_k as $1, $2 to the SQL query."""
+        """keyword_search passes query, language, and top_k to the SQL query."""
         mock_conn = AsyncMock()
         # Return plain dicts (asyncpg rows are dict-like)
         mock_conn.fetch = AsyncMock(
@@ -49,11 +49,16 @@ class TestKeywordSearch:
         assert "search_vector" in sql
         assert "@@" in sql  # tsvector match operator
 
-        # Verify positional args: query string and top_k
+        # Both plainto_tsquery calls (ts_rank + WHERE) must bind the language
+        # regconfig so query-side tokenization matches the index-side config.
+        assert sql.count("plainto_tsquery($2::regconfig, $1)") == 2
+
+        # Verify positional args: query, language, top_k
         args = call_args[0]
-        # args is (sql_string, query_string, top_k_int)
+        # args is (sql_string, query_string, language, top_k_int, allowed_source_types)
         assert args[1] == "hello world"
-        assert args[2] == 5
+        assert args[2] == "english"
+        assert args[3] == 5
 
         # Verify result shape
         assert len(result) == 1
@@ -75,7 +80,7 @@ class TestKeywordSearch:
         assert result == []
 
     async def test_keyword_search_respects_top_k_limit(self):
-        """keyword_search passes top_k as LIMIT $2."""
+        """keyword_search passes top_k as LIMIT $3."""
         mock_conn = AsyncMock()
         mock_conn.fetch = AsyncMock(return_value=[])
 
@@ -88,10 +93,35 @@ class TestKeywordSearch:
 
         call_args = mock_conn.fetch.call_args
         sql = call_args[0][0]
-        # LIMIT $2 means second parameter is top_k
-        assert "LIMIT $2" in sql
+        # LIMIT $3 means third parameter is top_k (after query, language)
+        assert "LIMIT $3" in sql
         args = call_args[0]
-        assert args[2] == 3
+        assert args[3] == 3
+
+    async def test_keyword_search_passes_custom_language_to_query(self):
+        """A non-default language flows through to the regconfig-bound query.
+
+        Regression for issue #242: the language param was previously dropped,
+        so both plainto_tsquery calls fell back to the connection's
+        default_text_search_config instead of the requested config.
+        """
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])
+
+        mock_acquire = AsyncMock()
+        mock_acquire.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_acquire.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(repository, "_acquire", return_value=mock_acquire):
+            await repository.keyword_search("test", top_k=5, language="simple")
+
+        call_args = mock_conn.fetch.call_args
+        sql = call_args[0][0]
+        # Both plainto_tsquery calls must bind the language as a regconfig.
+        assert sql.count("plainto_tsquery($2::regconfig, $1)") == 2
+        # The custom language must be the $2 positional argument.
+        args = call_args[0]
+        assert args[2] == "simple"
 
 
 class TestVectorSearchPg:
