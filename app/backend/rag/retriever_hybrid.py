@@ -40,6 +40,7 @@ async def retrieve_hybrid(
     query_embedding: list[float],
     top_k: int = 5,
     is_member: bool = False,
+    allowed_video_ids: list[str] | None = None,
 ) -> list[dict]:
     """
     Hybrid retrieval via Reciprocal Rank Fusion (RRF).
@@ -52,6 +53,10 @@ async def retrieve_hybrid(
             = 'dynamous'`) is included alongside the default YouTube content.
             Non-members see YouTube chunks only. The filter is applied at the
             SQL layer — non-member retrieval never touches Dynamous chunks.
+        allowed_video_ids: Conversation scope filter (issue #279) — when
+            non-null, both keyword and vector search only return chunks whose
+            video_id is in this list. ``None`` means no scope: search all
+            videos (the default, today's behavior).
 
     Returns:
         A list of dicts (length <= top_k), each containing:
@@ -88,11 +93,13 @@ async def retrieve_hybrid(
         top_k=fetch_k,
         language=KEYWORD_LANGUAGE,
         allowed_source_types=allowed_source_types,
+        allowed_video_ids=allowed_video_ids,
     )
     vector_task = repository.vector_search_pg(
         query_embedding,
         top_k=fetch_k,
         allowed_source_types=allowed_source_types,
+        allowed_video_ids=allowed_video_ids,
     )
 
     keyword_hits, vector_hits = await keyword_task, await vector_task

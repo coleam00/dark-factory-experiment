@@ -19,10 +19,19 @@ router = APIRouter()
 
 class ConversationCreate(BaseModel):
     title: str = "New Conversation"
+    # Optional video scope (issue #279). None/absent = search the whole library;
+    # a list restricts this conversation's retrieval to those video ids.
+    scoped_video_ids: list[str] | None = None
 
 
 class ConversationRename(BaseModel):
     title: str
+
+
+class ConversationScope(BaseModel):
+    # None clears the scope (search everything); a list restricts retrieval to
+    # the given video ids. An empty list is allowed but yields no results.
+    scoped_video_ids: list[str] | None = None
 
 
 @router.get("/conversations")
@@ -37,9 +46,11 @@ async def create_conversation(
 ):
     """Create a new empty conversation. Body is optional; defaults to title='New Conversation'."""
     title = body.title if body else "New Conversation"
+    scoped_video_ids = body.scoped_video_ids if body else None
     return await repository.create_conversation(
         user_id=str(current_user["id"]),
         title=title,
+        scoped_video_ids=scoped_video_ids,
     )
 
 
@@ -92,6 +103,27 @@ async def rename_conversation(
         raise HTTPException(status_code=404, detail="Conversation not found")
     conv = await repository.get_conversation(conv_id, user_id=str(current_user["id"]))
     return conv
+
+
+@router.patch("/conversations/{conv_id}/scope")
+async def update_conversation_scope(
+    conv_id: str,
+    body: ConversationScope,
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
+    """Set or clear the video scope for a conversation (issue #279).
+
+    Once set, the assistant's answers and citations in this conversation only
+    draw from the chosen videos. Pass `scoped_video_ids: null` to clear the
+    scope and go back to searching the whole library.
+    """
+    user_id = str(current_user["id"])
+    updated = await repository.update_conversation_scope(
+        conv_id, user_id=user_id, scoped_video_ids=body.scoped_video_ids
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return await repository.get_conversation(conv_id, user_id=user_id)
 
 
 @router.get("/videos")

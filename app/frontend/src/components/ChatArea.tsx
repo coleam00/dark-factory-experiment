@@ -5,11 +5,12 @@ import { useMessages } from '../hooks/useMessages';
 import { useStreamingResponse } from '../hooks/useStreamingResponse';
 import { useToast } from '../hooks/useToast';
 import type { Citation, Message as MessageType } from '../lib/api';
-import { RateLimitError, createConversation } from '../lib/api';
+import { RateLimitError, createConversation, updateConversationScope } from '../lib/api';
 import { exportConversationAsMarkdown } from '../lib/exportMarkdown';
 import { ChatInput, type ChatInputHandle } from './ChatInput';
 import { CitationModal } from './CitationModal';
 import { Message } from './Message';
+import { ScopePickerModal } from './ScopePickerModal';
 
 function formatResetTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -292,9 +293,8 @@ interface ConvLocationState {
 export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaProps) {
   const navigate = useNavigate();
   const location = useLocation() as Location & { state: ConvLocationState | null };
-  const { messages, setMessages, loading, error, notFound, conversation } = useMessages(
-    conversationId || null,
-  );
+  const { messages, setMessages, loading, error, notFound, conversation, setConversation } =
+    useMessages(conversationId || null);
   const {
     streamingContent,
     streamingSources,
@@ -325,6 +325,9 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
   const pendingUserMsgIdRef = useRef<string | null>(null);
   // Citation modal state
   const [selectedCitation, setSelectedCitation] = useState<Citation | null>(null);
+  // Scope picker modal state (issue #279)
+  const [scopeModalOpen, setScopeModalOpen] = useState(false);
+  const [savingScope, setSavingScope] = useState(false);
 
   // ── Auto-scroll logic ──
   // Defer scroll to the next paint cycle so streaming DOM updates are applied first.
@@ -602,6 +605,37 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
   const showEmptyInConversation =
     messages.length === 0 && !inlineError && !isStreaming && !location.state?.initialMessage;
 
+  // ── Scope save handler ──
+  // Persist the chosen scope, then update local conversation state so the
+  // badge reflects it immediately and subsequent sends respect it.
+  const handleScopeConfirm = useCallback(
+    async (videoIds: string[] | null) => {
+      if (!conversationId) return;
+      setSavingScope(true);
+      try {
+        const updated = await updateConversationScope(conversationId, videoIds);
+        setConversation((prev) =>
+          prev ? { ...prev, scoped_video_ids: updated.scoped_video_ids ?? null } : prev,
+        );
+        setScopeModalOpen(false);
+        addToast(
+          videoIds && videoIds.length > 0
+            ? `Scoped to ${videoIds.length} video${videoIds.length === 1 ? '' : 's'}.`
+            : 'Scope cleared — searching all videos.',
+          'success',
+        );
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Failed to update scope';
+        addToast(msg, 'error');
+      } finally {
+        setSavingScope(false);
+      }
+    },
+    [conversationId, setConversation, addToast],
+  );
+
+  const scopeCount = conversation?.scoped_video_ids?.length ?? 0;
+
   const handleExport = useCallback(() => {
     try {
       if (conversation) {
@@ -638,6 +672,49 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
           position: 'relative',
         }}
       >
+        {/* ── Scope button (visible when conversation is active) ── */}
+        {conversation && (
+          <button
+            onClick={() => setScopeModalOpen(true)}
+            title={
+              scopeCount > 0
+                ? `Conversation scoped to ${scopeCount} video${scopeCount === 1 ? '' : 's'}`
+                : 'Scope this conversation to specific videos'
+            }
+            style={{
+              position: 'absolute',
+              top: 12,
+              right: 110,
+              background: scopeCount > 0 ? 'rgba(59,130,246,0.15)' : '#1e293b',
+              border: `1px solid ${scopeCount > 0 ? 'rgba(59,130,246,0.4)' : 'rgba(255,255,255,0.08)'}`,
+              borderRadius: 7,
+              color: scopeCount > 0 ? '#93c5fd' : '#94a3b8',
+              cursor: 'pointer',
+              padding: '5px 8px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              fontSize: 12,
+              zIndex: 5,
+              transition: 'background 0.15s, color 0.15s',
+            }}
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 13 13"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M1,2 H12 L8,7 V11 L5,12 V7 Z" />
+            </svg>
+            {scopeCount > 0 ? `Scope: ${scopeCount}` : 'Scope: All'}
+          </button>
+        )}
+
         {/* ── Export button (visible when conversation is active) ── */}
         {conversation && messages.length > 0 && (
           <button
@@ -778,6 +855,17 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
       {/* ── Citation modal ── */}
       {selectedCitation && (
         <CitationModal citation={selectedCitation} onClose={() => setSelectedCitation(null)} />
+      )}
+
+      {/* ── Scope picker modal ── */}
+      {scopeModalOpen && (
+        <ScopePickerModal
+          currentScope={conversation?.scoped_video_ids ?? null}
+          onConfirm={handleScopeConfirm}
+          onCancel={() => {
+            if (!savingScope) setScopeModalOpen(false);
+          }}
+        />
       )}
     </div>
   );

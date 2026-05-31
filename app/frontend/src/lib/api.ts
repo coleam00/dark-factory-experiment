@@ -41,6 +41,12 @@ export interface Conversation {
   created_at: string;
   updated_at: string;
   preview?: string | null;
+  /**
+   * Video scope (issue #279). `null` (or absent) means the conversation
+   * searches the whole library; a list restricts the assistant's answers and
+   * citations to those video ids for the rest of the conversation.
+   */
+  scoped_video_ids?: string[] | null;
 }
 
 export interface Citation {
@@ -146,8 +152,13 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 export const getConversations = () => request<Conversation[]>('/conversations');
 export const searchConversations = (q: string) =>
   request<Conversation[]>(`/conversations/search?q=${encodeURIComponent(q)}`);
-export const createConversation = () =>
-  request<Conversation>('/conversations', { method: 'POST', body: '{}' });
+export const createConversation = (scopedVideoIds?: string[] | null) =>
+  request<Conversation>('/conversations', {
+    method: 'POST',
+    body: JSON.stringify(
+      scopedVideoIds !== undefined ? { scoped_video_ids: scopedVideoIds } : {},
+    ),
+  });
 export const getConversation = (id: string) =>
   request<ConversationWithMessages>(`/conversations/${id}`);
 export const deleteConversation = (id: string) =>
@@ -156,6 +167,16 @@ export const renameConversation = (id: string, title: string) =>
   request<Conversation>(`/conversations/${id}`, {
     method: 'PATCH',
     body: JSON.stringify({ title }),
+  });
+/**
+ * Set or clear a conversation's video scope (issue #279). Pass `null` to clear
+ * the scope (search everything); pass a list to restrict retrieval + citations
+ * to those videos.
+ */
+export const updateConversationScope = (id: string, scopedVideoIds: string[] | null) =>
+  request<Conversation>(`/conversations/${id}/scope`, {
+    method: 'PATCH',
+    body: JSON.stringify({ scoped_video_ids: scopedVideoIds }),
   });
 
 // Videos

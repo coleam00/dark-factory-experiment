@@ -410,8 +410,13 @@ async def execute_search_hybrid(
     raw_arguments: str | dict,
     embedding_cache: dict[str, list[float]] | None = None,
     is_member: bool = False,
+    allowed_video_ids: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Hybrid (keyword + semantic via RRF) search."""
+    """Hybrid (keyword + semantic via RRF) search.
+
+    ``allowed_video_ids`` scopes retrieval to a conversation's selected videos
+    (issue #279); ``None`` searches the whole library.
+    """
     from backend.config import RETRIEVAL_MAX_PER_VIDEO
     from backend.rag.retriever_hybrid import retrieve_hybrid
 
@@ -425,7 +430,13 @@ async def execute_search_hybrid(
 
     try:
         embedding = await _embed_query(query, embedding_cache)
-        chunks = await retrieve_hybrid(query, embedding, top_k=top_k, is_member=is_member)
+        chunks = await retrieve_hybrid(
+            query,
+            embedding,
+            top_k=top_k,
+            is_member=is_member,
+            allowed_video_ids=allowed_video_ids,
+        )
     except Exception as exc:
         logger.warning("search_hybrid failed: %s", exc, exc_info=True)
         return {"ok": False, "error": f"search failed: {exc}"}
@@ -439,8 +450,13 @@ async def execute_search_hybrid(
 async def execute_search_keyword(
     raw_arguments: str | dict,
     is_member: bool = False,
+    allowed_video_ids: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Keyword-only (tsvector FTS) search."""
+    """Keyword-only (tsvector FTS) search.
+
+    ``allowed_video_ids`` scopes retrieval to a conversation's selected videos
+    (issue #279); ``None`` searches the whole library.
+    """
     from backend.config import KEYWORD_LANGUAGE, RETRIEVAL_MAX_PER_VIDEO
 
     args = _parse_args(raw_arguments)
@@ -459,6 +475,7 @@ async def execute_search_keyword(
             top_k=top_k,
             language=KEYWORD_LANGUAGE,
             allowed_source_types=allowed,
+            allowed_video_ids=allowed_video_ids,
         )
         chunks = await _hydrate_chunks(raw)
     except Exception as exc:
@@ -475,8 +492,13 @@ async def execute_search_semantic(
     raw_arguments: str | dict,
     embedding_cache: dict[str, list[float]] | None = None,
     is_member: bool = False,
+    allowed_video_ids: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Semantic-only (pgvector cosine) search."""
+    """Semantic-only (pgvector cosine) search.
+
+    ``allowed_video_ids`` scopes retrieval to a conversation's selected videos
+    (issue #279); ``None`` searches the whole library.
+    """
     from backend.config import RETRIEVAL_MAX_PER_VIDEO
 
     args = _parse_args(raw_arguments)
@@ -492,7 +514,10 @@ async def execute_search_semantic(
     try:
         embedding = await _embed_query(query, embedding_cache)
         raw = await repository.vector_search_pg(
-            embedding, top_k=top_k, allowed_source_types=allowed
+            embedding,
+            top_k=top_k,
+            allowed_source_types=allowed,
+            allowed_video_ids=allowed_video_ids,
         )
         chunks = await _hydrate_chunks(raw)
     except Exception as exc:
@@ -603,6 +628,7 @@ async def execute_tool(
     video_id_whitelist: set[str] | None = None,
     embedding_cache: dict[str, list[float]] | None = None,
     is_member: bool = False,
+    allowed_video_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Dispatch by tool name. Unknown names return an error dict so the
     model sees the refusal and stops calling.
@@ -612,16 +638,29 @@ async def execute_tool(
 
     ``is_member`` controls retrieval ACL: True surfaces both YouTube and
     Dynamous (paid) chunks; False sees YouTube only.
+
+    ``allowed_video_ids`` is the conversation scope (issue #279): when non-null,
+    the search tools only return chunks from those videos. ``None`` searches
+    the whole library. The transcript tool ignores it — the video_id_whitelist
+    already guards that path.
     """
     if name == "search_videos":
         return await execute_search_hybrid(
-            raw_arguments, embedding_cache=embedding_cache, is_member=is_member
+            raw_arguments,
+            embedding_cache=embedding_cache,
+            is_member=is_member,
+            allowed_video_ids=allowed_video_ids,
         )
     if name == "keyword_search_videos":
-        return await execute_search_keyword(raw_arguments, is_member=is_member)
+        return await execute_search_keyword(
+            raw_arguments, is_member=is_member, allowed_video_ids=allowed_video_ids
+        )
     if name == "semantic_search_videos":
         return await execute_search_semantic(
-            raw_arguments, embedding_cache=embedding_cache, is_member=is_member
+            raw_arguments,
+            embedding_cache=embedding_cache,
+            is_member=is_member,
+            allowed_video_ids=allowed_video_ids,
         )
     if name == "get_video_transcript":
         return await execute_get_video_transcript(
