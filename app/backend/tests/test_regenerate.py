@@ -64,8 +64,8 @@ def _user_getter(user_id: str):
 
 
 def _conv_getter(user_id: str, conv_id: str):
-    async def mock_get_conversation(cid, user_id_arg):
-        if cid == conv_id:
+    async def mock_get_conversation(conv_id_arg, user_id):
+        if conv_id_arg == conv_id:
             return {
                 "id": conv_id,
                 "user_id": user_id,
@@ -96,7 +96,7 @@ class TestRegenerateRoute:
         consumed exactly once."""
         user_id, conv_id, token = _user_and_conv()
 
-        async def mock_list_messages(cid, uid):
+        async def mock_list_messages(conversation_id, user_id):
             return [
                 {"id": "u1", "role": "user", "content": "the question"},
                 {"id": "a-old", "role": "assistant", "content": "stale answer"},
@@ -145,7 +145,7 @@ class TestRegenerateRoute:
         """The regenerated answer ships its own citations via event: sources."""
         user_id, conv_id, token = _user_and_conv()
 
-        async def mock_list_messages(cid, uid):
+        async def mock_list_messages(conversation_id, user_id):
             return [
                 {"id": "u1", "role": "user", "content": "the question"},
                 {"id": "a-old", "role": "assistant", "content": "stale answer"},
@@ -194,7 +194,7 @@ class TestRegenerateRoute:
         """A 429 leaves the old answer intact — neither create nor delete runs."""
         user_id, conv_id, token = _user_and_conv()
 
-        async def mock_list_messages(cid, uid):
+        async def mock_list_messages(conversation_id, user_id):
             return [
                 {"id": "u1", "role": "user", "content": "the question"},
                 {"id": "a-old", "role": "assistant", "content": "stale answer"},
@@ -239,7 +239,7 @@ class TestRegenerateRoute:
         """No trailing assistant message → 409 and the cap is NOT consumed."""
         user_id, conv_id, token = _user_and_conv()
 
-        async def mock_list_messages(cid, uid):
+        async def mock_list_messages(conversation_id, user_id):
             return [{"id": "u1", "role": "user", "content": "the question"}]
 
         mock_create = AsyncMock(return_value={"id": "new"})
@@ -269,7 +269,7 @@ class TestRegenerateRoute:
         """A conversation the user doesn't own (get_conversation → None) → 404."""
         user_id, conv_id, token = _user_and_conv()
 
-        async def mock_get_conversation(cid, uid):
+        async def mock_get_conversation(conv_id, user_id):
             return None
 
         with (
