@@ -211,9 +211,10 @@ async def create_message(
                         cited_ids = extract_cited_chunk_ids(final_text_raw)
                         for chunk in source_citations:
                             chunk["is_cited"] = chunk.get("chunk_id") in cited_ids
-                        # Collapse same-video chunks (issue #208): keep one
-                        # entry per video_id, choosing the earliest-cited
-                        # timestamp as the representative.
+                        # Shape citations (issues #208, #276): keep every cited
+                        # moment as its own chip with its own timestamp; collapse
+                        # only the uncited "consulted" chunks to one chip per
+                        # video.
                         source_citations[:] = _collapse_by_video(source_citations)
                         # Cap fallback (issue #176): cited pass through, non-cited sliced.
                         cited = [c for c in source_citations if c.get("is_cited")]
@@ -467,42 +468,57 @@ async def _maybe_set_conversation_title(
 
 
 def _collapse_by_video(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Collapse multiple chunks from the same video into a single citation entry.
+    """Shape retrieved chunks into citation chips.
 
-    After the ``is_cited`` pass, chunks from the same video are redundant in
-    the UI — the user needs one clickable chip per video, not one per 5-second
-    transcript segment (issue #208).
+    Every distinct moment the model actually cited must keep its own chip with
+    its own timestamp — even when two cited moments come from the same video and
+    sit close together in the timeline (issue #276). Collapsing those into a
+    single chip (the prior behaviour) dropped a source and made the surviving
+    chip point at the earlier moment.
 
-    For each ``video_id`` group:
-    - ``is_cited`` is True if ANY chunk in the group was cited by the LLM.
-    - ``start_seconds`` is the earliest timestamp among cited chunks (or among
-      all chunks if none were cited), so the deep-link opens near the most
-      relevant moment.
-    - ``segment_count`` records how many chunks were collapsed so the frontend
-      can optionally display "(N segments)".
-    - All other fields are taken from the representative chunk.
+    The original noise-reduction goal (issue #208 — don't show one chip per
+    5-second transcript segment) still applies to the *consulted* tier:
 
-    Insertion order of videos is preserved (first-seen wins).
+    - Each chunk with ``is_cited`` becomes its own entry, anchored to its own
+      ``chunk_id`` / ``start_seconds`` (``segment_count`` = 1).
+    - Uncited chunks are collapsed per ``video_id`` into a single representative
+      entry (earliest ``start_seconds``), with ``segment_count`` recording how
+      many were merged.
+    - A video that contributed a cited chunk is already represented by that
+      chip, so its uncited siblings are dropped (they were absorbed under the
+      old per-video collapse too).
+
+    First-seen order is preserved: cited moments first (in input order), then
+    one consulted entry per remaining video.
     """
-    seen: dict[str, list[dict]] = {}
+    cited_video_ids: set[str] = set()
+    result: list[dict] = []
+
+    # Cited moments: one chip each, anchored to its own chunk.
     for c in chunks:
+        if c.get("is_cited"):
+            entry = dict(c)
+            entry["is_cited"] = True
+            entry["segment_count"] = 1
+            result.append(entry)
+            cited_video_ids.add(c.get("video_id") or "")
+
+    # Uncited chunks: collapse per video, skipping videos already represented
+    # by a cited chip. Insertion order of videos is preserved (first-seen wins).
+    uncited_groups: dict[str, list[dict]] = {}
+    for c in chunks:
+        if c.get("is_cited"):
+            continue
         vid = c.get("video_id") or ""
-        if vid not in seen:
-            seen[vid] = []
-        seen[vid].append(c)
+        if vid in cited_video_ids:
+            continue
+        uncited_groups.setdefault(vid, []).append(c)
 
-    collapsed: list[dict] = []
-    for group in seen.values():
-        cited_in_group = [c for c in group if c.get("is_cited")]
-        if cited_in_group:
-            representative = min(cited_in_group, key=lambda c: c.get("start_seconds") or 0.0)
-            is_cited = True
-        else:
-            representative = min(group, key=lambda c: c.get("start_seconds") or 0.0)
-            is_cited = False
+    for group in uncited_groups.values():
+        representative = min(group, key=lambda c: c.get("start_seconds") or 0.0)
         entry = dict(representative)
-        entry["is_cited"] = is_cited
+        entry["is_cited"] = False
         entry["segment_count"] = len(group)
-        collapsed.append(entry)
+        result.append(entry)
 
-    return collapsed
+    return result

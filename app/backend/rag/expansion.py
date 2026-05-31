@@ -34,13 +34,13 @@ async def expand_and_merge(
                 Defaults to repository.get_chunk_neighbors.
 
     Returns:
-        List of span dicts (same shape as input chunks but with merged content):
-          - video_id, video_title, video_url from the video of the first chunk in span
-          - content: concatenated text of all chunks in the span
-          - start_seconds: from the first chunk in the span
-          - end_seconds: from the last chunk in the span
-          - snippet: from the originally-retrieved chunk (preserved for citation)
-          - chunk_id: from the originally-retrieved chunk (preserved for citation)
+        List of citation dicts (same shape as input chunks but with merged
+        content). A contiguous span emits ONE entry per originally-retrieved
+        chunk it contains (issue #276), each:
+          - video_id, video_title, video_url from the span's first chunk
+          - content: concatenated text of all chunks in the span (shared context)
+          - start_seconds / end_seconds: from this entry's own retrieved chunk
+          - snippet / chunk_id: from this entry's own retrieved chunk
     """
     if window <= 0 or not chunks:
         return chunks
@@ -111,37 +111,47 @@ async def expand_and_merge(
                 else:
                     raw_spans.append([chunk])
 
-        # Convert raw spans to result spans, anchoring citation to the first
-        # originally-retrieved chunk in each raw span.
+        # Convert raw spans to result entries. A span can contain more than one
+        # originally-retrieved chunk when two retrieved moments are close enough
+        # that their neighbor windows overlap into one contiguous run. Emit one
+        # citation entry PER originally-retrieved chunk so two nearby moments
+        # from the same video don't collapse into a single chip (issue #276).
+        # Each entry shares the merged span content (small-to-big context) but
+        # anchors its timestamp/snippet/chunk_id to its OWN chunk, so the
+        # deep-link opens at the moment the model actually cited rather than at
+        # the (earlier) start of the expanded span.
         for raw in raw_spans:
-            # Find the first originally-retrieved chunk in this raw span
-            anchor = raw[0]
-            for c in raw:
-                if (current_video_id, c["chunk_index"]) in retrieved_by_index:
-                    anchor = c
-                    break
-
             content = "\n\n".join(c["content"] for c in raw)
-            merged.append(
-                {
-                    "video_id": raw[0]["video_id"],
-                    "video_title": raw[0].get("video_title", ""),
-                    "video_url": raw[0].get("video_url", ""),
-                    # Issue #147: preserve the source-type discriminator and
-                    # lesson_url for Dynamous chunks so the frontend can render
-                    # community.dynamous.ai citation links. Pull these from the
-                    # anchor (originally-retrieved chunk) — it went through
-                    # _hydrate_chunks and is guaranteed to have them. raw[0]
-                    # could be a neighbor fetched via get_chunk_neighbors, which
-                    # doesn't include those columns.
-                    "source_type": anchor.get("source_type", "youtube"),
-                    "lesson_url": anchor.get("lesson_url", ""),
-                    "content": content,
-                    "start_seconds": raw[0]["start_seconds"],
-                    "end_seconds": raw[-1]["end_seconds"],
-                    "snippet": anchor["snippet"],
-                    "chunk_id": anchor.get("chunk_id") or anchor.get("id", ""),
-                }
-            )
+            span_video_id = raw[0]["video_id"]
+            span_title = raw[0].get("video_title", "")
+            span_url = raw[0].get("video_url", "")
+
+            anchors = [
+                c for c in raw if (current_video_id, c["chunk_index"]) in retrieved_by_index
+            ]
+            if not anchors:
+                # Defensive: every span is built around at least one retrieved
+                # chunk, but fall back to the first chunk if that ever changes.
+                anchors = [raw[0]]
+
+            for anchor in anchors:
+                merged.append(
+                    {
+                        "video_id": span_video_id,
+                        "video_title": span_title,
+                        "video_url": span_url,
+                        # Issue #147: source_type/lesson_url come from the anchor
+                        # (an originally-retrieved chunk that went through
+                        # _hydrate_chunks); neighbors fetched via
+                        # get_chunk_neighbors don't carry these columns.
+                        "source_type": anchor.get("source_type", "youtube"),
+                        "lesson_url": anchor.get("lesson_url", ""),
+                        "content": content,
+                        "start_seconds": anchor.get("start_seconds", 0.0),
+                        "end_seconds": anchor.get("end_seconds", 0.0),
+                        "snippet": anchor.get("snippet", ""),
+                        "chunk_id": anchor.get("chunk_id") or anchor.get("id", ""),
+                    }
+                )
 
     return merged

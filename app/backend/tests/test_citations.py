@@ -223,9 +223,10 @@ class TestSseIntegration:
         # 2 cited + CITATIONS_MAX_COUNT non-cited = 12 total.
         assert len(payload) == 2 + CITATIONS_MAX_COUNT
 
-    async def test_same_video_chunks_collapsed_to_one_citation(self) -> None:
-        """Multiple chunks from the same video collapse into a single citation
-        entry (issue #208). segment_count reflects the original chunk count."""
+    async def test_single_cited_chunk_absorbs_uncited_siblings(self) -> None:
+        """When exactly one chunk from a video is cited, its uncited same-video
+        siblings are absorbed (issue #208 noise reduction) and the lone cited
+        moment stands as its own chip with its own timestamp (issue #276)."""
         chunks = [{**_chunk(f"c{i}", "v1"), "start_seconds": float(i * 10)} for i in range(5)]
         # Only c2 (start_seconds=20.0) is cited
         body = await _post_message(
@@ -237,13 +238,42 @@ class TestSseIntegration:
         entry = payload[0]
         assert entry["video_id"] == "v1"
         assert entry["is_cited"] is True
-        assert entry["segment_count"] == 5
-        # Representative picks earliest cited chunk → c2 at 20.0s
+        # A cited chip is a single distinct moment, not a merged segment count.
+        assert entry["segment_count"] == 1
+        # The cited chip anchors to c2's own timestamp (20.0s), not the earliest.
         assert entry["start_seconds"] == 20.0
 
+    async def test_two_cited_moments_same_video_each_get_own_chip(self) -> None:
+        """Two distinct moments the model cited from the SAME video must each
+        get their own chip with their own timestamp — not collapse into one chip
+        pointing at the earlier moment (issue #276). Uncited siblings of a cited
+        video are still absorbed."""
+        chunks = [
+            {**_chunk("early", "v1"), "start_seconds": 30.0},
+            {**_chunk("late", "v1"), "start_seconds": 90.0},
+            {**_chunk("consulted", "v1"), "start_seconds": 150.0},  # not cited
+        ]
+        body = await _post_message(
+            answer_tokens=["First point [c:early]. Second, later point [c:late]."],
+            retrieved_chunks=chunks,
+        )
+        payload = _parse_sources(body)
+        # Both cited moments survive as distinct chips; the uncited sibling from
+        # the same (already-cited) video is absorbed.
+        assert len(payload) == 2
+        by_id = {c["chunk_id"]: c for c in payload}
+        assert set(by_id) == {"early", "late"}
+        assert by_id["early"]["is_cited"] is True
+        assert by_id["late"]["is_cited"] is True
+        # Each chip keeps its OWN timestamp — the later claim is not mis-anchored
+        # to the earlier moment.
+        assert by_id["early"]["start_seconds"] == 30.0
+        assert by_id["late"]["start_seconds"] == 90.0
+
     async def test_collapse_two_videos_preserves_both(self) -> None:
-        """Chunks from two different videos collapse to two entries, each with
-        correct is_cited and segment_count."""
+        """One cited chunk in each of two videos yields two cited chips, each
+        anchored to the cited moment's own timestamp. Uncited siblings of those
+        cited videos are absorbed (issues #208, #276)."""
         chunks_v1 = [{**_chunk(f"v1c{i}", "v1"), "start_seconds": float(i * 5)} for i in range(3)]
         chunks_v2 = [{**_chunk(f"v2c{i}", "v2"), "start_seconds": float(i * 5)} for i in range(3)]
         # v1c1 and v2c0 are cited
@@ -255,10 +285,10 @@ class TestSseIntegration:
         assert len(payload) == 2
         by_vid = {e["video_id"]: e for e in payload}
         assert by_vid["v1"]["is_cited"] is True
-        assert by_vid["v1"]["segment_count"] == 3
+        assert by_vid["v1"]["segment_count"] == 1
         assert by_vid["v1"]["start_seconds"] == 5.0  # v1c1
         assert by_vid["v2"]["is_cited"] is True
-        assert by_vid["v2"]["segment_count"] == 3
+        assert by_vid["v2"]["segment_count"] == 1
         assert by_vid["v2"]["start_seconds"] == 0.0  # v2c0
 
     async def test_collapse_uncited_group_picks_earliest_timestamp(self) -> None:

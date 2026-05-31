@@ -112,9 +112,10 @@ class TestExpandAndMerge:
         # Citation fields from original chunk
         assert span["chunk_id"] == "c5"
         assert span["snippet"] == "hello world snippet"
-        # Span boundaries
-        assert span["start_seconds"] == 40.0  # from left neighbor
-        assert span["end_seconds"] == 70.0  # from right neighbor
+        # Timestamp anchors to the retrieved chunk itself (issue #276) so the
+        # deep-link opens at the cited moment, not the expanded span's start.
+        assert span["start_seconds"] == 50.0
+        assert span["end_seconds"] == 60.0
 
     @pytest.mark.asyncio
     async def test_non_adjacent_chunks_remain_separate(self):
@@ -286,3 +287,52 @@ class TestExpandAndMerge:
         all_contents = [r["content"] for r in result]
         for content in all_contents:
             assert all_contents.count(content) == 1
+
+    @pytest.mark.asyncio
+    async def test_two_nearby_retrieved_chunks_keep_distinct_anchors(self):
+        """Two retrieved chunks whose neighbor windows overlap into one
+        contiguous span must still yield one citation entry each, anchored to
+        its own timestamp — not a single merged chip pointing at the earlier
+        moment (issue #276)."""
+        c5 = dict(_ORIG_CHUNK)  # chunk_index 5, start 50.0
+        c7 = {
+            "chunk_id": "c7",
+            "video_id": "v1",
+            "content": "later moment",
+            "chunk_index": 7,
+            "start_seconds": 70.0,
+            "end_seconds": 80.0,
+            "snippet": "later snippet",
+            "video_title": "Test Video",
+            "video_url": "https://youtube.com/watch?v=v1",
+        }
+        c8 = {
+            "id": "c8",
+            "video_id": "v1",
+            "content": "after",
+            "chunk_index": 8,
+            "start_seconds": 80.0,
+            "end_seconds": 90.0,
+            "snippet": "s8",
+            "video_title": "Test Video",
+            "video_url": "https://youtube.com/watch?v=v1",
+        }
+
+        async def fake_neighbors(video_id, chunk_index, window):
+            if chunk_index == 5:
+                return [_NEIGHBOR_LEFT, _NEIGHBOR_RIGHT]  # indices 4, 6
+            if chunk_index == 7:
+                # index 6 is shared with c5's right neighbor (deduped by id)
+                return [_NEIGHBOR_RIGHT, c8]  # indices 6, 8
+            return []
+
+        result = await expand_and_merge([c5, c7], window=1, _fetch_neighbors=fake_neighbors)
+
+        # Indices 4,5,6,7,8 form one contiguous span, but c5 and c7 are both
+        # originally-retrieved → two distinct citation entries.
+        assert len(result) == 2
+        by_id = {r["chunk_id"]: r for r in result}
+        assert set(by_id) == {"c5", "c7"}
+        # Each entry keeps its OWN timestamp, not the span's earliest.
+        assert by_id["c5"]["start_seconds"] == 50.0
+        assert by_id["c7"]["start_seconds"] == 70.0
