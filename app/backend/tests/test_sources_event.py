@@ -1344,6 +1344,101 @@ class TestSourcesLiveVsPersistConsistency:
         assert assistant_kwargs["role"] == "assistant"
         assert assistant_kwargs["sources"] is None
 
+    async def test_refusal_persists_no_sources(self, bypass_auth) -> None:
+        """Refusal answer with retrieved sources: event: sources must not be emitted
+        and sources=None persisted. Both the live emit and persist decisions now go
+        through one code path (sources_finalized), so they can't disagree."""
+        from backend.routes.messages import MessageCreate, create_message
+
+        source_citations = [
+            {
+                "chunk_id": "c1",
+                "video_id": "v1",
+                "video_title": "Test Video",
+                "video_url": "https://youtube.com/watch?v=abc",
+                "start_seconds": 10.0,
+                "end_seconds": 20.0,
+                "snippet": "Test snippet",
+            }
+        ]
+        refusal_text = "The video library does not cover that topic."
+
+        async def fake_stream(*args, **kwargs):
+            final_text_out = kwargs.get("final_text_out")
+            tool_executor = kwargs.get("tool_executor")
+            if tool_executor is not None:
+                await tool_executor("search_videos", json.dumps({"query": "test"}))
+            yield f"data: {json.dumps(refusal_text)}\n\n"
+            if final_text_out is not None:
+                final_text_out.append(refusal_text)
+            yield "data: [DONE]\n\n"
+
+        fake_user = bypass_auth
+        fake_conv = {
+            "id": str(uuid4()),
+            "user_id": fake_user["id"],
+            "title": "New Conversation",
+        }
+
+        with (
+            patch(
+                "backend.routes.messages.repository.get_conversation",
+                new_callable=AsyncMock,
+                return_value=fake_conv,
+            ),
+            patch(
+                "backend.routes.messages.repository.create_message",
+                new_callable=AsyncMock,
+                side_effect=[{"id": str(uuid4())}, {"id": str(uuid4())}],
+            ) as mock_create,
+            patch(
+                "backend.routes.messages.repository.list_messages",
+                new_callable=AsyncMock,
+                return_value=[{"role": "user", "content": "hi"}],
+            ),
+            patch(
+                "backend.routes.messages.repository.list_videos",
+                new_callable=AsyncMock,
+                return_value=[{"id": "v1", "title": "Test Video", "url": "u"}],
+            ),
+            patch(
+                "backend.routes.messages.rate_limit.check_and_record",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "backend.routes.messages.stream_chat",
+                side_effect=fake_stream,
+            ),
+            patch(
+                "backend.routes.messages.execute_tool",
+                new_callable=AsyncMock,
+                return_value={"ok": True, "text": "context", "chunks": source_citations},
+            ),
+            patch(
+                "backend.routes.messages._maybe_set_conversation_title",
+                new_callable=AsyncMock,
+            ),
+        ):
+            resp = await create_message(
+                conv_id=fake_conv["id"],
+                body=MessageCreate(content="hi"),
+                current_user=fake_user,
+            )
+
+            body_iter = resp.body_iterator
+            chunks = []
+            async for chunk in body_iter:
+                chunks.append(chunk)
+
+            await asyncio.sleep(0.1)
+
+        assert mock_create.call_count == 2
+        assistant_kwargs = mock_create.call_args_list[1].kwargs
+        assert assistant_kwargs["role"] == "assistant"
+        assert assistant_kwargs["sources"] is None
+        output = "".join(chunks)
+        assert "event: sources" not in output
+
     async def test_clean_completion_collapses_multiple_chunks_per_video(self) -> None:
         """Multiple chunks from the same video: live and persisted both show
         exactly one entry per video_id (no duplicate chips)."""
