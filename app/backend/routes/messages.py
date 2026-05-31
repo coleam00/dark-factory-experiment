@@ -467,22 +467,17 @@ async def _maybe_set_conversation_title(
 
 
 def _collapse_by_video(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Collapse multiple chunks from the same video into a single citation entry.
-
-    After the ``is_cited`` pass, chunks from the same video are redundant in
-    the UI — the user needs one clickable chip per video, not one per 5-second
-    transcript segment (issue #208).
+    """Collapse uncited chunks from the same video into a single citation entry,
+    but keep each cited chunk as its own entry so distinct moments referenced
+    by the model each get their own source chip (issues #208, #276).
 
     For each ``video_id`` group:
-    - ``is_cited`` is True if ANY chunk in the group was cited by the LLM.
-    - ``start_seconds`` is the earliest timestamp among cited chunks (or among
-      all chunks if none were cited), so the deep-link opens near the most
-      relevant moment.
-    - ``segment_count`` records how many chunks were collapsed so the frontend
-      can optionally display "(N segments)".
-    - All other fields are taken from the representative chunk.
-
-    Insertion order of videos is preserved (first-seen wins).
+    - Each cited chunk produces a separate entry with ``segment_count=1``.
+    - All uncited chunks collapse into one entry; ``start_seconds`` is the
+      earliest timestamp among them, ``is_cited=False``, and
+      ``segment_count`` reflects how many uncited chunks were absorbed.
+    - Insertion order of videos is preserved; cited entries for a video
+      appear before its uncited collapsed entry.
     """
     seen: dict[str, list[dict]] = {}
     for c in chunks:
@@ -493,16 +488,22 @@ def _collapse_by_video(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     collapsed: list[dict] = []
     for group in seen.values():
-        cited_in_group = [c for c in group if c.get("is_cited")]
-        if cited_in_group:
-            representative = min(cited_in_group, key=lambda c: c.get("start_seconds") or 0.0)
-            is_cited = True
-        else:
-            representative = min(group, key=lambda c: c.get("start_seconds") or 0.0)
-            is_cited = False
-        entry = dict(representative)
-        entry["is_cited"] = is_cited
-        entry["segment_count"] = len(group)
-        collapsed.append(entry)
+        cited = [c for c in group if c.get("is_cited")]
+        uncited = [c for c in group if not c.get("is_cited")]
+
+        # Each cited chunk gets its own entry (issue #276)
+        for c in cited:
+            entry = dict(c)
+            entry["is_cited"] = True
+            entry["segment_count"] = 1
+            collapsed.append(entry)
+
+        # Uncited chunks collapse to one entry (issue #208)
+        if uncited:
+            representative = min(uncited, key=lambda c: c.get("start_seconds") or 0.0)
+            entry = dict(representative)
+            entry["is_cited"] = False
+            entry["segment_count"] = len(uncited)
+            collapsed.append(entry)
 
     return collapsed

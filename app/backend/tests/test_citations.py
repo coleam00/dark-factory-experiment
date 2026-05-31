@@ -224,8 +224,8 @@ class TestSseIntegration:
         assert len(payload) == 2 + CITATIONS_MAX_COUNT
 
     async def test_same_video_chunks_collapsed_to_one_citation(self) -> None:
-        """Multiple chunks from the same video collapse into a single citation
-        entry (issue #208). segment_count reflects the original chunk count."""
+        """Multiple chunks from the same video: cited chunk gets its own entry,
+        uncited chunks collapse into one entry (issues #208, #276)."""
         chunks = [{**_chunk(f"c{i}", "v1"), "start_seconds": float(i * 10)} for i in range(5)]
         # Only c2 (start_seconds=20.0) is cited
         body = await _post_message(
@@ -233,17 +233,19 @@ class TestSseIntegration:
             retrieved_chunks=chunks,
         )
         payload = _parse_sources(body)
-        assert len(payload) == 1
-        entry = payload[0]
-        assert entry["video_id"] == "v1"
-        assert entry["is_cited"] is True
-        assert entry["segment_count"] == 5
-        # Representative picks earliest cited chunk → c2 at 20.0s
-        assert entry["start_seconds"] == 20.0
+        assert len(payload) == 2
+        cited_entry = [e for e in payload if e["is_cited"]][0]
+        uncited_entry = [e for e in payload if not e["is_cited"]][0]
+        assert cited_entry["chunk_id"] == "c2"
+        assert cited_entry["start_seconds"] == 20.0
+        assert cited_entry["segment_count"] == 1
+        assert uncited_entry["video_id"] == "v1"
+        assert uncited_entry["segment_count"] == 4
+        assert uncited_entry["start_seconds"] == 0.0
 
     async def test_collapse_two_videos_preserves_both(self) -> None:
-        """Chunks from two different videos collapse to two entries, each with
-        correct is_cited and segment_count."""
+        """Chunks from two different videos: cited chunks get individual entries,
+        uncited chunks collapse per video."""
         chunks_v1 = [{**_chunk(f"v1c{i}", "v1"), "start_seconds": float(i * 5)} for i in range(3)]
         chunks_v2 = [{**_chunk(f"v2c{i}", "v2"), "start_seconds": float(i * 5)} for i in range(3)]
         # v1c1 and v2c0 are cited
@@ -252,14 +254,19 @@ class TestSseIntegration:
             retrieved_chunks=chunks_v1 + chunks_v2,
         )
         payload = _parse_sources(body)
-        assert len(payload) == 2
-        by_vid = {e["video_id"]: e for e in payload}
-        assert by_vid["v1"]["is_cited"] is True
-        assert by_vid["v1"]["segment_count"] == 3
-        assert by_vid["v1"]["start_seconds"] == 5.0  # v1c1
-        assert by_vid["v2"]["is_cited"] is True
-        assert by_vid["v2"]["segment_count"] == 3
-        assert by_vid["v2"]["start_seconds"] == 0.0  # v2c0
+        assert len(payload) == 4  # 2 cited + 2 uncited collapsed
+        by_vid_cited = {e["video_id"]: e for e in payload if e["is_cited"]}
+        by_vid_uncited = {e["video_id"]: e for e in payload if not e["is_cited"]}
+        assert by_vid_cited["v1"]["chunk_id"] == "v1c1"
+        assert by_vid_cited["v1"]["start_seconds"] == 5.0
+        assert by_vid_cited["v1"]["segment_count"] == 1
+        assert by_vid_uncited["v1"]["segment_count"] == 2
+        assert by_vid_uncited["v1"]["start_seconds"] == 0.0
+        assert by_vid_cited["v2"]["chunk_id"] == "v2c0"
+        assert by_vid_cited["v2"]["start_seconds"] == 0.0
+        assert by_vid_cited["v2"]["segment_count"] == 1
+        assert by_vid_uncited["v2"]["segment_count"] == 2
+        assert by_vid_uncited["v2"]["start_seconds"] == 5.0
 
     async def test_collapse_uncited_group_picks_earliest_timestamp(self) -> None:
         """All same-video chunks uncited → is_cited=False, earliest start_seconds selected."""
@@ -275,3 +282,28 @@ class TestSseIntegration:
         assert entry["is_cited"] is False
         assert entry["segment_count"] == 3
         assert entry["start_seconds"] == 0.0  # c0, earliest
+
+    async def test_two_cited_moments_same_video_produce_two_chips(self) -> None:
+        """Two distinct cited moments from the same video each get their own
+        source chip with correct timestamps; uncited chunks collapse to one
+        entry (issue #276 regression)."""
+        chunks = [
+            {**_chunk("c0", "v1"), "start_seconds": 0.0},
+            {**_chunk("c_early", "v1"), "start_seconds": 10.0},
+            {**_chunk("c_late", "v1"), "start_seconds": 55.0},
+        ]
+        body = await _post_message(
+            answer_tokens=["Early claim [c:c_early]. Later claim [c:c_late]."],
+            retrieved_chunks=chunks,
+        )
+        payload = _parse_sources(body)
+        assert len(payload) == 3  # 2 cited + 1 uncited collapsed
+        by_cid = {e["chunk_id"]: e for e in payload if e["is_cited"]}
+        uncited = [e for e in payload if not e["is_cited"]]
+        assert by_cid["c_early"]["start_seconds"] == 10.0
+        assert by_cid["c_early"]["segment_count"] == 1
+        assert by_cid["c_late"]["start_seconds"] == 55.0
+        assert by_cid["c_late"]["segment_count"] == 1
+        assert len(uncited) == 1
+        assert uncited[0]["start_seconds"] == 0.0
+        assert uncited[0]["segment_count"] == 1
