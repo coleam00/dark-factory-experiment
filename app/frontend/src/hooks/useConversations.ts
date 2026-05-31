@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { type Conversation, getConversations, renameConversation } from '../lib/api';
+import {
+  type Conversation,
+  type ConversationFilters,
+  renameConversation,
+  searchConversations,
+} from '../lib/api';
 
-export function useConversations(searchQuery?: string) {
+export function useConversations(filters: ConversationFilters = {}) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -9,12 +14,21 @@ export function useConversations(searchQuery?: string) {
   // when the user types faster than the network replies.
   const fetchIdRef = useRef(0);
 
+  // Destructure so the effect re-runs on value changes, not on the fresh
+  // object identity callers build every render.
+  const { q, startDate, endDate, videoId } = filters;
+
   const load = useCallback(async () => {
     const myId = ++fetchIdRef.current;
     try {
       setLoading(true);
-      const data = await getConversations();
-      if (myId === fetchIdRef.current) setConversations(data);
+      // Server-side filtering: title text, date range, and video all combine
+      // and the backend returns results newest-first with previews intact.
+      const data = await searchConversations({ q, startDate, endDate, videoId });
+      if (myId === fetchIdRef.current) {
+        setConversations(data);
+        setError(null);
+      }
     } catch (e) {
       if (myId === fetchIdRef.current) {
         setError(e instanceof Error ? e.message : 'Failed to load conversations');
@@ -22,7 +36,7 @@ export function useConversations(searchQuery?: string) {
     } finally {
       if (myId === fetchIdRef.current) setLoading(false);
     }
-  }, []);
+  }, [q, startDate, endDate, videoId]);
 
   useEffect(() => {
     load();
@@ -43,12 +57,7 @@ export function useConversations(searchQuery?: string) {
 
   // Filter out conversations with zero messages (preview === null).
   // Keep conversations unfiltered for guard logic in Sidebar.tsx.
-  const withMessages = conversations.filter((c) => c.preview !== null);
-
-  const trimmed = (searchQuery ?? '').trim().toLowerCase();
-  const filteredConversations = trimmed
-    ? withMessages.filter((c) => c.title.toLowerCase().includes(trimmed))
-    : withMessages;
+  const filteredConversations = conversations.filter((c) => c.preview !== null);
 
   return {
     conversations,

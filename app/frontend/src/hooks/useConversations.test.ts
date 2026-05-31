@@ -13,7 +13,9 @@ describe('useConversations', () => {
       const conversations = [
         { id: '1', title: 'Old Title', created_at: '', updated_at: '', preview: 'Hello' },
       ];
-      vi.spyOn(api, 'getConversations').mockResolvedValueOnce(conversations as api.Conversation[]);
+      vi.spyOn(api, 'searchConversations').mockResolvedValueOnce(
+        conversations as api.Conversation[],
+      );
       vi.spyOn(api, 'renameConversation').mockResolvedValueOnce({} as api.Conversation);
 
       const { result } = renderHook(() => useConversations());
@@ -31,7 +33,9 @@ describe('useConversations', () => {
       const conversations = [
         { id: '1', title: 'Original', created_at: '', updated_at: '', preview: 'Hello' },
       ];
-      vi.spyOn(api, 'getConversations').mockResolvedValueOnce(conversations as api.Conversation[]);
+      vi.spyOn(api, 'searchConversations').mockResolvedValueOnce(
+        conversations as api.Conversation[],
+      );
       vi.spyOn(api, 'renameConversation').mockRejectedValueOnce(new Error('Network error'));
 
       const { result } = renderHook(() => useConversations());
@@ -47,7 +51,7 @@ describe('useConversations', () => {
 
   describe('load error handling', () => {
     it('sets error and clears loading when load fails', async () => {
-      vi.spyOn(api, 'getConversations').mockRejectedValueOnce(new Error('Network error'));
+      vi.spyOn(api, 'searchConversations').mockRejectedValueOnce(new Error('Network error'));
 
       const { result } = renderHook(() => useConversations());
 
@@ -62,7 +66,7 @@ describe('useConversations', () => {
         resolveStale = r;
       });
 
-      vi.spyOn(api, 'getConversations')
+      vi.spyOn(api, 'searchConversations')
         .mockReturnValueOnce(stalePromise)
         .mockResolvedValueOnce([
           { id: 'fresh', title: 'Fresh', created_at: '', updated_at: '', preview: 'X' },
@@ -96,7 +100,7 @@ describe('useConversations', () => {
         // Empty-string preview must pass through — strict null check, not falsy check.
         { id: '4', title: 'Chat C', created_at: '', updated_at: '', preview: '' },
       ];
-      vi.spyOn(api, 'getConversations').mockResolvedValue(conversations as api.Conversation[]);
+      vi.spyOn(api, 'searchConversations').mockResolvedValue(conversations as api.Conversation[]);
 
       const { result } = renderHook(() => useConversations());
 
@@ -110,7 +114,7 @@ describe('useConversations', () => {
       const conversations = [
         { id: '1', title: 'New Conversation', created_at: '', updated_at: '', preview: null },
       ];
-      vi.spyOn(api, 'getConversations').mockResolvedValue(conversations as api.Conversation[]);
+      vi.spyOn(api, 'searchConversations').mockResolvedValue(conversations as api.Conversation[]);
 
       const { result } = renderHook(() => useConversations());
       await waitFor(() => expect(result.current.filteredConversations).toHaveLength(0));
@@ -125,94 +129,73 @@ describe('useConversations', () => {
           preview: 'First message',
         },
       ];
-      vi.spyOn(api, 'getConversations').mockResolvedValue(updated as api.Conversation[]);
+      vi.spyOn(api, 'searchConversations').mockResolvedValue(updated as api.Conversation[]);
       await result.current.refetch();
 
       await waitFor(() => expect(result.current.filteredConversations).toHaveLength(1));
     });
   });
 
-  describe('client-side search', () => {
-    it('filters conversations by title case-insensitively', async () => {
+  describe('server-side filtering', () => {
+    it('forwards the filter object to searchConversations and does not filter locally', async () => {
       const conversations = [
         { id: '1', title: 'Python Tutorial', created_at: '', updated_at: '', preview: 'Hello' },
-        { id: '2', title: 'JavaScript Guide', created_at: '', updated_at: '', preview: 'Hi' },
-        { id: '3', title: 'python advanced', created_at: '', updated_at: '', preview: 'Hey' },
+        { id: '2', title: 'python advanced', created_at: '', updated_at: '', preview: 'Hey' },
       ];
-      vi.spyOn(api, 'getConversations').mockResolvedValue(conversations as api.Conversation[]);
+      const spy = vi
+        .spyOn(api, 'searchConversations')
+        .mockResolvedValue(conversations as api.Conversation[]);
 
-      const { result } = renderHook(() => useConversations('python'));
+      const { result } = renderHook(() =>
+        useConversations({ q: 'python', startDate: 'S', endDate: 'E', videoId: 'vid-1' }),
+      );
 
       await waitFor(() => expect(result.current.filteredConversations).toHaveLength(2));
-      expect(result.current.filteredConversations.map((c) => c.id)).toEqual(['1', '3']);
+      expect(spy).toHaveBeenCalledWith({
+        q: 'python',
+        startDate: 'S',
+        endDate: 'E',
+        videoId: 'vid-1',
+      });
+      // The hook returns exactly what the server sent (no client-side title match).
+      expect(result.current.filteredConversations.map((c) => c.id)).toEqual(['1', '2']);
     });
 
-    it('excludes empty conversations from search results', async () => {
-      const conversations = [
-        { id: '1', title: 'New Conversation', created_at: '', updated_at: '', preview: null },
-        {
-          id: '2',
-          title: 'New Conversation',
-          created_at: '',
-          updated_at: '',
-          preview: 'Has messages',
-        },
-      ];
-      vi.spyOn(api, 'getConversations').mockResolvedValue(conversations as api.Conversation[]);
+    it('refetches when a filter value changes', async () => {
+      const spy = vi
+        .spyOn(api, 'searchConversations')
+        .mockResolvedValue([] as api.Conversation[]);
 
-      const { result } = renderHook(() => useConversations('New'));
+      const { rerender } = renderHook((props: api.ConversationFilters) => useConversations(props), {
+        initialProps: { q: 'a' },
+      });
 
-      await waitFor(() => expect(result.current.filteredConversations).toHaveLength(1));
-      expect(result.current.filteredConversations[0].id).toBe('2');
+      await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+
+      rerender({ q: 'b' });
+      await waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
+      expect(spy).toHaveBeenLastCalledWith({
+        q: 'b',
+        startDate: undefined,
+        endDate: undefined,
+        videoId: undefined,
+      });
     });
 
-    it('returns full list when query is empty', async () => {
-      const conversations = [
-        { id: '1', title: 'Chat A', created_at: '', updated_at: '', preview: 'Hello' },
-        { id: '2', title: 'Chat B', created_at: '', updated_at: '', preview: 'World' },
-      ];
-      vi.spyOn(api, 'getConversations').mockResolvedValue(conversations as api.Conversation[]);
+    it('calls searchConversations with no filters when none are provided', async () => {
+      const spy = vi
+        .spyOn(api, 'searchConversations')
+        .mockResolvedValue([] as api.Conversation[]);
 
-      const { result } = renderHook(() => useConversations(''));
+      renderHook(() => useConversations());
 
-      await waitFor(() => expect(result.current.filteredConversations).toHaveLength(2));
-    });
-
-    it('trims whitespace-only queries and returns full list', async () => {
-      const conversations = [
-        { id: '1', title: 'Chat A', created_at: '', updated_at: '', preview: 'Hello' },
-      ];
-      vi.spyOn(api, 'getConversations').mockResolvedValue(conversations as api.Conversation[]);
-
-      const { result } = renderHook(() => useConversations('   '));
-
-      await waitFor(() => expect(result.current.filteredConversations).toHaveLength(1));
-    });
-
-    it('returns empty list when query has no matches', async () => {
-      const conversations = [
-        { id: '1', title: 'Python Tutorial', created_at: '', updated_at: '', preview: 'Hello' },
-      ];
-      vi.spyOn(api, 'getConversations').mockResolvedValue(conversations as api.Conversation[]);
-
-      const { result } = renderHook(() => useConversations('rust'));
-
-      // Wait for the underlying load to settle, then assert the filter returns []
-      await waitFor(() => expect(result.current.loading).toBe(false));
-      expect(result.current.filteredConversations).toHaveLength(0);
-    });
-
-    it('trims leading/trailing whitespace from non-empty queries', async () => {
-      const conversations = [
-        { id: '1', title: 'Python Tutorial', created_at: '', updated_at: '', preview: 'Hello' },
-        { id: '2', title: 'JavaScript', created_at: '', updated_at: '', preview: 'Hi' },
-      ];
-      vi.spyOn(api, 'getConversations').mockResolvedValue(conversations as api.Conversation[]);
-
-      const { result } = renderHook(() => useConversations('  python  '));
-
-      await waitFor(() => expect(result.current.filteredConversations).toHaveLength(1));
-      expect(result.current.filteredConversations[0].id).toBe('1');
+      await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+      expect(spy).toHaveBeenCalledWith({
+        q: undefined,
+        startDate: undefined,
+        endDate: undefined,
+        videoId: undefined,
+      });
     });
   });
 });

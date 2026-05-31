@@ -250,6 +250,8 @@ async def test_repository_functions_require_user_id():
         "update_conversation_title",
         "touch_conversation",
         "delete_conversation",
+        "search_conversations",
+        "list_conversation_videos",
         "create_message",
         "list_messages",
     ]

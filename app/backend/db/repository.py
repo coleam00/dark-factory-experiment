@@ -526,6 +526,90 @@ async def search_conversations_by_title(user_id: str, query: str, limit: int = 2
     return [dict(r) for r in rows]
 
 
+async def search_conversations(
+    user_id: str,
+    q: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    video_id: str | None = None,
+) -> list[dict]:
+    """Filter a user's conversations by optional title text, date range, and video.
+
+    Every filter is optional and the non-null ones combine with AND. The result
+    mirrors ``list_conversations`` (same columns + ``preview`` subquery) and is
+    ordered most-recent-first. Filters are scoped to the owning user; a NULL
+    parameter disables that filter via the ``$N IS NULL OR ...`` guard so a
+    single prepared statement covers every combination.
+
+    - ``q``: case-insensitive substring match on the title (ILIKE).
+    - ``start_date`` / ``end_date``: ISO 8601 bounds on ``updated_at`` (inclusive),
+      passed straight through to Postgres TIMESTAMPTZ parsing.
+    - ``video_id``: keeps only conversations whose messages cite the given video,
+      extracted from the ``messages.sources`` JSONB citation array.
+    """
+    pattern = f"%{q}%" if q is not None else None
+    async with _acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT c.*,
+                   (SELECT content
+                    FROM messages
+                    WHERE conversation_id = c.id
+                    ORDER BY created_at DESC
+                    LIMIT 1) AS preview
+            FROM conversations c
+            WHERE c.user_id = $1
+              AND ($2::text IS NULL OR c.title ILIKE $2)
+              AND ($3::timestamptz IS NULL OR c.updated_at >= $3::timestamptz)
+              AND ($4::timestamptz IS NULL OR c.updated_at <= $4::timestamptz)
+              AND ($5::text IS NULL OR EXISTS (
+                      SELECT 1
+                      FROM messages m
+                      WHERE m.conversation_id = c.id
+                        AND m.sources IS NOT NULL
+                        AND EXISTS (
+                            SELECT 1
+                            FROM jsonb_array_elements(m.sources) elem
+                            WHERE elem ->> 'video_id' = $5::text
+                        )
+                  ))
+            ORDER BY c.updated_at DESC
+            """,
+            user_id,
+            pattern,
+            start_date,
+            end_date,
+            video_id,
+        )
+    return [dict(r) for r in rows]
+
+
+async def list_conversation_videos(user_id: str) -> list[dict]:
+    """Return the distinct videos cited across the user's conversations.
+
+    Walks ``messages.sources`` (JSONB citation arrays) for the user's messages
+    and returns deduplicated ``{video_id, video_title}`` pairs, ordered by title.
+    Feeds the sidebar's "filter by video" dropdown.
+    """
+    async with _acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT DISTINCT
+                   elem ->> 'video_id'    AS video_id,
+                   elem ->> 'video_title' AS video_title
+            FROM messages m
+            JOIN conversations c ON c.id = m.conversation_id
+            CROSS JOIN LATERAL jsonb_array_elements(m.sources) elem
+            WHERE c.user_id = $1
+              AND m.sources IS NOT NULL
+              AND elem ->> 'video_id' IS NOT NULL
+            ORDER BY video_title
+            """,
+            user_id,
+        )
+    return [dict(r) for r in rows]
+
+
 # ---------------------------------------------------------------------------
 # Messages
 # ---------------------------------------------------------------------------

@@ -45,15 +45,35 @@ async def create_conversation(
 
 @router.get("/conversations/search")
 async def search_conversations(
-    q: str,
+    q: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    video_id: str | None = None,
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
-    """Title-contains search. Must be declared BEFORE /conversations/{conv_id}
+    """Filter a user's conversations by optional title text, date range, and video.
+
+    All params are optional and combine with AND; results stay newest-first and
+    include the `preview` field. Must be declared BEFORE /conversations/{conv_id}
     or FastAPI routes "search" to the path-parameter handler and returns 404."""
-    return await repository.search_conversations_by_title(
+    return await repository.search_conversations(
         user_id=str(current_user["id"]),
-        query=q,
+        q=q,
+        start_date=start_date,
+        end_date=end_date,
+        video_id=video_id,
     )
+
+
+@router.get("/conversations/videos")
+async def list_conversation_videos(
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
+    """Distinct videos cited in the user's conversations, for the filter dropdown.
+
+    Must be declared BEFORE /conversations/{conv_id} so FastAPI does not route
+    "videos" to the path-parameter handler."""
+    return await repository.list_conversation_videos(user_id=str(current_user["id"]))
 
 
 @router.get("/conversations/{conv_id}")

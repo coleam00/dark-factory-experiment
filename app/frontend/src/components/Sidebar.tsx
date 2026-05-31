@@ -3,8 +3,44 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useConversations } from '../hooks/useConversations';
 import { useToast } from '../hooks/useToast';
-import { type Conversation, createConversation, deleteConversation } from '../lib/api';
+import {
+  type Conversation,
+  type ConversationVideo,
+  createConversation,
+  deleteConversation,
+  getConversationVideos,
+} from '../lib/api';
 import { VideoExplorer } from './VideoExplorer';
+
+// ── Date-range filter presets ────────────────────────────────────
+type DatePreset = 'all' | 'this-week' | 'last-month' | 'custom';
+
+// Resolve a preset (or custom inputs) into ISO 8601 bounds for the backend.
+// `updated_at` is TIMESTAMPTZ, so passing ISO strings is safe. Custom end is
+// pinned to end-of-day so the chosen day is inclusive.
+function computeDateRange(
+  preset: DatePreset,
+  customStart: string,
+  customEnd: string,
+): { startDate?: string; endDate?: string } {
+  if (preset === 'this-week') {
+    const start = new Date();
+    start.setDate(start.getDate() - 7);
+    return { startDate: start.toISOString() };
+  }
+  if (preset === 'last-month') {
+    const start = new Date();
+    start.setMonth(start.getMonth() - 1);
+    return { startDate: start.toISOString() };
+  }
+  if (preset === 'custom') {
+    return {
+      startDate: customStart ? new Date(`${customStart}T00:00:00`).toISOString() : undefined,
+      endDate: customEnd ? new Date(`${customEnd}T23:59:59`).toISOString() : undefined,
+    };
+  }
+  return {};
+}
 
 // ── Relative time helper ─────────────────────────────────────────
 function formatRelativeTime(dateStr: string): string {
@@ -413,8 +449,22 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
-  const { conversations, loading, refetch, rename, filteredConversations } =
-    useConversations(debouncedQuery);
+  const [datePreset, setDatePreset] = useState<DatePreset>('all');
+  const [customStart, setCustomStart] = useState('');
+  const [customEnd, setCustomEnd] = useState('');
+  const [selectedVideoId, setSelectedVideoId] = useState('');
+  const [videos, setVideos] = useState<ConversationVideo[]>([]);
+
+  const { startDate, endDate } = computeDateRange(datePreset, customStart, customEnd);
+  // Date/video filters apply immediately; only the text query is debounced.
+  const { conversations, loading, refetch, rename, filteredConversations } = useConversations({
+    q: debouncedQuery.trim() || undefined,
+    startDate,
+    endDate,
+    videoId: selectedVideoId || undefined,
+  });
+  const hasActiveFilter =
+    debouncedQuery.trim() !== '' || datePreset !== 'all' || selectedVideoId !== '';
   const { user, logout } = useAuth();
   const [creatingNew, setCreatingNew] = useState(false);
   const [newChatError, setNewChatError] = useState<string | null>(null);
@@ -430,6 +480,14 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
     const timer = setTimeout(() => setDebouncedQuery(searchQuery), 250);
     return () => clearTimeout(timer);
   }, [searchQuery]);
+
+  // Populate the video filter dropdown with videos cited in the user's
+  // conversations. Best-effort: failure just leaves the dropdown empty.
+  useEffect(() => {
+    getConversationVideos()
+      .then(setVideos)
+      .catch(() => setVideos([]));
+  }, []);
 
   // Store refetch in the shared ref so ChatArea can trigger it
   useEffect(() => {
@@ -601,6 +659,103 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
           />
         </div>
 
+        {/* ── Date + video filters ── */}
+        <div
+          style={{
+            padding: '0 12px 8px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
+          }}
+        >
+          <select
+            aria-label="Filter by date"
+            value={datePreset}
+            onChange={(e) => setDatePreset(e.target.value as DatePreset)}
+            className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+            style={{
+              width: '100%',
+              padding: '7px 10px',
+              borderRadius: 8,
+              background: '#1e293b',
+              border: '1px solid #334155',
+              color: '#f1f5f9',
+              fontSize: 13,
+              outline: 'none',
+            }}
+          >
+            <option value="all">Any date</option>
+            <option value="this-week">This week</option>
+            <option value="last-month">Last month</option>
+            <option value="custom">Custom range…</option>
+          </select>
+
+          {datePreset === 'custom' && (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                type="date"
+                aria-label="Start date"
+                value={customStart}
+                onChange={(e) => setCustomStart(e.target.value)}
+                className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  padding: '7px 10px',
+                  borderRadius: 8,
+                  background: '#1e293b',
+                  border: '1px solid #334155',
+                  color: '#f1f5f9',
+                  fontSize: 13,
+                  outline: 'none',
+                }}
+              />
+              <input
+                type="date"
+                aria-label="End date"
+                value={customEnd}
+                onChange={(e) => setCustomEnd(e.target.value)}
+                className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  padding: '7px 10px',
+                  borderRadius: 8,
+                  background: '#1e293b',
+                  border: '1px solid #334155',
+                  color: '#f1f5f9',
+                  fontSize: 13,
+                  outline: 'none',
+                }}
+              />
+            </div>
+          )}
+
+          <select
+            aria-label="Filter by video"
+            value={selectedVideoId}
+            onChange={(e) => setSelectedVideoId(e.target.value)}
+            className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+            style={{
+              width: '100%',
+              padding: '7px 10px',
+              borderRadius: 8,
+              background: '#1e293b',
+              border: '1px solid #334155',
+              color: '#f1f5f9',
+              fontSize: 13,
+              outline: 'none',
+            }}
+          >
+            <option value="">Any video</option>
+            {videos.map((v) => (
+              <option key={v.video_id} value={v.video_id}>
+                {v.video_title}
+              </option>
+            ))}
+          </select>
+        </div>
+
         {/* ── Conversation list ── */}
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {loading ? (
@@ -630,10 +785,14 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
               >
                 <path d="M6,4 L30,4 A2,2 0 0,1 32,6 L32,24 A2,2 0 0,1 30,26 L10,26 L4,32 L4,6 A2,2 0 0,1 6,4 Z" />
               </svg>
-              {debouncedQuery.trim() ? (
-                <p style={{ margin: 0, fontSize: 13 }}>
-                  No matches for <strong style={{ color: '#94a3b8' }}>"{debouncedQuery}"</strong>
-                </p>
+              {hasActiveFilter ? (
+                debouncedQuery.trim() ? (
+                  <p style={{ margin: 0, fontSize: 13 }}>
+                    No matches for <strong style={{ color: '#94a3b8' }}>"{debouncedQuery}"</strong>
+                  </p>
+                ) : (
+                  <p style={{ margin: 0, fontSize: 13 }}>No conversations match these filters</p>
+                )
               ) : (
                 <>
                   <p style={{ margin: 0, fontSize: 13 }}>No conversations yet</p>
