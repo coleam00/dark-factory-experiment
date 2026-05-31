@@ -172,7 +172,7 @@ describe('handleCitationClick', () => {
     expect(screen.queryByTitle('YouTube video player')).not.toBeInTheDocument();
     // ...instead the user gets an info toast rather than a silent dead click
     expect(mockAddToast).toHaveBeenCalledTimes(1);
-    expect(mockAddToast).toHaveBeenCalledWith({ message: expect.any(String), type: 'info' });
+    expect(mockAddToast).toHaveBeenCalledWith(expect.any(String), 'info');
   });
 
   it('opens the citation modal for YouTube citations', async () => {

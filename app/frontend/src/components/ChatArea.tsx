@@ -449,7 +449,7 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
           // No lesson URL on this Dynamous source and the citation modal is
           // YouTube-only (would show "video unavailable"), so surface a toast
           // instead of a silent dead click.
-          addToast({ message: 'No lesson URL available for this citation.', type: 'info' });
+          addToast('No lesson URL available for this citation.', 'info');
         }
       } else {
         setSelectedCitation(citation);
