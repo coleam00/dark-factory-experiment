@@ -49,16 +49,36 @@ class TestKeywordSearch:
         assert "search_vector" in sql
         assert "@@" in sql  # tsvector match operator
 
-        # Verify positional args: query string and top_k
+        # Verify positional args: language, query string, top_k
         args = call_args[0]
-        # args is (sql_string, query_string, top_k_int)
-        assert args[1] == "hello world"
-        assert args[2] == 5
+        # args is (sql_string, language, query_string, top_k_int)
+        assert args[1] == "english"
+        assert args[2] == "hello world"
+        assert args[3] == 5
 
         # Verify result shape
         assert len(result) == 1
         assert result[0]["id"] == "chunk1"
         assert result[0]["rank"] == 0.9
+
+    async def test_keyword_search_binds_language_to_both_plainto_tsquery_calls(self):
+        """keyword_search binds language as regconfig to both ts_rank and WHERE clauses."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])
+
+        mock_acquire = AsyncMock()
+        mock_acquire.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_acquire.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(repository, "_acquire", return_value=mock_acquire):
+            await repository.keyword_search("hello world", top_k=5, language="english")
+
+        call_args = mock_conn.fetch.call_args
+        sql = call_args[0][0]
+        # Both plainto_tsquery calls must use the two-argument form with regconfig
+        assert sql.count("plainto_tsquery($1::regconfig, $2)") == 2
+        args = call_args[0]
+        assert args[1] == "english"
 
     async def test_keyword_search_returns_empty_list_when_no_matches(self):
         """keyword_search returns empty list when DB returns no rows."""
@@ -88,10 +108,10 @@ class TestKeywordSearch:
 
         call_args = mock_conn.fetch.call_args
         sql = call_args[0][0]
-        # LIMIT $2 means second parameter is top_k
-        assert "LIMIT $2" in sql
+        # LIMIT $3 means third parameter is top_k
+        assert "LIMIT $3" in sql
         args = call_args[0]
-        assert args[2] == 3
+        assert args[3] == 3
 
 
 class TestVectorSearchPg:

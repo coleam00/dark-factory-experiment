@@ -276,13 +276,14 @@ async def keyword_search(
         rows = await conn.fetch(
             """
             SELECT id, video_id, content, chunk_index, start_seconds, end_seconds, snippet,
-                   ts_rank(search_vector, plainto_tsquery($1)) AS rank
+                   ts_rank(search_vector, plainto_tsquery($1::regconfig, $2)) AS rank
             FROM chunks
-            WHERE search_vector @@ plainto_tsquery($1)
-              AND source_type = ANY($3::text[])
+            WHERE search_vector @@ plainto_tsquery($1::regconfig, $2)
+              AND source_type = ANY($4::text[])
             ORDER BY rank DESC
-            LIMIT $2
+            LIMIT $3
             """,
+            language,
             query,
             top_k,
             allowed_source_types,
