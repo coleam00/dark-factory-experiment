@@ -174,6 +174,12 @@ async def create_message(
         # Two-tier citations (issue #176): strip `[c:<id>]` markers from the
         # stream; use them at [DONE] to flag is_cited on retrieved chunks.
         marker_stripper = CitationMarkerStripper()
+        # Guard against persisting sources that were never successfully emitted
+        # to the client (issue #277).  The flag is only set after a yield
+        # returns normally; if GeneratorExit is raised at the yield point
+        # (client disconnect) the flag stays False.
+        sources_emitted = False
+        sources_snapshot: list[dict] | None = None
         try:
             # is_member_for_turn is captured above when tools are wired.
             # Re-bind to a local that's always defined so we can pass it
@@ -227,8 +233,10 @@ async def create_message(
                             else _extract_text_from_sse(full_response)
                         )
                         if not _is_refusal(final_text):
+                            sources_snapshot = list(source_citations)
                             sources_json = json.dumps(source_citations)
                             yield f"event: sources\ndata: {sources_json}\n\n"
+                            sources_emitted = True
                     full_response.append(sse_chunk)
                     yield sse_chunk
                     continue
@@ -269,8 +277,10 @@ async def create_message(
                 refusal_check_text = final_text_buf[0] if final_text_buf else assistant_text
                 sources_to_persist: list[dict] | None = (
                     None
-                    if not source_citations or _is_refusal(refusal_check_text)
-                    else source_citations
+                    if not sources_emitted
+                    or sources_snapshot is None
+                    or _is_refusal(refusal_check_text)
+                    else sources_snapshot
                 )
                 try:
                     await asyncio.shield(
