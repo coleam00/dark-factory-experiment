@@ -15,6 +15,9 @@ interface MessageProps {
   onCitationClick?: (citation: Citation) => void;
   /** Current tool-call status during streaming (ephemeral progress indicator) */
   streamingStatus?: StreamingStatus | null;
+  /** When provided (last assistant message, not streaming), renders a
+   *  "Regenerate" button that re-runs the last question (issue #280). */
+  onRegenerate?: () => void;
 }
 
 // ── Typing indicator (3 pulsing dots) ────────────────────────────
@@ -167,6 +170,7 @@ export function Message({
   sources,
   onCitationClick,
   streamingStatus,
+  onRegenerate,
 }: MessageProps) {
   const isUser = role === 'user';
   const hasSources = !isUser && Array.isArray(sources) && sources.length > 0;
@@ -204,6 +208,32 @@ export function Message({
           <>
             <MarkdownRenderer content={content} />
             {hasSources && <SourceCitations sources={sources} onCitationClick={onCitationClick} />}
+            {onRegenerate && !isStreaming && (
+              <div style={{ marginTop: 10 }}>
+                <button
+                  onClick={onRegenerate}
+                  aria-label="Regenerate response"
+                  className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: '#94a3b8',
+                    fontSize: 12,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    padding: 0,
+                    fontFamily: 'inherit',
+                    transition: 'color 0.15s',
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.color = '#f1f5f9')}
+                  onMouseLeave={(e) => (e.currentTarget.style.color = '#94a3b8')}
+                >
+                  ↻ Regenerate
+                </button>
+              </div>
+            )}
           </>
         )}
       </div>

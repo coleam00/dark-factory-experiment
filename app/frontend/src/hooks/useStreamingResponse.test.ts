@@ -9,6 +9,7 @@
 
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { RateLimitError } from '../lib/api';
 import { useStreamingResponse } from './useStreamingResponse';
 
 function makeSseStream(chunks: string[]): ReadableStream<Uint8Array> {
@@ -436,6 +437,59 @@ describe('status event SSE parsing — hook state transitions', () => {
     await act(async () => {
       await p;
     });
+  });
+});
+
+describe('startRegenerate (issue #280)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('POSTs to the regenerate endpoint with an empty body and streams the reply', async () => {
+    const sseChunks = ['data: "Fresh answer"\n\n', 'data: [DONE]\n\n'];
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: makeSseStream(sseChunks),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const onComplete = vi.fn();
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await act(async () => {
+      await result.current.startRegenerate('conv-1', onComplete);
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/conversations/conv-1/regenerate',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({}),
+      }),
+    );
+    expect(onComplete).toHaveBeenCalledWith(
+      expect.objectContaining({ fullText: 'Fresh answer' }),
+    );
+  });
+
+  it('surfaces a RateLimitError on a 429 from the regenerate endpoint', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 429,
+        json: async () => ({ limit: 25, window_hours: 24, reset_at: '2026-01-01T00:00:00Z' }),
+      }),
+    );
+
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await expect(
+      act(async () => {
+        await result.current.startRegenerate('conv-1', vi.fn());
+      }),
+    ).rejects.toBeInstanceOf(RateLimitError);
   });
 });
 

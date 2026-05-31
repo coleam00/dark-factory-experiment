@@ -42,10 +42,14 @@ export function useStreamingResponse(conversationId: string | null) {
     }
   }, []);
 
-  const startStream = useCallback(
+  // Shared fetch + SSE-parse loop used by both startStream (send) and
+  // startRegenerate. The only difference between the two flows is the URL
+  // and request body — everything else (status handling, reader loop,
+  // onComplete, finally reset) is identical.
+  const consumeStream = useCallback(
     async (
-      conversationId: string,
-      userMessage: string,
+      url: string,
+      body: object,
       onComplete: (result: StreamResult) => void,
     ): Promise<void> => {
       setIsStreaming(true);
@@ -61,11 +65,11 @@ export function useStreamingResponse(conversationId: string | null) {
         const abortController = new AbortController();
         streamAbortRef.current = abortController;
 
-        const res = await fetch(`/api/conversations/${conversationId}/messages`, {
+        const res = await fetch(url, {
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content: userMessage }),
+          body: JSON.stringify(body),
           signal: abortController.signal,
         });
 
@@ -218,12 +222,33 @@ export function useStreamingResponse(conversationId: string | null) {
     [],
   );
 
+  const startStream = useCallback(
+    (
+      conversationId: string,
+      userMessage: string,
+      onComplete: (result: StreamResult) => void,
+    ): Promise<void> =>
+      consumeStream(`/api/conversations/${conversationId}/messages`, { content: userMessage }, onComplete),
+    [consumeStream],
+  );
+
+  // Regenerate the most recent assistant message. No request body is needed —
+  // the backend re-runs the trailing user question already stored server-side.
+  // 429 handling lives in consumeStream, so regenerate inherits the same
+  // RateLimitError behaviour as a normal send.
+  const startRegenerate = useCallback(
+    (conversationId: string, onComplete: (result: StreamResult) => void): Promise<void> =>
+      consumeStream(`/api/conversations/${conversationId}/regenerate`, {}, onComplete),
+    [consumeStream],
+  );
+
   return {
     streamingContent,
     streamingSources,
     streamingStatus,
     isStreaming,
     startStream,
+    startRegenerate,
     abortStream,
   };
 }

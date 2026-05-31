@@ -301,6 +301,7 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
     streamingStatus,
     isStreaming,
     startStream,
+    startRegenerate,
     abortStream,
   } = useStreamingResponse(conversationId || null);
   const { addToast } = useToast();
@@ -323,6 +324,9 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
   const [failedMessageText, setFailedMessageText] = useState<string | null>(null);
   // Track the temp user message ID so we can remove it on failure
   const pendingUserMsgIdRef = useRef<string | null>(null);
+  // Track the assistant message removed for a regenerate so we can restore it
+  // if the regenerate fails (issue #280).
+  const regenRemovedRef = useRef<MessageType | null>(null);
   // Citation modal state
   const [selectedCitation, setSelectedCitation] = useState<Citation | null>(null);
 
@@ -559,6 +563,77 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
     ],
   );
 
+  // ── Regenerate handler ──
+  // Re-run the last user question and replace the most recent assistant
+  // answer with a fresh stream (its own citations). Counts against the daily
+  // cap exactly like a send (handled server-side). Mirrors handleSend's
+  // optimistic pattern: remove the stale answer, stream a replacement, and
+  // restore the removed answer on failure (issue #280).
+  const handleRegenerate = useCallback(async () => {
+    if (!conversationId || isStreaming) return;
+    const last = messages[messages.length - 1];
+    if (!last || last.role !== 'assistant') return;
+
+    setInlineError(null);
+    setFailedMessageText(null);
+
+    regenRemovedRef.current = last;
+    setMessages((prev) => prev.slice(0, -1));
+    autoScrollRef.current = true;
+    scrollToBottom();
+
+    try {
+      await startRegenerate(conversationId, ({ fullText, sources }) => {
+        const assistantMsg: MessageType = {
+          id: `temp-assistant-${Date.now()}`,
+          conversation_id: conversationId,
+          role: 'assistant',
+          content: fullText,
+          created_at: new Date().toISOString(),
+          sources: sources.length > 0 ? sources : undefined,
+        };
+        setMessages((prev) => [...prev, assistantMsg]);
+      });
+      regenRemovedRef.current = null;
+      // Pull fresh quota counter so the sidebar updates after each regenerate.
+      refreshAuth();
+    } catch (e) {
+      // Restore the removed assistant message so the conversation isn't left
+      // without a reply.
+      if (regenRemovedRef.current) {
+        const restored = regenRemovedRef.current;
+        setMessages((prev) => [...prev, restored]);
+        regenRemovedRef.current = null;
+      }
+
+      // Intentional abort (navigation or user cancel) — no error toast.
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        return;
+      }
+
+      if (e instanceof RateLimitError) {
+        const friendly = `You've hit your daily message limit (${e.limit}/day). Resets at ${formatResetTime(e.resetAt)}.`;
+        setInlineError(friendly);
+        addToast(friendly, 'error');
+        refreshAuth();
+        return;
+      }
+
+      const errMsg = e instanceof Error ? e.message : 'Failed to regenerate response';
+      setInlineError('Failed to regenerate. Please try again.');
+      addToast(errMsg || 'Network error — could not regenerate', 'error');
+    }
+  }, [
+    conversationId,
+    isStreaming,
+    messages,
+    startRegenerate,
+    setMessages,
+    scrollToBottom,
+    refreshAuth,
+    addToast,
+  ]);
+
   // Send pending message after conversation is created (post-route-change).
   // We read from `location.state.initialMessage`, which survives the
   // LandingPage → ConversationPage remount. Clear state with `replace`
@@ -708,13 +783,18 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
             {showEmptyInConversation ? (
               <EmptyState onStarterClick={handleStarterClick} />
             ) : (
-              messages.map((msg) => (
+              messages.map((msg, idx) => (
                 <Message
                   key={msg.id}
                   role={msg.role}
                   content={msg.content}
                   sources={msg.sources}
                   onCitationClick={handleCitationClick}
+                  onRegenerate={
+                    idx === messages.length - 1 && msg.role === 'assistant' && !isStreaming
+                      ? handleRegenerate
+                      : undefined
+                  }
                 />
               ))
             )}

@@ -603,6 +603,25 @@ async def list_messages(conversation_id: str, user_id: str) -> list[dict]:
     return results
 
 
+async def delete_message(message_id: str, user_id: str) -> bool:
+    """Delete a single message scoped to its owner. Returns True if a row was deleted.
+
+    Owner-scoped via JOIN on conversations.user_id so a caller cannot delete
+    another user's message even if it forgets to check (mirrors create_message).
+    """
+    async with _acquire() as conn:
+        result = await conn.execute(
+            """
+            DELETE FROM messages m
+            USING conversations c
+            WHERE m.id = $1 AND m.conversation_id = c.id AND c.user_id = $2
+            """,
+            message_id,
+            user_id,
+        )
+    return result != "DELETE 0"  # type: ignore[no-any-return]
+
+
 # ---------------------------------------------------------------------------
 # Channel sync runs
 # ---------------------------------------------------------------------------
