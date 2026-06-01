@@ -301,6 +301,7 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
     streamingStatus,
     isStreaming,
     startStream,
+    regenerateStream,
     abortStream,
   } = useStreamingResponse(conversationId || null);
   const { addToast } = useToast();
@@ -559,6 +560,69 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
     ],
   );
 
+  // ── Regenerate handler — replace the latest assistant answer in place ──
+  const handleRegenerate = useCallback(async () => {
+    if (!conversationId || isStreaming) return;
+    const last = messages[messages.length - 1];
+    if (!last || last.role !== 'assistant') return;
+
+    setInlineError(null);
+    setFailedMessageText(null);
+
+    // Optimistically drop the stale answer so the streaming bubble takes its
+    // place (rather than showing both at once). Keep a reference so we can
+    // restore it if the regenerate request fails.
+    setMessages((prev) => prev.filter((m) => m.id !== last.id));
+    autoScrollRef.current = true;
+    scrollToBottom();
+
+    try {
+      await regenerateStream(conversationId, ({ fullText, sources }) => {
+        const assistantMsg: MessageType = {
+          id: `temp-assistant-${Date.now()}`,
+          conversation_id: conversationId,
+          role: 'assistant',
+          content: fullText,
+          created_at: new Date().toISOString(),
+          sources: sources.length > 0 ? sources : undefined,
+        };
+        setMessages((prev) => [...prev, assistantMsg]);
+      });
+      // Pull fresh quota counter — a regenerate counts against the daily cap.
+      refreshAuth();
+    } catch (e) {
+      // Restore the previous answer so the conversation isn't left truncated.
+      setMessages((prev) => [...prev, last]);
+
+      // Intentional abort (navigation or user cancel) — no error toast.
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        return;
+      }
+
+      if (e instanceof RateLimitError) {
+        const friendly = `You've hit your daily message limit (${e.limit}/day). Resets at ${formatResetTime(e.resetAt)}.`;
+        setInlineError(friendly);
+        addToast(friendly, 'error');
+        // Sync counter so the sidebar reflects the exhausted quota.
+        refreshAuth();
+        return;
+      }
+
+      const errMsg = e instanceof Error ? e.message : 'Failed to regenerate response';
+      setInlineError('Failed to regenerate the response. Please try again.');
+      addToast(errMsg || 'Network error — could not regenerate', 'error');
+    }
+  }, [
+    conversationId,
+    isStreaming,
+    messages,
+    setMessages,
+    regenerateStream,
+    scrollToBottom,
+    addToast,
+    refreshAuth,
+  ]);
+
   // Send pending message after conversation is created (post-route-change).
   // We read from `location.state.initialMessage`, which survives the
   // LandingPage → ConversationPage remount. Clear state with `replace`
@@ -708,15 +772,22 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
             {showEmptyInConversation ? (
               <EmptyState onStarterClick={handleStarterClick} />
             ) : (
-              messages.map((msg) => (
-                <Message
-                  key={msg.id}
-                  role={msg.role}
-                  content={msg.content}
-                  sources={msg.sources}
-                  onCitationClick={handleCitationClick}
-                />
-              ))
+              messages.map((msg, idx) => {
+                // The regenerate action only belongs on the most recent
+                // assistant answer, and only when nothing is streaming.
+                const isLatestAssistant =
+                  idx === messages.length - 1 && msg.role === 'assistant' && !isStreaming;
+                return (
+                  <Message
+                    key={msg.id}
+                    role={msg.role}
+                    content={msg.content}
+                    sources={msg.sources}
+                    onCitationClick={handleCitationClick}
+                    onRegenerate={isLatestAssistant ? handleRegenerate : undefined}
+                  />
+                );
+              })
             )}
 
             {/* Streaming assistant bubble */}

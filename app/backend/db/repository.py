@@ -603,6 +603,31 @@ async def list_messages(conversation_id: str, user_id: str) -> list[dict]:
     return results
 
 
+async def delete_message(message_id: str, conversation_id: str, user_id: str) -> bool:
+    """Delete a single message, scoped to the conversation owner.
+
+    The owner check is enforced atomically via an EXISTS subquery so a message
+    can only be deleted by the user who owns its conversation — mirroring the
+    ownership guard in ``create_message``. Returns True if a row was deleted.
+    """
+    async with _acquire() as conn:
+        result = await conn.execute(
+            """
+            DELETE FROM messages
+            WHERE id = $1
+              AND conversation_id = $2
+              AND EXISTS (
+                  SELECT 1 FROM conversations WHERE id = $3 AND user_id = $4
+              )
+            """,
+            message_id,
+            conversation_id,
+            conversation_id,
+            user_id,
+        )
+    return not result.endswith(" 0")
+
+
 # ---------------------------------------------------------------------------
 # Channel sync runs
 # ---------------------------------------------------------------------------

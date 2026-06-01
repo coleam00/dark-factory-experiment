@@ -116,6 +116,116 @@ async def create_message(
     all_messages = await repository.list_messages(conv_id, user_id=user_id)
     llm_messages = [{"role": m["role"], "content": m["content"]} for m in all_messages]
 
+    # 5-8. Stream the assistant response (tool-driven retrieval, SSE framing,
+    # the sources event, and post-stream persistence) via the shared helper.
+    return await _stream_assistant_response(
+        conv_id=conv_id,
+        user_id=user_id,
+        llm_messages=llm_messages,
+        current_user=current_user,
+        title_seed=user_content,
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /api/conversations/{conv_id}/messages/regenerate
+# ---------------------------------------------------------------------------
+
+
+@router.post("/conversations/{conv_id}/messages/regenerate")
+async def regenerate_message(
+    conv_id: str,
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
+    """
+    Regenerate a fresh assistant response for the most recent user turn.
+
+    Deletes the latest assistant message and streams a replacement grounded in
+    the same conversation history (which still ends with the user's question).
+    The new answer carries its own citations and streams exactly like a normal
+    send. Regeneration consumes one slot from the 25 msg/user/24h cap so it
+    cannot be used to slip past the daily limit (MISSION §10 invariant #1).
+
+    Returns:
+        StreamingResponse with Content-Type: text/event-stream (same framing as
+        ``create_message``).
+    """
+    user_id = str(current_user["id"])
+
+    # 1. Verify conversation exists AND belongs to current user.
+    # 404 (not 403) — don't leak existence of other users' conversations.
+    conv = await repository.get_conversation(conv_id, user_id=user_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # 2. Load history and confirm there is an assistant answer to regenerate.
+    #    This is a read-only check, so doing it before the rate-limit record
+    #    means an invalid request (no assistant turn) never burns a quota slot.
+    all_messages = await repository.list_messages(conv_id, user_id=user_id)
+    if not all_messages or all_messages[-1]["role"] != "assistant":
+        raise HTTPException(
+            status_code=400,
+            detail="No assistant response to regenerate",
+        )
+    last_assistant = all_messages[-1]
+
+    # 3. Enforce the 25 msg / user / 24h cap (MISSION §10 invariant #1) BEFORE
+    #    deleting anything. Recording the slot first means a user cannot
+    #    delete-spam old answers to slip past the cap — every regenerate costs
+    #    a slot regardless of whether the stream later aborts.
+    try:
+        await rate_limit.check_and_record(user_id)
+    except rate_limit.RateLimitExceeded as exc:
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": "rate_limit_exceeded",
+                "limit": rate_limit.DAILY_MESSAGE_CAP,
+                "window_hours": rate_limit.WINDOW_HOURS,
+                "reset_at": exc.reset_at.isoformat(),
+            },
+        )
+
+    # 4. Delete the stale assistant message so the replacement takes its place.
+    #    A crash mid-stream then leaves the conversation ending on the user
+    #    message (no answer) rather than two assistant answers.
+    await repository.delete_message(last_assistant["id"], conv_id, user_id)
+
+    # 5. Build the LLM context from the remaining history — it now ends with
+    #    the user message that prompted the answer, exactly as a normal send
+    #    would after persisting the user message.
+    history = all_messages[:-1]
+    llm_messages = [{"role": m["role"], "content": m["content"]} for m in history]
+
+    # 6-8. Stream the replacement. title_seed=None: regeneration adds no new
+    # user message, so the auto-title logic must not re-run.
+    return await _stream_assistant_response(
+        conv_id=conv_id,
+        user_id=user_id,
+        llm_messages=llm_messages,
+        current_user=current_user,
+        title_seed=None,
+    )
+
+
+async def _stream_assistant_response(
+    *,
+    conv_id: str,
+    user_id: str,
+    llm_messages: list[dict[str, Any]],
+    current_user: dict[str, Any],
+    title_seed: str | None,
+) -> StreamingResponse:
+    """Run the tool-driven RAG stream and return the SSE ``StreamingResponse``.
+
+    Shared by both the normal send and the regenerate flows. Callers are
+    responsible for ownership verification, rate-limit recording, and (for
+    sends) persisting the user message before invoking this helper.
+
+    ``title_seed`` is the user content used to auto-generate a conversation
+    title on the first send; pass ``None`` (e.g. for regeneration) to skip the
+    title step entirely.
+    """
     # 5. Set up tool plumbing. All retrieval happens inside the LLM loop via
     # tool calls — no pre-retrieval runs here. The executor closure collects
     # every chunk returned by any tool call so the final SSE `sources` event
@@ -291,14 +401,17 @@ async def create_message(
                     raise
                 # Title auto-generation is best-effort: client-disconnect swallowed,
                 # unexpected errors logged but not re-raised (message was saved above).
-                try:
-                    await asyncio.shield(
-                        _maybe_set_conversation_title(conv_id, user_id, user_content)
-                    )
-                except asyncio.CancelledError:
-                    pass
-                except Exception as exc:
-                    logger.warning("Failed to update conversation title: %s", exc)
+                # Skipped entirely when title_seed is None (e.g. regeneration adds
+                # no new user message, so the title must not change).
+                if title_seed is not None:
+                    try:
+                        await asyncio.shield(
+                            _maybe_set_conversation_title(conv_id, user_id, title_seed)
+                        )
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception as exc:
+                        logger.warning("Failed to update conversation title: %s", exc)
 
     return StreamingResponse(
         event_generator(),

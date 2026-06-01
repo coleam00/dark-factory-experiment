@@ -15,6 +15,59 @@ interface MessageProps {
   onCitationClick?: (citation: Citation) => void;
   /** Current tool-call status during streaming (ephemeral progress indicator) */
   streamingStatus?: StreamingStatus | null;
+  /** When provided, renders a "Regenerate" action below an assistant message.
+   *  ChatArea passes this only for the most recent assistant answer. */
+  onRegenerate?: () => void;
+}
+
+// ── Regenerate action ─────────────────────────────────────────────
+function RegenerateButton({ onRegenerate }: { onRegenerate: () => void }) {
+  return (
+    <button
+      onClick={onRegenerate}
+      title="Regenerate this response"
+      aria-label="Regenerate this response"
+      className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+      style={{
+        marginTop: 10,
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 5,
+        background: 'transparent',
+        border: '1px solid rgba(255,255,255,0.12)',
+        borderRadius: 7,
+        color: '#94a3b8',
+        cursor: 'pointer',
+        fontSize: 12,
+        padding: '4px 10px',
+        fontFamily: 'inherit',
+        transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.color = '#f1f5f9';
+        e.currentTarget.style.borderColor = 'rgba(59,130,246,0.4)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.color = '#94a3b8';
+        e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)';
+      }}
+    >
+      <svg
+        width="13"
+        height="13"
+        viewBox="0 0 13 13"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M11,2 L11,5 L8,5" />
+        <path d="M11,5 A4.5,4.5 0 1,0 11.5,8.5" />
+      </svg>
+      Regenerate
+    </button>
+  );
 }
 
 // ── Typing indicator (3 pulsing dots) ────────────────────────────
@@ -167,9 +220,13 @@ export function Message({
   sources,
   onCitationClick,
   streamingStatus,
+  onRegenerate,
 }: MessageProps) {
   const isUser = role === 'user';
   const hasSources = !isUser && Array.isArray(sources) && sources.length > 0;
+  // Show the regenerate action on a settled (non-streaming) assistant message
+  // when ChatArea wired the handler (i.e. it is the latest answer).
+  const showRegenerate = !isUser && !isStreaming && !!onRegenerate;
 
   return (
     <div
@@ -204,6 +261,7 @@ export function Message({
           <>
             <MarkdownRenderer content={content} />
             {hasSources && <SourceCitations sources={sources} onCitationClick={onCitationClick} />}
+            {showRegenerate && onRegenerate && <RegenerateButton onRegenerate={onRegenerate} />}
           </>
         )}
       </div>
