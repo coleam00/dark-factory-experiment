@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { type Conversation, getConversations, renameConversation } from '../lib/api';
+import { type Conversation, type ConversationFilters, getConversations, renameConversation } from '../lib/api';
 
-export function useConversations(searchQuery?: string) {
+export function useConversations(filters?: ConversationFilters) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -13,7 +13,7 @@ export function useConversations(searchQuery?: string) {
     const myId = ++fetchIdRef.current;
     try {
       setLoading(true);
-      const data = await getConversations();
+      const data = await getConversations(filters);
       if (myId === fetchIdRef.current) setConversations(data);
     } catch (e) {
       if (myId === fetchIdRef.current) {
@@ -22,7 +22,7 @@ export function useConversations(searchQuery?: string) {
     } finally {
       if (myId === fetchIdRef.current) setLoading(false);
     }
-  }, []);
+  }, [filters]);
 
   useEffect(() => {
     load();
@@ -42,13 +42,8 @@ export function useConversations(searchQuery?: string) {
   };
 
   // Filter out conversations with zero messages (preview === null).
-  // Keep conversations unfiltered for guard logic in Sidebar.tsx.
-  const withMessages = conversations.filter((c) => c.preview !== null);
-
-  const trimmed = (searchQuery ?? '').trim().toLowerCase();
-  const filteredConversations = trimmed
-    ? withMessages.filter((c) => c.title.toLowerCase().includes(trimmed))
-    : withMessages;
+  // Server-side filtering already applied; this just hides empty chats.
+  const filteredConversations = conversations.filter((c) => c.preview !== null);
 
   return {
     conversations,

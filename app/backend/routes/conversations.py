@@ -26,8 +26,23 @@ class ConversationRename(BaseModel):
 
 
 @router.get("/conversations")
-async def list_conversations(current_user: dict[str, Any] = Depends(get_current_user)):
-    return await repository.list_conversations(user_id=str(current_user["id"]))
+async def list_conversations(
+    q: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    video_id: str | None = None,
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
+    user_id = str(current_user["id"])
+    if q or date_from or date_to or video_id:
+        return await repository.search_conversations(
+            user_id=user_id,
+            query=q,
+            date_from=date_from,
+            date_to=date_to,
+            video_id=video_id,
+        )
+    return await repository.list_conversations(user_id=user_id)
 
 
 @router.post("/conversations", status_code=201)

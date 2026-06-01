@@ -1,9 +1,16 @@
-import { type MutableRefObject, type RefObject, useEffect, useRef, useState } from 'react';
+import { type MutableRefObject, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useConversations } from '../hooks/useConversations';
 import { useToast } from '../hooks/useToast';
-import { type Conversation, createConversation, deleteConversation } from '../lib/api';
+import {
+  type Conversation,
+  type ConversationFilters,
+  type Video,
+  createConversation,
+  deleteConversation,
+  getVideos,
+} from '../lib/api';
 import { VideoExplorer } from './VideoExplorer';
 
 // ── Relative time helper ─────────────────────────────────────────
@@ -21,6 +28,72 @@ function formatRelativeTime(dateStr: string): string {
   if (diffHrs < 24) return `${diffHrs}h ago`;
   if (diffDays < 7) return `${diffDays}d ago`;
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+// ── Date-range helpers ───────────────────────────────────────────
+function startOfDay(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+function endOfDay(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
+}
+
+function startOfWeek(d: Date): Date {
+  const day = d.getDay();
+  const diff = d.getDate() - day;
+  return new Date(d.getFullYear(), d.getMonth(), diff);
+}
+
+function startOfMonth(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), 1);
+}
+
+function endOfMonth(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
+}
+
+function prevMonth(d: Date): { start: Date; end: Date } {
+  const start = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+  const end = new Date(d.getFullYear(), d.getMonth(), 0, 23, 59, 59, 999);
+  return { start, end };
+}
+
+function toIsoLocal(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+type DatePreset = 'all' | 'today' | 'this_week' | 'this_month' | 'last_month' | 'custom';
+
+function computeDateRange(
+  preset: DatePreset,
+  customFrom: string,
+  customTo: string
+): { from?: string; to?: string } {
+  const now = new Date();
+  switch (preset) {
+    case 'today':
+      return { from: toIsoLocal(startOfDay(now)), to: toIsoLocal(endOfDay(now)) };
+    case 'this_week':
+      return { from: toIsoLocal(startOfWeek(now)) };
+    case 'this_month':
+      return { from: toIsoLocal(startOfMonth(now)) };
+    case 'last_month': {
+      const { start, end } = prevMonth(now);
+      return { from: toIsoLocal(start), to: toIsoLocal(end) };
+    }
+    case 'custom': {
+      const from = customFrom ? new Date(customFrom) : undefined;
+      const to = customTo ? new Date(customTo) : undefined;
+      return {
+        from: from ? toIsoLocal(startOfDay(from)) : undefined,
+        to: to ? toIsoLocal(endOfDay(to)) : undefined,
+      };
+    }
+    default:
+      return {};
+  }
 }
 
 // ── Skeleton row ─────────────────────────────────────────────────
@@ -411,10 +484,39 @@ interface SidebarProps {
 
 export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRef }: SidebarProps) {
   const navigate = useNavigate();
+
+  // Search + filters
   const [searchQuery, setSearchQuery] = useState('');
-  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [datePreset, setDatePreset] = useState<DatePreset>('all');
+  const [customDateFrom, setCustomDateFrom] = useState('');
+  const [customDateTo, setCustomDateTo] = useState('');
+  const [videoId, setVideoId] = useState('');
+  const [videos, setVideos] = useState<Video[]>([]);
+
+  const [debouncedFilters, setDebouncedFilters] = useState<ConversationFilters>({});
+
+  // Load video list once for the dropdown
+  useEffect(() => {
+    getVideos().then(setVideos).catch(() => setVideos([]));
+  }, []);
+
+  // Debounce combined filters — 250ms per issue #92
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const { from, to } = computeDateRange(datePreset, customDateFrom, customDateTo);
+      setDebouncedFilters({
+        q: searchQuery.trim() || undefined,
+        dateFrom: from,
+        dateTo: to,
+        videoId: videoId || undefined,
+      });
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [searchQuery, datePreset, customDateFrom, customDateTo, videoId]);
+
   const { conversations, loading, refetch, rename, filteredConversations } =
-    useConversations(debouncedQuery);
+    useConversations(debouncedFilters);
+
   const { user, logout } = useAuth();
   const [creatingNew, setCreatingNew] = useState(false);
   const [newChatError, setNewChatError] = useState<string | null>(null);
@@ -424,12 +526,6 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
   const [explorerOpen, setExplorerOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const { addToast } = useToast();
-
-  // Debounce search query — 250ms per issue #92
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedQuery(searchQuery), 250);
-    return () => clearTimeout(timer);
-  }, [searchQuery]);
 
   // Store refetch in the shared ref so ChatArea can trigger it
   useEffect(() => {
@@ -522,6 +618,12 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
     }
   };
 
+  const hasActiveFilters =
+    Boolean(debouncedFilters.q) ||
+    Boolean(debouncedFilters.dateFrom) ||
+    Boolean(debouncedFilters.dateTo) ||
+    Boolean(debouncedFilters.videoId);
+
   return (
     <>
       <aside className={`sidebar-container${isOpen ? ' open' : ''}`}>
@@ -601,6 +703,95 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
           />
         </div>
 
+        {/* ── Filters: date + video ── */}
+        <div style={{ padding: '0 12px 8px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {/* Date preset */}
+          <select
+            value={datePreset}
+            onChange={(e) => setDatePreset(e.target.value as DatePreset)}
+            className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+            style={{
+              width: '100%',
+              padding: '6px 8px',
+              borderRadius: 6,
+              background: '#1e293b',
+              border: '1px solid #334155',
+              color: '#f1f5f9',
+              fontSize: 12,
+              outline: 'none',
+            }}
+          >
+            <option value="all">All time</option>
+            <option value="today">Today</option>
+            <option value="this_week">This week</option>
+            <option value="this_month">This month</option>
+            <option value="last_month">Last month</option>
+            <option value="custom">Custom range…</option>
+          </select>
+
+          {/* Custom date inputs */}
+          {datePreset === 'custom' && (
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input
+                type="date"
+                value={customDateFrom}
+                onChange={(e) => setCustomDateFrom(e.target.value)}
+                className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+                style={{
+                  flex: 1,
+                  padding: '5px 8px',
+                  borderRadius: 6,
+                  background: '#1e293b',
+                  border: '1px solid #334155',
+                  color: '#f1f5f9',
+                  fontSize: 12,
+                  outline: 'none',
+                }}
+              />
+              <input
+                type="date"
+                value={customDateTo}
+                onChange={(e) => setCustomDateTo(e.target.value)}
+                className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+                style={{
+                  flex: 1,
+                  padding: '5px 8px',
+                  borderRadius: 6,
+                  background: '#1e293b',
+                  border: '1px solid #334155',
+                  color: '#f1f5f9',
+                  fontSize: 12,
+                  outline: 'none',
+                }}
+              />
+            </div>
+          )}
+
+          {/* Video filter */}
+          <select
+            value={videoId}
+            onChange={(e) => setVideoId(e.target.value)}
+            className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+            style={{
+              width: '100%',
+              padding: '6px 8px',
+              borderRadius: 6,
+              background: '#1e293b',
+              border: '1px solid #334155',
+              color: '#f1f5f9',
+              fontSize: 12,
+              outline: 'none',
+            }}
+          >
+            <option value="">Any video</option>
+            {videos.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.title}
+              </option>
+            ))}
+          </select>
+        </div>
+
         {/* ── Conversation list ── */}
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {loading ? (
@@ -630,9 +821,9 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
               >
                 <path d="M6,4 L30,4 A2,2 0 0,1 32,6 L32,24 A2,2 0 0,1 30,26 L10,26 L4,32 L4,6 A2,2 0 0,1 6,4 Z" />
               </svg>
-              {debouncedQuery.trim() ? (
+              {hasActiveFilters ? (
                 <p style={{ margin: 0, fontSize: 13 }}>
-                  No matches for <strong style={{ color: '#94a3b8' }}>"{debouncedQuery}"</strong>
+                  No conversations match your filters
                 </p>
               ) : (
                 <>
@@ -669,7 +860,7 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
                 key={conv.id}
                 conv={conv}
                 isActive={conv.id === activeConversationId}
-                searchQuery={debouncedQuery}
+                searchQuery={debouncedFilters.q ?? ''}
                 onSelect={() => handleSelect(conv.id)}
                 onDeleteRequest={handleDeleteRequest}
                 onRename={handleRename}

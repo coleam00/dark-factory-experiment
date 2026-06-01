@@ -142,8 +142,23 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+export interface ConversationFilters {
+  q?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  videoId?: string;
+}
+
 // Conversations
-export const getConversations = () => request<Conversation[]>('/conversations');
+export const getConversations = (filters?: ConversationFilters) => {
+  const params = new URLSearchParams();
+  if (filters?.q) params.set('q', filters.q);
+  if (filters?.dateFrom) params.set('date_from', filters.dateFrom);
+  if (filters?.dateTo) params.set('date_to', filters.dateTo);
+  if (filters?.videoId) params.set('video_id', filters.videoId);
+  const query = params.toString();
+  return request<Conversation[]>(`/conversations${query ? `?${query}` : ''}`);
+};
 export const searchConversations = (q: string) =>
   request<Conversation[]>(`/conversations/search?q=${encodeURIComponent(q)}`);
 export const createConversation = () =>

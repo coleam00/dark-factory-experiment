@@ -526,6 +526,69 @@ async def search_conversations_by_title(user_id: str, query: str, limit: int = 2
     return [dict(r) for r in rows]
 
 
+async def search_conversations(
+    user_id: str,
+    *,
+    query: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    video_id: str | None = None,
+    limit: int = 200,
+) -> list[dict]:
+    """Return conversations scoped to *user_id*, filtered by any combination of:
+
+    - *query*: title ILIKE '%query%'
+    - *date_from*: created_at >= date_from (ISO 8601 string, cast to TIMESTAMPTZ)
+    - *date_to*: created_at <= date_to (ISO 8601 string, cast to TIMESTAMPTZ)
+    - *video_id*: conversation has at least one message whose sources JSONB
+      array contains an object with this video_id.
+
+    Results are ordered updated_at DESC (newest first).
+    """
+    conditions: list[str] = ["c.user_id = $1"]
+    params: list = [user_id]
+
+    if query:
+        conditions.append(f"c.title ILIKE ${len(params) + 1}")
+        params.append(f"%{query}%")
+
+    if date_from:
+        conditions.append(f"c.created_at >= ${len(params) + 1}::timestamptz")
+        params.append(date_from)
+
+    if date_to:
+        conditions.append(f"c.created_at <= ${len(params) + 1}::timestamptz")
+        params.append(date_to)
+
+    if video_id:
+        conditions.append(
+            f"EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.sources @> jsonb_build_array(jsonb_build_object('video_id', ${len(params) + 1})))"
+        )
+        params.append(video_id)
+
+    # Append LIMIT placeholder
+    limit_idx = len(params) + 1
+    params.append(limit)
+
+    where_clause = " AND ".join(conditions)
+    sql = f"""
+    SELECT c.*,
+           (SELECT content
+            FROM messages
+            WHERE conversation_id = c.id
+            ORDER BY created_at DESC
+            LIMIT 1) AS preview
+    FROM conversations c
+    WHERE {where_clause}
+    ORDER BY c.updated_at DESC
+    LIMIT ${limit_idx}
+    """
+
+    async with _acquire() as conn:
+        rows = await conn.fetch(sql, *params)
+    return [dict(r) for r in rows]
+
+
 # ---------------------------------------------------------------------------
 # Messages
 # ---------------------------------------------------------------------------
