@@ -54,7 +54,12 @@ async def regenerate_message(
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    # 2. Rate limit — same cap as normal sends
+    # 2. Verify there is an assistant message to regenerate BEFORE consuming a rate-limit slot.
+    #    check_and_record commits the audit row atomically; a 409 afterwards would waste a slot.
+    if not await regenerate_repo.has_last_assistant_message(conv_id, user_id):
+        raise HTTPException(status_code=409, detail="No assistant message to regenerate")
+
+    # 3. Rate limit — same cap as normal sends
     try:
         await rate_limit.check_and_record(user_id)
     except rate_limit.RateLimitExceeded as exc:
@@ -68,16 +73,16 @@ async def regenerate_message(
             },
         )
 
-    # 3. Delete the last assistant message
+    # 4. Delete the last assistant message (re-check handles rare concurrent-request races)
     deleted = await regenerate_repo.delete_last_assistant_message(conv_id, user_id)
     if not deleted:
         raise HTTPException(status_code=409, detail="No assistant message to regenerate")
 
-    # 4. Load history (now sans the deleted assistant turn)
+    # 5. Load history (now sans the deleted assistant turn)
     all_messages = await repository.list_messages(conv_id, user_id=user_id)
     llm_messages = [{"role": m["role"], "content": m["content"]} for m in all_messages]
 
-    # 5. Tool plumbing (same as messages.py)
+    # 6. Tool plumbing (same as messages.py)
     source_citations: list[dict] = []
     tool_chunks_acc: list[dict] = []
     embedding_cache: dict[str, list[float]] = {}
@@ -114,7 +119,7 @@ async def regenerate_message(
         executor = _executor
         max_tool_calls = LLM_TOOLS_MAX_PER_TURN
 
-    # 6. Stream
+    # 7. Stream
     async def event_generator() -> AsyncGenerator[str, None]:
         full_response: list[str] = []
         final_text_buf: list[str] = []

@@ -74,6 +74,61 @@ async def test_delete_last_assistant_message_returns_false_when_none(monkeypatch
 
 
 # ---------------------------------------------------------------------------
+# has_last_assistant_message unit tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_has_last_assistant_message_returns_true_when_row_exists(monkeypatch):
+    from backend.db import regenerate_repo
+
+    class FakeConn:
+        async def fetchrow(self, *args):
+            return {"?column?": 1}
+
+    class FakeAcquire:
+        async def __aenter__(self):
+            return FakeConn()
+
+        async def __aexit__(self, *exc):
+            return False
+
+    class FakePool:
+        def acquire(self):
+            return FakeAcquire()
+
+    monkeypatch.setattr(regenerate_repo, "get_pg_pool", lambda: FakePool())
+
+    result = await regenerate_repo.has_last_assistant_message("conv-123", "user-456")
+    assert result is True
+
+
+@pytest.mark.asyncio
+async def test_has_last_assistant_message_returns_false_when_no_row(monkeypatch):
+    from backend.db import regenerate_repo
+
+    class FakeConn:
+        async def fetchrow(self, *args):
+            return None
+
+    class FakeAcquire:
+        async def __aenter__(self):
+            return FakeConn()
+
+        async def __aexit__(self, *exc):
+            return False
+
+    class FakePool:
+        def acquire(self):
+            return FakeAcquire()
+
+    monkeypatch.setattr(regenerate_repo, "get_pg_pool", lambda: FakePool())
+
+    result = await regenerate_repo.has_last_assistant_message("conv-123", "user-456")
+    assert result is False
+
+
+# ---------------------------------------------------------------------------
 # Router wiring test
 # ---------------------------------------------------------------------------
 

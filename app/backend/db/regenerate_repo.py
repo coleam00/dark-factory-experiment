@@ -8,6 +8,26 @@ from __future__ import annotations
 from backend.db.postgres import get_pg_pool
 
 
+async def has_last_assistant_message(conversation_id: str, user_id: str) -> bool:
+    """Return True if the conversation (owned by user_id) has at least one assistant message."""
+    pool = get_pg_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT 1
+            FROM messages m
+            JOIN conversations c ON c.id = m.conversation_id
+            WHERE m.conversation_id = $1
+              AND c.user_id = $2
+              AND m.role = 'assistant'
+            LIMIT 1
+            """,
+            conversation_id,
+            user_id,
+        )
+        return row is not None
+
+
 async def delete_last_assistant_message(conversation_id: str, user_id: str) -> bool:
     """Delete the most recent assistant message in a conversation.
 
