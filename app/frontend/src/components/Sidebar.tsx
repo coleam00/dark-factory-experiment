@@ -84,8 +84,10 @@ function computeDateRange(
       return { from: toIsoLocal(start), to: toIsoLocal(end) };
     }
     case 'custom': {
-      const from = customFrom ? new Date(customFrom) : undefined;
-      const to = customTo ? new Date(customTo) : undefined;
+      // Append T00:00:00 so Date parses as local time, not UTC midnight.
+      // new Date('2026-01-15') is UTC-based and shifts the date in non-UTC zones.
+      const from = customFrom ? new Date(`${customFrom}T00:00:00`) : undefined;
+      const to = customTo ? new Date(`${customTo}T00:00:00`) : undefined;
       return {
         from: from ? toIsoLocal(startOfDay(from)) : undefined,
         to: to ? toIsoLocal(endOfDay(to)) : undefined,
