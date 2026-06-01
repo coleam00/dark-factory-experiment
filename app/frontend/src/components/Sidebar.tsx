@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useConversations } from '../hooks/useConversations';
 import { useToast } from '../hooks/useToast';
-import { type Conversation, createConversation, deleteConversation } from '../lib/api';
+import { type Conversation, createConversation, deleteConversation, getVideos, type Video } from '../lib/api';
 import { VideoExplorer } from './VideoExplorer';
 
 // ── Relative time helper ─────────────────────────────────────────
@@ -170,16 +170,35 @@ function ConvItem({
         </div>
       )}
 
-      {/* Timestamp */}
+      {/* Timestamp + scope indicator */}
       <div
         style={{
           fontSize: 12,
           color: '#94a3b8',
           marginTop: 2,
           marginBottom: preview ? 3 : 0,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
         }}
       >
         {formatRelativeTime(conv.updated_at)}
+        {conv.video_ids && conv.video_ids.length > 0 && (
+          <span
+            title={`Scoped to ${conv.video_ids.length} video${conv.video_ids.length === 1 ? '' : 's'}`}
+            style={{
+              fontSize: 10,
+              color: '#3b82f6',
+              background: 'rgba(59,130,246,0.12)',
+              borderRadius: 4,
+              padding: '1px 5px',
+              fontWeight: 600,
+              letterSpacing: 0.3,
+            }}
+          >
+            {conv.video_ids.length} video{conv.video_ids.length === 1 ? '' : 's'}
+          </span>
+        )}
       </div>
 
       {/* Preview */}
@@ -423,6 +442,11 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
   const [deleteError, setDeleteError] = useState(false);
   const [explorerOpen, setExplorerOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [scopePickerOpen, setScopePickerOpen] = useState(false);
+  const [scopeVideos, setScopeVideos] = useState<Video[]>([]);
+  const [scopeLoading, setScopeLoading] = useState(false);
+  const [scopeQuery, setScopeQuery] = useState('');
+  const [selectedScopeIds, setSelectedScopeIds] = useState<Set<string>>(new Set());
   const { addToast } = useToast();
 
   // Debounce search query — 250ms per issue #92
@@ -449,10 +473,30 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
         return;
       }
     }
-    setCreatingNew(true);
+    // Open scope picker; load videos if not already loaded
+    setScopePickerOpen(true);
     setNewChatError(null);
+    if (scopeVideos.length === 0 && !scopeLoading) {
+      setScopeLoading(true);
+      try {
+        const data = await getVideos();
+        setScopeVideos(data);
+      } catch {
+        // ignore — picker will show empty state
+      } finally {
+        setScopeLoading(false);
+      }
+    }
+  };
+
+  const handleCreateScopedChat = async () => {
+    const videoIds = selectedScopeIds.size > 0 ? Array.from(selectedScopeIds) : null;
+    setCreatingNew(true);
+    setScopePickerOpen(false);
     try {
-      const conv = await createConversation();
+      const conv = await createConversation(videoIds);
+      setSelectedScopeIds(new Set());
+      setScopeQuery('');
       await refetch();
       navigate(`/c/${conv.id}`);
       onClose();
@@ -462,6 +506,25 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
       setCreatingNew(false);
     }
   };
+
+  const toggleScopeVideo = (id: string) => {
+    setSelectedScopeIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const filteredScopeVideos = scopeQuery.trim()
+    ? scopeVideos.filter((v) =>
+        [v.title, v.channel_title, v.description]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+          .includes(scopeQuery.trim().toLowerCase()),
+      )
+    : scopeVideos;
 
   // ── Delete flow ──
   const handleDeleteRequest = (id: string) => {
@@ -850,6 +913,152 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
           deleting={deleting}
           error={deleteError}
         />
+      )}
+
+      {/* ── Video Scope Picker dialog ── */}
+      {scopePickerOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.6)',
+            zIndex: 50,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <div
+            style={{
+              background: '#1e293b',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: 12,
+              padding: 24,
+              width: 420,
+              maxWidth: 'calc(100vw - 48px)',
+              maxHeight: '80vh',
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)',
+            }}
+          >
+            <p style={{ margin: '0 0 4px', fontWeight: 600, color: '#f1f5f9' }}>New Chat</p>
+            <p style={{ margin: '0 0 16px', fontSize: 13, color: '#94a3b8' }}>
+              Choose videos to scope this conversation to, or leave all unchecked to search the
+              full library.
+            </p>
+            <input
+              type="search"
+              placeholder="Search videos…"
+              value={scopeQuery}
+              onChange={(e) => setScopeQuery(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                borderRadius: 8,
+                background: '#0f172a',
+                border: '1px solid #334155',
+                color: '#f1f5f9',
+                fontSize: 13,
+                outline: 'none',
+                marginBottom: 12,
+              }}
+            />
+            <div style={{ flex: 1, overflowY: 'auto', marginBottom: 16 }}>
+              {scopeLoading ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div className="skeleton" style={{ height: 32, width: '100%' }} />
+                  <div className="skeleton" style={{ height: 32, width: '100%' }} />
+                  <div className="skeleton" style={{ height: 32, width: '100%' }} />
+                </div>
+              ) : filteredScopeVideos.length === 0 ? (
+                <p style={{ margin: 0, fontSize: 13, color: '#475569', textAlign: 'center' }}>
+                  No videos found
+                </p>
+              ) : (
+                filteredScopeVideos.map((v) => (
+                  <label
+                    key={v.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      padding: '8px 4px',
+                      cursor: 'pointer',
+                      borderRadius: 6,
+                      transition: 'background 0.15s',
+                    }}
+                    onMouseEnter={(e) =>
+                      (e.currentTarget.style.background = 'rgba(255,255,255,0.04)')
+                    }
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedScopeIds.has(v.id)}
+                      onChange={() => toggleScopeVideo(v.id)}
+                      style={{ cursor: 'pointer' }}
+                    />
+                    <span
+                      style={{
+                        fontSize: 13,
+                        color: '#f1f5f9',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      }}
+                      title={v.title}
+                    >
+                      {v.title}
+                    </span>
+                  </label>
+                ))
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => {
+                  setScopePickerOpen(false);
+                  setSelectedScopeIds(new Set());
+                  setScopeQuery('');
+                }}
+                className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+                style={{
+                  background: 'transparent',
+                  border: '1px solid rgba(255,255,255,0.15)',
+                  borderRadius: 8,
+                  color: '#94a3b8',
+                  cursor: 'pointer',
+                  padding: '8px 16px',
+                  fontSize: 14,
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCreateScopedChat}
+                disabled={creatingNew}
+                className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+                style={{
+                  background: '#3b82f6',
+                  border: 'none',
+                  borderRadius: 8,
+                  color: '#fff',
+                  cursor: creatingNew ? 'not-allowed' : 'pointer',
+                  padding: '8px 16px',
+                  fontSize: 14,
+                  opacity: creatingNew ? 0.7 : 1,
+                }}
+              >
+                {creatingNew
+                  ? 'Creating…'
+                  : selectedScopeIds.size > 0
+                    ? `Create scoped chat (${selectedScopeIds.size})`
+                    : 'Create chat'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── Video Explorer panel ── */}

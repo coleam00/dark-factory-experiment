@@ -253,6 +253,7 @@ async def keyword_search(
     top_k: int,
     language: str = "english",
     allowed_source_types: list[str] | None = None,
+    allowed_video_ids: list[str] | None = None,
 ) -> list[dict]:
     """
     Return top-K chunks matching a full-text query using tsvector.
@@ -280,12 +281,14 @@ async def keyword_search(
             FROM chunks
             WHERE search_vector @@ plainto_tsquery($1)
               AND source_type = ANY($3::text[])
+              AND ($4::text[] IS NULL OR array_length($4::text[], 1) IS NULL OR video_id = ANY($4::text[]))
             ORDER BY rank DESC
             LIMIT $2
             """,
             query,
             top_k,
             allowed_source_types,
+            allowed_video_ids,
         )
     return [dict(r) for r in rows]
 
@@ -294,6 +297,7 @@ async def vector_search_pg(
     query_embedding: list[float],
     top_k: int,
     allowed_source_types: list[str] | None = None,
+    allowed_video_ids: list[str] | None = None,
 ) -> list[dict]:
     """
     Return top-K chunks by pgvector cosine similarity.
@@ -326,12 +330,14 @@ async def vector_search_pg(
                    embedding::vector <=> $1::vector AS distance
             FROM chunks
             WHERE source_type = ANY($3::text[])
+              AND ($4::text[] IS NULL OR array_length($4::text[], 1) IS NULL OR video_id = ANY($4::text[]))
             ORDER BY distance
             LIMIT $2
             """,
             embedding_json,
             top_k,
             allowed_source_types,
+            allowed_video_ids,
         )
     return [dict(r) for r in rows]
 
@@ -415,18 +421,24 @@ async def replace_chunks_for_video(
 # ---------------------------------------------------------------------------
 
 
-async def create_conversation(*, user_id: str, title: str = "New Conversation") -> dict:
+async def create_conversation(
+    *,
+    user_id: str,
+    title: str = "New Conversation",
+    video_ids: list[str] | None = None,
+) -> dict:
     conv_id = _new_id()
     now = _now()
     async with _acquire() as conn:
         await conn.execute(
             """
-            INSERT INTO conversations (id, user_id, title, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO conversations (id, user_id, title, video_ids, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6)
             """,
             conv_id,
             user_id,
             title,
+            video_ids,
             now,
             now,
         )
@@ -434,6 +446,7 @@ async def create_conversation(*, user_id: str, title: str = "New Conversation") 
         "id": conv_id,
         "user_id": user_id,
         "title": title,
+        "video_ids": video_ids,
         "created_at": now,
         "updated_at": now,
     }
@@ -443,7 +456,7 @@ async def get_conversation(conv_id: str, user_id: str) -> dict | None:
     """Return the conversation only if it belongs to the given user."""
     async with _acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT * FROM conversations WHERE id = $1 AND user_id = $2",
+            "SELECT id, user_id, title, video_ids, created_at, updated_at FROM conversations WHERE id = $1 AND user_id = $2",
             conv_id,
             user_id,
         )
@@ -454,7 +467,7 @@ async def list_conversations(user_id: str) -> list[dict]:
     async with _acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT c.*,
+            SELECT c.id, c.user_id, c.title, c.video_ids, c.created_at, c.updated_at,
                    (SELECT content
                     FROM messages
                     WHERE conversation_id = c.id
@@ -475,6 +488,21 @@ async def update_conversation_title(conv_id: str, user_id: str, title: str) -> b
         result = await conn.execute(
             "UPDATE conversations SET title = $1, updated_at = $2 WHERE id = $3 AND user_id = $4",
             title,
+            _now(),
+            conv_id,
+            user_id,
+        )
+        return result != "UPDATE 0"  # type: ignore[no-any-return]
+
+
+async def update_conversation_video_ids(
+    conv_id: str, user_id: str, video_ids: list[str] | None
+) -> bool:
+    """Update the video scope for a conversation. Returns False if it does not belong to the user."""
+    async with _acquire() as conn:
+        result = await conn.execute(
+            "UPDATE conversations SET video_ids = $1, updated_at = $2 WHERE id = $3 AND user_id = $4",
+            video_ids,
             _now(),
             conv_id,
             user_id,

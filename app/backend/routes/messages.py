@@ -120,8 +120,8 @@ async def create_message(
     # tool calls — no pre-retrieval runs here. The executor closure collects
     # every chunk returned by any tool call so the final SSE `sources` event
     # lists exactly what the model actually read. The video_id whitelist is
-    # only consulted by the transcript tool (it guards against hallucinated
-    # ids); the search tools ignore it.
+    # consulted by both the transcript tool (guards against hallucinated ids)
+    # and the search tools (scopes retrieval to the conversation's videos).
     source_citations: list[dict] = []
     tool_chunks_acc: list[dict] = []
     embedding_cache: dict[str, list[float]] = {}
@@ -129,9 +129,18 @@ async def create_message(
     executor = None
     max_tool_calls = 0
     if LLM_TOOLS_ENABLED:
+        # Build the video_id whitelist: if the conversation has a scoped set of
+        # video_ids, restrict all tools to those ids. Otherwise fall back to
+        # the full library so the transcript tool can still guard against
+        # hallucinations.
+        conv_video_ids = conv.get("video_ids")
+        scoped_video_ids: list[str] | None = conv_video_ids if conv_video_ids else None
         try:
-            all_videos = await repository.list_videos()
-            video_id_whitelist: set[str] = {v["id"] for v in all_videos if v.get("id")}
+            if scoped_video_ids:
+                video_id_whitelist: set[str] = set(scoped_video_ids)
+            else:
+                all_videos = await repository.list_videos()
+                video_id_whitelist = {v["id"] for v in all_videos if v.get("id")}
         except Exception as exc:
             logger.warning(
                 "Failed to load video whitelist for tool use; transcript tool calls will be unguarded: %s",

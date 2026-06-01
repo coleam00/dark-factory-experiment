@@ -40,6 +40,7 @@ async def retrieve_hybrid(
     query_embedding: list[float],
     top_k: int = 5,
     is_member: bool = False,
+    video_id_whitelist: set[str] | None = None,
 ) -> list[dict]:
     """
     Hybrid retrieval via Reciprocal Rank Fusion (RRF).
@@ -78,6 +79,7 @@ async def retrieve_hybrid(
         )
 
     allowed_source_types = ["youtube", "dynamous"] if is_member else ["youtube"]
+    allowed_video_ids = list(video_id_whitelist) if video_id_whitelist else None
 
     # Over-fetch factor — each method returns 2*top_k before merging
     fetch_k = top_k * HYBRID_OVERFETCH_FACTOR
@@ -88,11 +90,13 @@ async def retrieve_hybrid(
         top_k=fetch_k,
         language=KEYWORD_LANGUAGE,
         allowed_source_types=allowed_source_types,
+        allowed_video_ids=allowed_video_ids,
     )
     vector_task = repository.vector_search_pg(
         query_embedding,
         top_k=fetch_k,
         allowed_source_types=allowed_source_types,
+        allowed_video_ids=allowed_video_ids,
     )
 
     keyword_hits, vector_hits = await keyword_task, await vector_task
