@@ -48,7 +48,11 @@ export function VideoScopePicker({ selected, onChange }: VideoScopePickerProps) 
     return () => {
       cancelled = true;
     };
-  }, [open, loaded, loading]);
+  // `loading` is intentionally omitted from deps: it is set inside the effect
+  // so including it would cause an infinite re-fetch loop on error (loading
+  // goes false → effect re-triggers → another fetch starts → repeat).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, loaded]);
 
   const selectedSet = useMemo(() => new Set(selected), [selected]);
 
