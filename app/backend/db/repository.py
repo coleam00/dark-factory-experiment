@@ -35,6 +35,22 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+def _parse_dt(value: datetime | str) -> datetime:
+    """Coerce an ISO-8601 string (or passthrough datetime) to an aware datetime.
+
+    asyncpg binds TIMESTAMPTZ parameters as datetime objects — passing a raw
+    string raises DataError at bind-time (see _now). Frontend date-range
+    filters arrive as ISO-8601 strings (often with a trailing 'Z'), so
+    normalise them here before they hit a `WHERE updated_at >= $n` comparison.
+    """
+    if isinstance(value, datetime):
+        return value
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    return datetime.fromisoformat(text)
+
+
 def _acquire() -> asyncpg.pool.PoolAcquireContext:
     """Return the pool's acquire context manager.
 
@@ -450,22 +466,63 @@ async def get_conversation(conv_id: str, user_id: str) -> dict | None:
     return dict(row) if row else None
 
 
-async def list_conversations(user_id: str) -> list[dict]:
-    async with _acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT c.*,
-                   (SELECT content
-                    FROM messages
-                    WHERE conversation_id = c.id
-                    ORDER BY created_at DESC
-                    LIMIT 1) AS preview
-            FROM conversations c
-            WHERE c.user_id = $1
-            ORDER BY c.updated_at DESC
-            """,
-            user_id,
+async def list_conversations(
+    user_id: str,
+    *,
+    query: str | None = None,
+    start_date: datetime | str | None = None,
+    end_date: datetime | str | None = None,
+    video_id: str | None = None,
+) -> list[dict]:
+    """List a user's conversations, newest-first, with optional filters.
+
+    Every filter is additive (ANDed) on top of the mandatory owner scope, so
+    the user_id boundary from MISSION §10 #3 is never weakened. Supported
+    filters:
+      - query: case-insensitive substring match on the conversation title.
+      - start_date / end_date: inclusive bounds on updated_at (the "when" of
+        the conversation). Accept an aware datetime or an ISO-8601 string.
+      - video_id: keep only conversations with at least one message citing the
+        given video. messages.sources is a JSONB array of citation objects,
+        each carrying a video_id; the @> containment test is naturally safe on
+        NULL sources (it yields NULL, i.e. excluded).
+
+    Only placeholder indices (never user values) are interpolated into the SQL
+    text — every value is bound through asyncpg parameters.
+    """
+    conditions = ["c.user_id = $1"]
+    params: list[object] = [user_id]
+
+    if query:
+        params.append(f"%{query}%")
+        conditions.append(f"c.title ILIKE ${len(params)}")
+    if start_date is not None:
+        params.append(_parse_dt(start_date))
+        conditions.append(f"c.updated_at >= ${len(params)}")
+    if end_date is not None:
+        params.append(_parse_dt(end_date))
+        conditions.append(f"c.updated_at <= ${len(params)}")
+    if video_id:
+        params.append(video_id)
+        conditions.append(
+            "EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id "
+            f"AND m.sources @> jsonb_build_array(jsonb_build_object('video_id', ${len(params)}::text)))"
         )
+
+    where_clause = " AND ".join(conditions)
+    sql = f"""
+        SELECT c.*,
+               (SELECT content
+                FROM messages
+                WHERE conversation_id = c.id
+                ORDER BY created_at DESC
+                LIMIT 1) AS preview
+        FROM conversations c
+        WHERE {where_clause}
+        ORDER BY c.updated_at DESC
+    """
+    async with _acquire() as conn:
+        rows = await conn.fetch(sql, *params)
     return [dict(r) for r in rows]
 
 

@@ -143,7 +143,28 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 // Conversations
-export const getConversations = () => request<Conversation[]>('/conversations');
+/**
+ * Optional filters for the conversation list. They combine (AND) on the server
+ * and results always come back newest-first. `startDate`/`endDate` are ISO-8601
+ * strings and map to the snake_case `start_date`/`end_date` query params;
+ * `videoId` maps to `video_id`.
+ */
+export interface ConversationFilters {
+  q?: string;
+  startDate?: string;
+  endDate?: string;
+  videoId?: string;
+}
+
+export const getConversations = (filters?: ConversationFilters) => {
+  const params = new URLSearchParams();
+  if (filters?.q) params.set('q', filters.q);
+  if (filters?.startDate) params.set('start_date', filters.startDate);
+  if (filters?.endDate) params.set('end_date', filters.endDate);
+  if (filters?.videoId) params.set('video_id', filters.videoId);
+  const qs = params.toString();
+  return request<Conversation[]>(`/conversations${qs ? `?${qs}` : ''}`);
+};
 export const searchConversations = (q: string) =>
   request<Conversation[]>(`/conversations/search?q=${encodeURIComponent(q)}`);
 export const createConversation = () =>

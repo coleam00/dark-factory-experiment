@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { type Conversation, getConversations, renameConversation } from '../lib/api';
+import { type Conversation, type ConversationFilters, getConversations, renameConversation } from '../lib/api';
 
-export function useConversations(searchQuery?: string) {
+interface ServerFilters {
+  startDate?: string;
+  endDate?: string;
+  videoId?: string;
+}
+
+export function useConversations(searchQuery?: string, serverFilters?: ServerFilters) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -9,11 +15,27 @@ export function useConversations(searchQuery?: string) {
   // when the user types faster than the network replies.
   const fetchIdRef = useRef(0);
 
+  // Date/video filters are applied server-side (the full conversation set must
+  // be queried to honour them), while the free-text query stays client-side so
+  // typing remains instant. Read the individual values so the load callback
+  // only re-creates — and the effect only refetches — when one truly changes.
+  const startDate = serverFilters?.startDate ?? '';
+  const endDate = serverFilters?.endDate ?? '';
+  const videoId = serverFilters?.videoId ?? '';
+
   const load = useCallback(async () => {
     const myId = ++fetchIdRef.current;
     try {
       setLoading(true);
-      const data = await getConversations();
+      const filters: ConversationFilters | undefined =
+        startDate || endDate || videoId
+          ? {
+              startDate: startDate || undefined,
+              endDate: endDate || undefined,
+              videoId: videoId || undefined,
+            }
+          : undefined;
+      const data = await getConversations(filters);
       if (myId === fetchIdRef.current) setConversations(data);
     } catch (e) {
       if (myId === fetchIdRef.current) {
@@ -22,7 +44,7 @@ export function useConversations(searchQuery?: string) {
     } finally {
       if (myId === fetchIdRef.current) setLoading(false);
     }
-  }, []);
+  }, [startDate, endDate, videoId]);
 
   useEffect(() => {
     load();

@@ -26,8 +26,27 @@ class ConversationRename(BaseModel):
 
 
 @router.get("/conversations")
-async def list_conversations(current_user: dict[str, Any] = Depends(get_current_user)):
-    return await repository.list_conversations(user_id=str(current_user["id"]))
+async def list_conversations(
+    q: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    video_id: str | None = None,
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
+    """List the current user's conversations, newest-first.
+
+    Optional query params narrow the list and combine (AND); the owner scope is
+    always enforced. `q` matches the title (case-insensitive substring),
+    `start_date`/`end_date` are ISO-8601 inclusive bounds on updated_at, and
+    `video_id` keeps only conversations that cite that video.
+    """
+    return await repository.list_conversations(
+        user_id=str(current_user["id"]),
+        query=q,
+        start_date=start_date,
+        end_date=end_date,
+        video_id=video_id,
+    )
 
 
 @router.post("/conversations", status_code=201)
