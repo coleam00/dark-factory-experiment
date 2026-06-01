@@ -134,6 +134,7 @@ async def sync_channel(limit: int | None = None, force: bool = False) -> SyncRes
     videos_total = len(all_video_ids)
     videos_new = 0
     videos_error = 0
+    videos_skipped = 0
 
     logger.info(
         "Channel %s has %d videos (type=%s)",
@@ -156,7 +157,11 @@ async def sync_channel(limit: int | None = None, force: bool = False) -> SyncRes
             existing = await repo.get_video_by_youtube_id(youtube_video_id)
             if existing is not None and not force:
                 logger.info("Video %s already ingested, skipping", youtube_video_id)
-                videos_new += 1
+                # Already in the DB — not newly ingested this run, so it must not
+                # count toward videos_new. Inflating videos_new here both misreports
+                # the run as having ingested the whole channel and masks failed runs
+                # (the videos_new == 0 status check below would never fire). See #295.
+                videos_skipped += 1
                 await repo.update_sync_video_status(
                     video_id=sync_video_record["id"],
                     status="ingested",
@@ -365,10 +370,11 @@ async def sync_channel(limit: int | None = None, force: bool = False) -> SyncRes
     )
 
     logger.info(
-        "Channel sync run %s complete: total=%d new=%d error=%d",
+        "Channel sync run %s complete: total=%d new=%d skipped=%d error=%d",
         sync_run_id,
         videos_total,
         videos_new,
+        videos_skipped,
         videos_error,
     )
 
