@@ -22,10 +22,6 @@ class ConversationCreate(BaseModel):
     video_ids: list[str] | None = None
 
 
-class ConversationRename(BaseModel):
-    title: str
-
-
 class ConversationUpdate(BaseModel):
     title: str | None = None
     video_ids: list[str] | None = None
@@ -107,6 +103,8 @@ async def update_conversation(
         if not updated:
             raise HTTPException(status_code=404, detail="Conversation not found")
     conv = await repository.get_conversation(conv_id, user_id=user_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
     return conv
 
 

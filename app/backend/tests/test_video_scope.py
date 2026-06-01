@@ -152,7 +152,7 @@ async def test_execute_search_hybrid_respects_video_id_whitelist(monkeypatch):
 @pytest.mark.asyncio
 async def test_execute_search_keyword_respects_video_id_whitelist(monkeypatch):
     async def fake_keyword(_q, top_k=10, language="english", allowed_source_types=None, allowed_video_ids=None):
-        assert allowed_video_ids == ["v1", "v2"]
+        assert sorted(allowed_video_ids) == ["v1", "v2"]
         return []
 
     monkeypatch.setattr(tools_module.repository, "keyword_search", fake_keyword)
@@ -249,5 +249,5 @@ async def test_retrieve_hybrid_threads_video_id_whitelist(monkeypatch):
         video_id_whitelist={"v1", "v2"},
     )
 
-    assert keyword_spy[0]["allowed_video_ids"] == ["v1", "v2"]
-    assert vector_spy[0]["allowed_video_ids"] == ["v1", "v2"]
+    assert sorted(keyword_spy[0]["allowed_video_ids"]) == ["v1", "v2"]
+    assert sorted(vector_spy[0]["allowed_video_ids"]) == ["v1", "v2"]
