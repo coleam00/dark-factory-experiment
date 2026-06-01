@@ -15,6 +15,8 @@ interface MessageProps {
   onCitationClick?: (citation: Citation) => void;
   /** Current tool-call status during streaming (ephemeral progress indicator) */
   streamingStatus?: StreamingStatus | null;
+  /** Called when the user clicks regenerate on this assistant message */
+  onRegenerate?: () => void;
 }
 
 // ── Typing indicator (3 pulsing dots) ────────────────────────────
@@ -167,6 +169,7 @@ export function Message({
   sources,
   onCitationClick,
   streamingStatus,
+  onRegenerate,
 }: MessageProps) {
   const isUser = role === 'user';
   const hasSources = !isUser && Array.isArray(sources) && sources.length > 0;
@@ -204,6 +207,50 @@ export function Message({
           <>
             <MarkdownRenderer content={content} />
             {hasSources && <SourceCitations sources={sources} onCitationClick={onCitationClick} />}
+            {onRegenerate && (
+              <div style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-start' }}>
+                <button
+                  onClick={onRegenerate}
+                  className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    background: 'transparent',
+                    border: '1px solid rgba(148,163,184,0.3)',
+                    borderRadius: 6,
+                    color: '#94a3b8',
+                    cursor: 'pointer',
+                    fontSize: 12,
+                    padding: '4px 10px',
+                    transition: 'color 0.15s, border-color 0.15s',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.color = '#f1f5f9';
+                    e.currentTarget.style.borderColor = 'rgba(148,163,184,0.5)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.color = '#94a3b8';
+                    e.currentTarget.style.borderColor = 'rgba(148,163,184,0.3)';
+                  }}
+                >
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 12 12"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <polyline points="11,2 11,5 8,5" />
+                    <path d="M10.5,5 A4.5,4.5 0 1,1 3,9" />
+                  </svg>
+                  Regenerate
+                </button>
+              </div>
+            )}
           </>
         )}
       </div>

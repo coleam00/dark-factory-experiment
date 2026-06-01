@@ -5,7 +5,7 @@ import { useMessages } from '../hooks/useMessages';
 import { useStreamingResponse } from '../hooks/useStreamingResponse';
 import { useToast } from '../hooks/useToast';
 import type { Citation, Message as MessageType } from '../lib/api';
-import { RateLimitError, createConversation } from '../lib/api';
+import { RateLimitError, createConversation, getConversation } from '../lib/api';
 import { exportConversationAsMarkdown } from '../lib/exportMarkdown';
 import { ChatInput, type ChatInputHandle } from './ChatInput';
 import { CitationModal } from './CitationModal';
@@ -301,6 +301,7 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
     streamingStatus,
     isStreaming,
     startStream,
+    startRegenerateStream,
     abortStream,
   } = useStreamingResponse(conversationId || null);
   const { addToast } = useToast();
@@ -574,6 +575,76 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
     handleSend(msg);
   }, [conversationId, location.state, navigate, handleSend]);
 
+  // ── Regenerate handler ──
+  const handleRegenerate = useCallback(async () => {
+    if (!conversationId) return;
+    if (isStreaming) return;
+
+    setInlineError(null);
+    setFailedMessageText(null);
+
+    // Remove the last assistant message optimistically
+    setMessages((prev) => {
+      const lastIdx = prev.length - 1;
+      if (lastIdx >= 0 && prev[lastIdx].role === 'assistant') {
+        return prev.slice(0, lastIdx);
+      }
+      return prev;
+    });
+    autoScrollRef.current = true;
+    scrollToBottom();
+
+    try {
+      await startRegenerateStream(conversationId, ({ fullText, sources }) => {
+        const assistantMsg: MessageType = {
+          id: `temp-assistant-${Date.now()}`,
+          conversation_id: conversationId,
+          role: 'assistant',
+          content: fullText,
+          created_at: new Date().toISOString(),
+          sources: sources.length > 0 ? sources : undefined,
+        };
+        setMessages((prev) => [...prev, assistantMsg]);
+      });
+      refreshAuth();
+      refreshConversationsRef?.current?.();
+    } catch (e) {
+      // Intentional abort — no error toast
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        return;
+      }
+
+      // Reload conversation to restore correct state after any error
+      try {
+        const data = await getConversation(conversationId);
+        setMessages(data.messages);
+      } catch (reloadErr) {
+        console.error('[ChatArea] Failed to reload conversation after regenerate error:', reloadErr);
+      }
+
+      if (e instanceof RateLimitError) {
+        const friendly = `You've hit your daily message limit (${e.limit}/day). Resets at ${formatResetTime(e.resetAt)}.`;
+        setInlineError(friendly);
+        addToast(friendly, 'error');
+        refreshAuth();
+        return;
+      }
+
+      const errMsg = e instanceof Error ? e.message : 'Failed to regenerate';
+      setInlineError('Failed to regenerate. Please try again.');
+      addToast(errMsg || 'Network error — regeneration failed', 'error');
+    }
+  }, [
+    conversationId,
+    isStreaming,
+    setMessages,
+    startRegenerateStream,
+    scrollToBottom,
+    addToast,
+    refreshAuth,
+    refreshConversationsRef,
+  ]);
+
   // ── Retry failed message — re-attempt the API call with same content ──
   const handleRetry = useCallback(() => {
     if (!failedMessageText) return;
@@ -708,13 +779,20 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
             {showEmptyInConversation ? (
               <EmptyState onStarterClick={handleStarterClick} />
             ) : (
-              messages.map((msg) => (
+              messages.map((msg, idx) => (
                 <Message
                   key={msg.id}
                   role={msg.role}
                   content={msg.content}
                   sources={msg.sources}
                   onCitationClick={handleCitationClick}
+                  onRegenerate={
+                    msg.role === 'assistant' &&
+                    idx === messages.length - 1 &&
+                    !isStreaming
+                      ? handleRegenerate
+                      : undefined
+                  }
                 />
               ))
             )}
