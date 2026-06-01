@@ -19,10 +19,32 @@ router = APIRouter()
 
 class ConversationCreate(BaseModel):
     title: str = "New Conversation"
+    # Optional video scope (issue #279): pin the conversation to a subset of
+    # videos so the assistant only answers from them. Omitted/empty = unscoped.
+    video_scope: list[str] | None = None
 
 
 class ConversationRename(BaseModel):
     title: str
+
+
+class ConversationScopeUpdate(BaseModel):
+    # The video ids this conversation should be scoped to. An empty list clears
+    # the scope and restores whole-library search.
+    video_ids: list[str]
+
+
+def _normalize_scope(video_ids: list[str] | None) -> list[str] | None:
+    """Trim, drop blanks, de-dupe (order-preserving). Empty → None (unscoped)."""
+    if not video_ids:
+        return None
+    seen: list[str] = []
+    for v in video_ids:
+        if isinstance(v, str):
+            trimmed = v.strip()
+            if trimmed and trimmed not in seen:
+                seen.append(trimmed)
+    return seen or None
 
 
 @router.get("/conversations")
@@ -35,11 +57,17 @@ async def create_conversation(
     body: ConversationCreate | None = None,
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
-    """Create a new empty conversation. Body is optional; defaults to title='New Conversation'."""
+    """Create a new empty conversation. Body is optional; defaults to title='New Conversation'.
+
+    An optional ``video_scope`` pins the conversation to a subset of videos
+    (issue #279); omitted or empty leaves it unscoped (whole-library search).
+    """
     title = body.title if body else "New Conversation"
+    video_scope = _normalize_scope(body.video_scope) if body else None
     return await repository.create_conversation(
         user_id=str(current_user["id"]),
         title=title,
+        video_scope=video_scope,
     )
 
 
@@ -92,6 +120,29 @@ async def rename_conversation(
         raise HTTPException(status_code=404, detail="Conversation not found")
     conv = await repository.get_conversation(conv_id, user_id=str(current_user["id"]))
     return conv
+
+
+@router.put("/conversations/{conv_id}/scope")
+async def set_conversation_scope(
+    conv_id: str,
+    body: ConversationScopeUpdate,
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
+    """Scope a conversation to a subset of videos (issue #279).
+
+    Pass the video ids to restrict the assistant to; pass an empty list to
+    clear the scope and search the whole library again. Owner-scoped — a
+    mismatched conversation returns 404 (no existence leak), exactly like the
+    other conversation mutations here.
+    """
+    user_id = str(current_user["id"])
+    scope = _normalize_scope(body.video_ids)
+    updated = await repository.update_conversation_scope(
+        conv_id, user_id=user_id, video_scope=scope
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return await repository.get_conversation(conv_id, user_id=user_id)
 
 
 @router.get("/videos")

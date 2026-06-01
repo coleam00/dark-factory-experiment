@@ -144,17 +144,31 @@ async def create_message(
         # turn won't change behavior mid-flight.
         is_member_for_turn = bool(current_user.get("is_member", False))
 
+        # Conversation video scope (issue #279): when the user pinned this
+        # conversation to a subset of videos, every retrieval tool is restricted
+        # to those ids so answers and citations only come from them. Captured
+        # once per turn (consistent with the ACL above). None/empty = unscoped,
+        # i.e. search the whole library exactly as before.
+        raw_scope = conv.get("video_scope")
+        video_scope_for_turn: list[str] | None = list(raw_scope) if raw_scope else None
+
         async def _executor(name: str, raw_args: str) -> str:
             # Pass `None` (not empty set) when the whitelist failed to load so
             # the transcript tool falls back to open lookups instead of rejecting
             # every id.
             whitelist = video_id_whitelist if video_id_whitelist else None
+            # Forward the conversation scope only when set, so the unscoped path
+            # keeps execute_tool's pre-#279 call signature unchanged.
+            extra: dict[str, Any] = {}
+            if video_scope_for_turn:
+                extra["allowed_video_ids"] = video_scope_for_turn
             result = await execute_tool(
                 name,
                 raw_args,
                 video_id_whitelist=whitelist,
                 embedding_cache=embedding_cache,
                 is_member=is_member_for_turn,
+                **extra,
             )
             if result.get("ok") and result.get("chunks"):
                 tool_chunks_acc.extend(result["chunks"])

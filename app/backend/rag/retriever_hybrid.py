@@ -40,6 +40,7 @@ async def retrieve_hybrid(
     query_embedding: list[float],
     top_k: int = 5,
     is_member: bool = False,
+    allowed_video_ids: list[str] | None = None,
 ) -> list[dict]:
     """
     Hybrid retrieval via Reciprocal Rank Fusion (RRF).
@@ -52,6 +53,10 @@ async def retrieve_hybrid(
             = 'dynamous'`) is included alongside the default YouTube content.
             Non-members see YouTube chunks only. The filter is applied at the
             SQL layer — non-member retrieval never touches Dynamous chunks.
+        allowed_video_ids: Conversation video-scope filter (issue #279). When a
+            non-empty list is given, both the keyword and vector legs only fetch
+            chunks from those video ids, so the fused result can only contain
+            in-scope videos. ``None``/empty means search the whole library.
 
     Returns:
         A list of dicts (length <= top_k), each containing:
@@ -82,18 +87,24 @@ async def retrieve_hybrid(
     # Over-fetch factor — each method returns 2*top_k before merging
     fetch_k = top_k * HYBRID_OVERFETCH_FACTOR
 
-    # Run keyword and vector searches concurrently
-    keyword_task = repository.keyword_search(
-        query_text,
-        top_k=fetch_k,
-        language=KEYWORD_LANGUAGE,
-        allowed_source_types=allowed_source_types,
-    )
-    vector_task = repository.vector_search_pg(
-        query_embedding,
-        top_k=fetch_k,
-        allowed_source_types=allowed_source_types,
-    )
+    # Run keyword and vector searches concurrently. The video-scope filter is
+    # passed through only when set so unscoped callers (and their test fakes)
+    # see the exact same signature as before issue #279.
+    keyword_kwargs: dict = {
+        "top_k": fetch_k,
+        "language": KEYWORD_LANGUAGE,
+        "allowed_source_types": allowed_source_types,
+    }
+    vector_kwargs: dict = {
+        "top_k": fetch_k,
+        "allowed_source_types": allowed_source_types,
+    }
+    if allowed_video_ids:
+        keyword_kwargs["allowed_video_ids"] = allowed_video_ids
+        vector_kwargs["allowed_video_ids"] = allowed_video_ids
+
+    keyword_task = repository.keyword_search(query_text, **keyword_kwargs)
+    vector_task = repository.vector_search_pg(query_embedding, **vector_kwargs)
 
     keyword_hits, vector_hits = await keyword_task, await vector_task
 

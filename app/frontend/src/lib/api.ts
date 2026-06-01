@@ -41,6 +41,12 @@ export interface Conversation {
   created_at: string;
   updated_at: string;
   preview?: string | null;
+  /**
+   * Video ids this conversation is scoped to (issue #279). When set, the
+   * assistant only answers from — and only cites — these videos. `null` or
+   * absent means the conversation searches the whole library.
+   */
+  video_scope?: string[] | null;
 }
 
 export interface Citation {
@@ -146,8 +152,22 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 export const getConversations = () => request<Conversation[]>('/conversations');
 export const searchConversations = (q: string) =>
   request<Conversation[]>(`/conversations/search?q=${encodeURIComponent(q)}`);
-export const createConversation = () =>
-  request<Conversation>('/conversations', { method: 'POST', body: '{}' });
+export const createConversation = (videoScope?: string[]) =>
+  request<Conversation>('/conversations', {
+    method: 'POST',
+    body: JSON.stringify(
+      videoScope && videoScope.length > 0 ? { video_scope: videoScope } : {},
+    ),
+  });
+/**
+ * Scope an existing conversation to a subset of videos (issue #279). Pass an
+ * empty array to clear the scope and search the whole library again.
+ */
+export const setConversationScope = (id: string, videoIds: string[]) =>
+  request<Conversation>(`/conversations/${id}/scope`, {
+    method: 'PUT',
+    body: JSON.stringify({ video_ids: videoIds }),
+  });
 export const getConversation = (id: string) =>
   request<ConversationWithMessages>(`/conversations/${id}`);
 export const deleteConversation = (id: string) =>

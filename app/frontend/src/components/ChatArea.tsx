@@ -1,4 +1,11 @@
-import { type MutableRefObject, useCallback, useEffect, useRef, useState } from 'react';
+import {
+  type MutableRefObject,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { type Location, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useMessages } from '../hooks/useMessages';
@@ -10,6 +17,7 @@ import { exportConversationAsMarkdown } from '../lib/exportMarkdown';
 import { ChatInput, type ChatInputHandle } from './ChatInput';
 import { CitationModal } from './CitationModal';
 import { Message } from './Message';
+import { VideoScopePicker } from './VideoScopePicker';
 
 function formatResetTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -58,9 +66,12 @@ function SkeletonMessages() {
 // ── Empty / landing state ─────────────────────────────────────────
 interface EmptyStateProps {
   onStarterClick: (text: string) => void;
+  // Optional extra content rendered under the starters — used on the landing
+  // screen to host the video-scope picker (issue #279).
+  footer?: ReactNode;
 }
 
-function EmptyState({ onStarterClick }: EmptyStateProps) {
+function EmptyState({ onStarterClick, footer }: EmptyStateProps) {
   const starters = [
     'How do I use subagents in Claude Code?',
     'How should I structure an agent team?',
@@ -132,6 +143,7 @@ function EmptyState({ onStarterClick }: EmptyStateProps) {
           </button>
         ))}
       </div>
+      {footer && <div style={{ marginTop: 24, width: '100%', maxWidth: 400 }}>{footer}</div>}
     </div>
   );
 }
@@ -325,6 +337,9 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
   const pendingUserMsgIdRef = useRef<string | null>(null);
   // Citation modal state
   const [selectedCitation, setSelectedCitation] = useState<Citation | null>(null);
+  // Landing-screen video scope selection (issue #279). Applied when the first
+  // message creates the conversation, then fixed for the conversation's life.
+  const [scopeVideoIds, setScopeVideoIds] = useState<string[]>([]);
 
   // ── Auto-scroll logic ──
   // Defer scroll to the next paint cycle so streaming DOM updates are applied first.
@@ -459,7 +474,11 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
       if (!conversationId) {
         if (isStreaming) return;
         try {
-          const conv = await createConversation();
+          // Apply the landing-screen video scope (issue #279) at creation so it
+          // sticks for the whole conversation. Empty selection → unscoped.
+          const conv = await createConversation(
+            scopeVideoIds.length > 0 ? scopeVideoIds : undefined,
+          );
           navigate(`/c/${conv.id}`, {
             state: { initialMessage: content } satisfies ConvLocationState,
           });
@@ -556,6 +575,7 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
       addToast,
       refreshAuth,
       refreshConversationsRef,
+      scopeVideoIds,
     ],
   );
 
@@ -687,7 +707,12 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
           </button>
         )}
 
-        {showEmpty && <EmptyState onStarterClick={handleStarterClick} />}
+        {showEmpty && (
+          <EmptyState
+            onStarterClick={handleStarterClick}
+            footer={<VideoScopePicker selected={scopeVideoIds} onChange={setScopeVideoIds} />}
+          />
+        )}
 
         {showSkeleton && <SkeletonMessages />}
 
@@ -705,6 +730,44 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
             ref={messagesWrapperRef}
             style={{ padding: '24px 24px 0', display: 'flex', flexDirection: 'column' }}
           >
+            {/* Scope indicator (issue #279): show when this conversation is
+                pinned to a subset of videos so the user understands why
+                answers/citations are limited. */}
+            {conversation?.video_scope && conversation.video_scope.length > 0 && (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  alignSelf: 'flex-start',
+                  marginBottom: 12,
+                  padding: '6px 12px',
+                  background: 'rgba(59,130,246,0.1)',
+                  border: '1px solid rgba(59,130,246,0.3)',
+                  borderRadius: 999,
+                  fontSize: 12,
+                  color: '#93c5fd',
+                }}
+                title="This conversation only answers from the selected videos."
+              >
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 13 13"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <rect x="1.5" y="3" width="10" height="7" rx="1.5" />
+                  <polyline points="5,6 7.5,6.5 5,7" />
+                </svg>
+                Answering from {conversation.video_scope.length} selected video
+                {conversation.video_scope.length === 1 ? '' : 's'}
+              </div>
+            )}
+
             {showEmptyInConversation ? (
               <EmptyState onStarterClick={handleStarterClick} />
             ) : (

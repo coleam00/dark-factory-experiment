@@ -410,8 +410,14 @@ async def execute_search_hybrid(
     raw_arguments: str | dict,
     embedding_cache: dict[str, list[float]] | None = None,
     is_member: bool = False,
+    allowed_video_ids: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Hybrid (keyword + semantic via RRF) search."""
+    """Hybrid (keyword + semantic via RRF) search.
+
+    ``allowed_video_ids`` is the conversation's video scope (issue #279): when
+    set, retrieval is restricted to those videos so answers and citations only
+    come from them.
+    """
     from backend.config import RETRIEVAL_MAX_PER_VIDEO
     from backend.rag.retriever_hybrid import retrieve_hybrid
 
@@ -423,9 +429,15 @@ async def execute_search_hybrid(
         return {"ok": False, "error": "missing required parameter: query"}
     top_k = _clamp_top_k(args.get("top_k"))
 
+    # Forward the scope only when set so unscoped callers (and their existing
+    # test fakes) keep the pre-#279 retrieve_hybrid signature.
+    retrieve_kwargs: dict[str, Any] = {"top_k": top_k, "is_member": is_member}
+    if allowed_video_ids:
+        retrieve_kwargs["allowed_video_ids"] = allowed_video_ids
+
     try:
         embedding = await _embed_query(query, embedding_cache)
-        chunks = await retrieve_hybrid(query, embedding, top_k=top_k, is_member=is_member)
+        chunks = await retrieve_hybrid(query, embedding, **retrieve_kwargs)
     except Exception as exc:
         logger.warning("search_hybrid failed: %s", exc, exc_info=True)
         return {"ok": False, "error": f"search failed: {exc}"}
@@ -439,8 +451,12 @@ async def execute_search_hybrid(
 async def execute_search_keyword(
     raw_arguments: str | dict,
     is_member: bool = False,
+    allowed_video_ids: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Keyword-only (tsvector FTS) search."""
+    """Keyword-only (tsvector FTS) search.
+
+    ``allowed_video_ids`` is the conversation's video scope (issue #279).
+    """
     from backend.config import KEYWORD_LANGUAGE, RETRIEVAL_MAX_PER_VIDEO
 
     args = _parse_args(raw_arguments)
@@ -453,13 +469,16 @@ async def execute_search_keyword(
 
     allowed = ["youtube", "dynamous"] if is_member else ["youtube"]
 
+    search_kwargs: dict[str, Any] = {
+        "top_k": top_k,
+        "language": KEYWORD_LANGUAGE,
+        "allowed_source_types": allowed,
+    }
+    if allowed_video_ids:
+        search_kwargs["allowed_video_ids"] = allowed_video_ids
+
     try:
-        raw = await repository.keyword_search(
-            query,
-            top_k=top_k,
-            language=KEYWORD_LANGUAGE,
-            allowed_source_types=allowed,
-        )
+        raw = await repository.keyword_search(query, **search_kwargs)
         chunks = await _hydrate_chunks(raw)
     except Exception as exc:
         logger.warning("search_keyword failed: %s", exc, exc_info=True)
@@ -475,8 +494,12 @@ async def execute_search_semantic(
     raw_arguments: str | dict,
     embedding_cache: dict[str, list[float]] | None = None,
     is_member: bool = False,
+    allowed_video_ids: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Semantic-only (pgvector cosine) search."""
+    """Semantic-only (pgvector cosine) search.
+
+    ``allowed_video_ids`` is the conversation's video scope (issue #279).
+    """
     from backend.config import RETRIEVAL_MAX_PER_VIDEO
 
     args = _parse_args(raw_arguments)
@@ -489,11 +512,13 @@ async def execute_search_semantic(
 
     allowed = ["youtube", "dynamous"] if is_member else ["youtube"]
 
+    search_kwargs: dict[str, Any] = {"top_k": top_k, "allowed_source_types": allowed}
+    if allowed_video_ids:
+        search_kwargs["allowed_video_ids"] = allowed_video_ids
+
     try:
         embedding = await _embed_query(query, embedding_cache)
-        raw = await repository.vector_search_pg(
-            embedding, top_k=top_k, allowed_source_types=allowed
-        )
+        raw = await repository.vector_search_pg(embedding, **search_kwargs)
         chunks = await _hydrate_chunks(raw)
     except Exception as exc:
         logger.warning("search_semantic failed: %s", exc, exc_info=True)
@@ -509,12 +534,18 @@ async def execute_get_video_transcript(
     raw_arguments: str | dict,
     video_id_whitelist: set[str] | None = None,
     is_member: bool = False,
+    allowed_video_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Full transcript of one video. video_id_whitelist guards against the
     model hallucinating ids; None disables the check (tests).
 
     Defense-in-depth: a non-member who somehow guesses a Dynamous video_id
     is blocked here in addition to the search-layer filter.
+
+    ``allowed_video_ids`` is the conversation's video scope (issue #279). When
+    set, a transcript request for a video outside the scope is rejected — the
+    transcript tool takes an explicit video_id, so without this guard the model
+    could pull a full out-of-scope transcript and bypass the scoped search.
     """
     args = _parse_args(raw_arguments)
     if args is None:
@@ -530,6 +561,15 @@ async def execute_get_video_transcript(
             "error": (
                 f"video_id {video_id!r} is not in the current library. "
                 "Only ids from prior search results are valid."
+            ),
+        }
+
+    if allowed_video_ids and video_id not in allowed_video_ids:
+        return {
+            "ok": False,
+            "error": (
+                f"video_id {video_id!r} is outside the videos this conversation "
+                "is scoped to. Only search results from the selected videos are valid."
             ),
         }
 
@@ -603,6 +643,7 @@ async def execute_tool(
     video_id_whitelist: set[str] | None = None,
     embedding_cache: dict[str, list[float]] | None = None,
     is_member: bool = False,
+    allowed_video_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Dispatch by tool name. Unknown names return an error dict so the
     model sees the refusal and stops calling.
@@ -612,20 +653,35 @@ async def execute_tool(
 
     ``is_member`` controls retrieval ACL: True surfaces both YouTube and
     Dynamous (paid) chunks; False sees YouTube only.
+
+    ``allowed_video_ids`` is the conversation's video scope (issue #279). When
+    set, every retrieval tool — search and transcript — is restricted to those
+    videos, so the model can only ground its answer in the user's selection.
     """
     if name == "search_videos":
         return await execute_search_hybrid(
-            raw_arguments, embedding_cache=embedding_cache, is_member=is_member
+            raw_arguments,
+            embedding_cache=embedding_cache,
+            is_member=is_member,
+            allowed_video_ids=allowed_video_ids,
         )
     if name == "keyword_search_videos":
-        return await execute_search_keyword(raw_arguments, is_member=is_member)
+        return await execute_search_keyword(
+            raw_arguments, is_member=is_member, allowed_video_ids=allowed_video_ids
+        )
     if name == "semantic_search_videos":
         return await execute_search_semantic(
-            raw_arguments, embedding_cache=embedding_cache, is_member=is_member
+            raw_arguments,
+            embedding_cache=embedding_cache,
+            is_member=is_member,
+            allowed_video_ids=allowed_video_ids,
         )
     if name == "get_video_transcript":
         return await execute_get_video_transcript(
-            raw_arguments, video_id_whitelist=video_id_whitelist, is_member=is_member
+            raw_arguments,
+            video_id_whitelist=video_id_whitelist,
+            is_member=is_member,
+            allowed_video_ids=allowed_video_ids,
         )
     return {"ok": False, "error": f"unknown tool: {name}"}
 
