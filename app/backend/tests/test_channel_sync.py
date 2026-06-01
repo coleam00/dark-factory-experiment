@@ -145,7 +145,7 @@ def make_mock_transcript(text):
 async def test_sync_channel_idempotent_skips_existing_videos():
     """
     If a video is already in the DB (matched by youtube_video_id in URL),
-    it is skipped and counted as 'new' (already ingested = already counted).
+    it is skipped and must NOT be counted as 'new'.
     """
     # Pre-ingest a video so get_video_by_youtube_id returns it
     await repository.create_video(
@@ -181,7 +181,7 @@ async def test_sync_channel_idempotent_skips_existing_videos():
     data = response.json()
     assert data["sync_run_id"]
     assert data["videos_total"] == 2
-    assert data["videos_new"] == 2  # one skipped (already in DB), one "new" (abc...)
+    assert data["videos_new"] == 1  # only abc123def456 is genuinely new
     assert data["videos_error"] == 0
 
 
