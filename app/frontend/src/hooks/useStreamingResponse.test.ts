@@ -614,3 +614,46 @@ describe('sources event — hook state via renderHook', () => {
     expect(onComplete).toHaveBeenCalledWith(expect.objectContaining({ sources: [] }));
   });
 });
+
+describe('mid-stream error — partial result is not committed (issue #244)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('rejects, does not call onComplete, and stops reading after a mid-stream error', async () => {
+    // Some content flows, then a mid-stream error payload, then more content that
+    // must NOT be consumed because the loop should stop promptly on the error.
+    const sseChunks = [
+      'data: "Partial "\n\n',
+      'data: "answer"\n\n',
+      'data: {"error":"Something went wrong"}\n\n',
+      'data: " ignored"\n\n',
+      'data: [DONE]\n\n',
+    ];
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: makeSseStream(sseChunks),
+      }),
+    );
+
+    const onComplete = vi.fn();
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await act(async () => {
+      await expect(
+        result.current.startStream('conv-1', 'hi', onComplete),
+      ).rejects.toThrow('Something went wrong');
+    });
+
+    // Failed stream must not be committed as a success.
+    expect(onComplete).not.toHaveBeenCalled();
+    // The post-error token must not have been accumulated (loop stopped promptly).
+    expect(result.current.streamingContent).not.toContain('ignored');
+    // The finally cleanup ran exactly once, resetting streaming state.
+    expect(result.current.isStreaming).toBe(false);
+  });
+});
