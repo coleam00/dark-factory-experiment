@@ -215,4 +215,98 @@ describe('useConversations', () => {
       expect(result.current.filteredConversations[0].id).toBe('1');
     });
   });
+
+  describe('server-side filters (date / video)', () => {
+    it('calls searchConversations and surfaces its result when videoId is set', async () => {
+      const getSpy = vi.spyOn(api, 'getConversations');
+      const searchSpy = vi.spyOn(api, 'searchConversations').mockResolvedValue([
+        { id: 'v1', title: 'About a video', created_at: '', updated_at: '', preview: 'Hi' },
+        // preview === null must still be filtered out on the server-side path
+        { id: 'v2', title: 'Empty', created_at: '', updated_at: '', preview: null },
+      ] as api.Conversation[]);
+
+      const { result } = renderHook(() =>
+        useConversations(undefined, { videoId: 'vid-123' }),
+      );
+
+      await waitFor(() => expect(result.current.filteredConversations).toHaveLength(1));
+      expect(result.current.filteredConversations[0].id).toBe('v1');
+      expect(searchSpy).toHaveBeenCalledWith({
+        q: undefined,
+        dateFrom: undefined,
+        dateTo: undefined,
+        videoId: 'vid-123',
+      });
+      expect(getSpy).not.toHaveBeenCalled();
+    });
+
+    it('passes date range params through to searchConversations', async () => {
+      const searchSpy = vi
+        .spyOn(api, 'searchConversations')
+        .mockResolvedValue([] as api.Conversation[]);
+
+      const { result } = renderHook(() =>
+        useConversations('react', { dateFrom: '2026-01-01', dateTo: '2026-02-01' }),
+      );
+
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(searchSpy).toHaveBeenCalledWith({
+        q: 'react',
+        dateFrom: '2026-01-01',
+        dateTo: '2026-02-01',
+        videoId: undefined,
+      });
+    });
+
+    it('does not apply client-side title filtering on the server-side path', async () => {
+      // The server already applied the title match; the client must surface the
+      // server result verbatim (minus preview === null), not re-filter by title.
+      vi.spyOn(api, 'searchConversations').mockResolvedValue([
+        { id: '1', title: 'Totally unrelated', created_at: '', updated_at: '', preview: 'Hi' },
+      ] as api.Conversation[]);
+
+      const { result } = renderHook(() =>
+        useConversations('python', { videoId: 'vid-9' }),
+      );
+
+      await waitFor(() => expect(result.current.filteredConversations).toHaveLength(1));
+      expect(result.current.filteredConversations[0].id).toBe('1');
+    });
+
+    it('re-fetches when a filter changes', async () => {
+      const searchSpy = vi
+        .spyOn(api, 'searchConversations')
+        .mockResolvedValueOnce([
+          { id: 'a', title: 'A', created_at: '', updated_at: '', preview: 'Hi' },
+        ] as api.Conversation[])
+        .mockResolvedValueOnce([
+          { id: 'b', title: 'B', created_at: '', updated_at: '', preview: 'Yo' },
+        ] as api.Conversation[]);
+
+      const { result, rerender } = renderHook(
+        ({ videoId }: { videoId: string }) => useConversations(undefined, { videoId }),
+        { initialProps: { videoId: 'vid-1' } },
+      );
+
+      await waitFor(() => expect(result.current.filteredConversations[0]?.id).toBe('a'));
+
+      rerender({ videoId: 'vid-2' });
+
+      await waitFor(() => expect(result.current.filteredConversations[0]?.id).toBe('b'));
+      expect(searchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('uses getConversations (not the server endpoint) when no filters are set', async () => {
+      const getSpy = vi.spyOn(api, 'getConversations').mockResolvedValue([
+        { id: '1', title: 'Chat', created_at: '', updated_at: '', preview: 'Hello' },
+      ] as api.Conversation[]);
+      const searchSpy = vi.spyOn(api, 'searchConversations');
+
+      const { result } = renderHook(() => useConversations('chat'));
+
+      await waitFor(() => expect(result.current.filteredConversations).toHaveLength(1));
+      expect(getSpy).toHaveBeenCalled();
+      expect(searchSpy).not.toHaveBeenCalled();
+    });
+  });
 });

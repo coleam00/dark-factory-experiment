@@ -22,7 +22,9 @@ pytestmark = pytest.mark.skip(
 
 from backend.db.repository import (  # noqa: E402
     create_conversation,
+    create_message,
     create_video,
+    search_conversations,
     search_conversations_by_title,
     search_videos_admin,
 )
@@ -209,3 +211,93 @@ async def test_search_videos_admin_matches_description_and_channel_title():
     results = await search_videos_admin("Rust Channel")
     assert len(results) == 1
     assert results[0]["title"] == "Generic Title"
+
+
+# ---------------------------------------------------------------------------
+# search_conversations — combined date / video / title filter (issue #294)
+# ---------------------------------------------------------------------------
+
+
+async def test_search_conversations_no_filters_lists_owner_rows():
+    """With no filters set, it behaves like the conversation list (owner-scoped)."""
+    user_id = str(uuid4())
+    await create_conversation(user_id=user_id, title="Chat A")
+    await create_conversation(user_id=user_id, title="Chat B")
+
+    results = await search_conversations(user_id)
+    titles = {r["title"] for r in results}
+    assert titles == {"Chat A", "Chat B"}
+
+
+async def test_search_conversations_only_owner_rows():
+    """Owner scope is enforced even with other filters applied."""
+    alice_id = str(uuid4())
+    bob_id = str(uuid4())
+    await create_conversation(user_id=alice_id, title="Alice Topic")
+    await create_conversation(user_id=bob_id, title="Bob Topic")
+
+    results = await search_conversations(alice_id, query="topic")
+    titles = {r["title"] for r in results}
+    assert titles == {"Alice Topic"}
+
+
+async def test_search_conversations_title_and_date_combine():
+    """Title and date-range filters combine with AND."""
+    user_id = str(uuid4())
+    await create_conversation(user_id=user_id, title="Python in 2026")
+
+    # A wide window around now should include the freshly-created conversation.
+    results = await search_conversations(
+        user_id,
+        query="python",
+        date_from="2000-01-01T00:00:00Z",
+        date_to="2100-01-01T00:00:00Z",
+    )
+    assert len(results) == 1
+    assert results[0]["title"] == "Python in 2026"
+
+    # A window entirely in the past excludes it.
+    results = await search_conversations(
+        user_id,
+        query="python",
+        date_to="2001-01-01T00:00:00Z",
+    )
+    assert results == []
+
+
+async def test_search_conversations_video_filter_matches_via_sources():
+    """video_id filter matches conversations whose messages cite that video."""
+    user_id = str(uuid4())
+    conv_with = await create_conversation(user_id=user_id, title="Has video")
+    conv_without = await create_conversation(user_id=user_id, title="No video")
+
+    await create_message(
+        conversation_id=conv_with["id"],
+        user_id=user_id,
+        role="assistant",
+        content="answer",
+        sources=[{"video_id": "vid-target", "video_title": "Target"}],
+    )
+    # A different video cited elsewhere must not match.
+    await create_message(
+        conversation_id=conv_without["id"],
+        user_id=user_id,
+        role="assistant",
+        content="answer",
+        sources=[{"video_id": "vid-other", "video_title": "Other"}],
+    )
+
+    results = await search_conversations(user_id, video_id="vid-target")
+    titles = {r["title"] for r in results}
+    assert titles == {"Has video"}
+
+
+async def test_search_conversations_ordered_most_recent_first():
+    """Results are ordered by updated_at DESC (most-recent-first)."""
+    user_id = str(uuid4())
+    await create_conversation(user_id=user_id, title="Older")
+    await create_conversation(user_id=user_id, title="Newer")
+
+    results = await search_conversations(user_id)
+    # Newer conversation (created later → later updated_at) comes first.
+    assert results[0]["title"] == "Newer"

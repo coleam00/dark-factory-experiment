@@ -1,7 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { type Conversation, getConversations, renameConversation } from '../lib/api';
+import {
+  type Conversation,
+  getConversations,
+  renameConversation,
+  searchConversations,
+} from '../lib/api';
 
-export function useConversations(searchQuery?: string) {
+export interface ConversationFilterArgs {
+  dateFrom?: string;
+  dateTo?: string;
+  videoId?: string;
+}
+
+export function useConversations(searchQuery?: string, filters?: ConversationFilterArgs) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -9,11 +20,23 @@ export function useConversations(searchQuery?: string) {
   // when the user types faster than the network replies.
   const fetchIdRef = useRef(0);
 
+  // A date or video filter requires server-side filtering (the video link lives
+  // only inside messages.sources, which the client never loads). Title-only
+  // search stays on the existing client-side path so prior behavior is unchanged.
+  const filtersActive = !!(filters?.dateFrom || filters?.dateTo || filters?.videoId);
+
   const load = useCallback(async () => {
     const myId = ++fetchIdRef.current;
     try {
       setLoading(true);
-      const data = await getConversations();
+      const data = filtersActive
+        ? await searchConversations({
+            q: searchQuery,
+            dateFrom: filters?.dateFrom,
+            dateTo: filters?.dateTo,
+            videoId: filters?.videoId,
+          })
+        : await getConversations();
       if (myId === fetchIdRef.current) setConversations(data);
     } catch (e) {
       if (myId === fetchIdRef.current) {
@@ -22,7 +45,9 @@ export function useConversations(searchQuery?: string) {
     } finally {
       if (myId === fetchIdRef.current) setLoading(false);
     }
-  }, []);
+    // searchQuery only affects the fetch when a server-side filter is active;
+    // otherwise it's applied client-side below and must not retrigger a load.
+  }, [filtersActive, filters?.dateFrom, filters?.dateTo, filters?.videoId, searchQuery]);
 
   useEffect(() => {
     load();
@@ -45,10 +70,13 @@ export function useConversations(searchQuery?: string) {
   // Keep conversations unfiltered for guard logic in Sidebar.tsx.
   const withMessages = conversations.filter((c) => c.preview !== null);
 
+  // When a server-side filter is active the backend already applied the title
+  // match, so skip the client-side substring filter to avoid double-filtering.
   const trimmed = (searchQuery ?? '').trim().toLowerCase();
-  const filteredConversations = trimmed
-    ? withMessages.filter((c) => c.title.toLowerCase().includes(trimmed))
-    : withMessages;
+  const filteredConversations =
+    !filtersActive && trimmed
+      ? withMessages.filter((c) => c.title.toLowerCase().includes(trimmed))
+      : withMessages;
 
   return {
     conversations,

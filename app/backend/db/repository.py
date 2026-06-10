@@ -526,6 +526,74 @@ async def search_conversations_by_title(user_id: str, query: str, limit: int = 2
     return [dict(r) for r in rows]
 
 
+async def search_conversations(
+    user_id: str,
+    *,
+    query: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    video_id: str | None = None,
+    limit: int = 100,
+) -> list[dict]:
+    """Filter a user's conversations by any combination of title text, date range,
+    and the video discussed, ordered most-recent-first (issue #294).
+
+    All filters are optional and combine with AND. Owner scope (`c.user_id = $1`)
+    is non-negotiable and always applied first — never weaken it.
+
+    Date-column decision: filter on `created_at` ("when the conversation happened"
+    per the issue), but sort on `updated_at DESC` to match the existing list
+    ordering / "most-recent-first". A reviewer can flip the filter column to
+    `updated_at` if preferred.
+
+    The video link lives only inside `messages.sources` JSONB (Citation objects
+    shaped `[{"video_id": ...}]`), so the video filter uses an EXISTS containment
+    check across the conversation's messages (backed by the GIN index from
+    migration 0006).
+    """
+    # WHERE is built dynamically with a positional-param list, always starting
+    # from the owner scope. Only the ILIKE pattern value is interpolated into a
+    # Python string (the established pattern in search_conversations_by_title);
+    # every value still binds as a parameter — no SQL is built from user input.
+    params: list[object] = [user_id]
+    where = ["c.user_id = $1"]
+
+    if query:
+        params.append(f"%{query}%")
+        where.append(f"c.title ILIKE ${len(params)}")
+    if date_from:
+        params.append(date_from)
+        where.append(f"c.created_at >= ${len(params)}::timestamptz")
+    if date_to:
+        params.append(date_to)
+        where.append(f"c.created_at <= ${len(params)}::timestamptz")
+    if video_id:
+        params.append(json.dumps([{"video_id": video_id}]))
+        where.append(
+            "EXISTS (SELECT 1 FROM messages m "
+            f"WHERE m.conversation_id = c.id AND m.sources @> ${len(params)}::jsonb)"
+        )
+
+    params.append(limit)
+    limit_param = len(params)
+
+    sql = f"""
+        SELECT c.*,
+               (SELECT content
+                FROM messages
+                WHERE conversation_id = c.id
+                ORDER BY created_at DESC
+                LIMIT 1) AS preview
+        FROM conversations c
+        WHERE {" AND ".join(where)}
+        ORDER BY c.updated_at DESC
+        LIMIT ${limit_param}
+    """
+    async with _acquire() as conn:
+        rows = await conn.fetch(sql, *params)
+    return [dict(r) for r in rows]
+
+
 # ---------------------------------------------------------------------------
 # Messages
 # ---------------------------------------------------------------------------

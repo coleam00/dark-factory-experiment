@@ -144,8 +144,22 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 // Conversations
 export const getConversations = () => request<Conversation[]>('/conversations');
-export const searchConversations = (q: string) =>
-  request<Conversation[]>(`/conversations/search?q=${encodeURIComponent(q)}`);
+
+export interface ConversationFilters {
+  q?: string;
+  dateFrom?: string; // ISO date/datetime, filters on created_at >=
+  dateTo?: string; // ISO date/datetime, filters on created_at <=
+  videoId?: string; // matches conversations whose messages cite this video
+}
+
+export const searchConversations = (f: ConversationFilters) => {
+  const p = new URLSearchParams();
+  if (f.q) p.set('q', f.q);
+  if (f.dateFrom) p.set('date_from', f.dateFrom);
+  if (f.dateTo) p.set('date_to', f.dateTo);
+  if (f.videoId) p.set('video_id', f.videoId);
+  return request<Conversation[]>(`/conversations/search?${p.toString()}`);
+};
 export const createConversation = () =>
   request<Conversation>('/conversations', { method: 'POST', body: '{}' });
 export const getConversation = (id: string) =>

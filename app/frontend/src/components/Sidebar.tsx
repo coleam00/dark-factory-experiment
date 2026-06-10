@@ -3,8 +3,31 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useConversations } from '../hooks/useConversations';
 import { useToast } from '../hooks/useToast';
-import { type Conversation, createConversation, deleteConversation } from '../lib/api';
+import {
+  type Conversation,
+  type Video,
+  createConversation,
+  deleteConversation,
+  getVideos,
+} from '../lib/api';
 import { VideoExplorer } from './VideoExplorer';
+
+// ── Date-range presets ───────────────────────────────────────────
+// Compute with native Date math (no date library, per scope). Returns an ISO
+// `from` (start) and `to` (end) — undefined means "unbounded on that side".
+type DatePreset = { dateFrom?: string; dateTo?: string };
+
+function presetThisWeek(): DatePreset {
+  const from = new Date();
+  from.setDate(from.getDate() - 7);
+  return { dateFrom: from.toISOString() };
+}
+
+function presetLastMonth(): DatePreset {
+  const from = new Date();
+  from.setMonth(from.getMonth() - 1);
+  return { dateFrom: from.toISOString() };
+}
 
 // ── Relative time helper ─────────────────────────────────────────
 function formatRelativeTime(dateStr: string): string {
@@ -413,8 +436,21 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
-  const { conversations, loading, refetch, rename, filteredConversations } =
-    useConversations(debouncedQuery);
+  // ── Date / video filters (issue #294) ──
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [videoId, setVideoId] = useState('');
+  const [videos, setVideos] = useState<Video[]>([]);
+  const { conversations, loading, refetch, rename, filteredConversations } = useConversations(
+    debouncedQuery,
+    {
+      dateFrom: dateFrom || undefined,
+      dateTo: dateTo || undefined,
+      videoId: videoId || undefined,
+    },
+  );
+  const filtersActive = !!(dateFrom || dateTo || videoId);
   const { user, logout } = useAuth();
   const [creatingNew, setCreatingNew] = useState(false);
   const [newChatError, setNewChatError] = useState<string | null>(null);
@@ -430,6 +466,27 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
     const timer = setTimeout(() => setDebouncedQuery(searchQuery), 250);
     return () => clearTimeout(timer);
   }, [searchQuery]);
+
+  // Load the video list once to populate the filter dropdown (issue #294).
+  useEffect(() => {
+    let cancelled = false;
+    getVideos()
+      .then((v) => {
+        if (!cancelled) setVideos(v);
+      })
+      .catch(() => {
+        // Non-fatal: the video filter dropdown just stays empty.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const clearFilters = () => {
+    setDateFrom('');
+    setDateTo('');
+    setVideoId('');
+  };
 
   // Store refetch in the shared ref so ChatArea can trigger it
   useEffect(() => {
@@ -601,6 +658,187 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
           />
         </div>
 
+        {/* ── Filters (date range + video) — issue #294 ── */}
+        <div style={{ padding: '0 12px 8px' }}>
+          <button
+            onClick={() => setFiltersOpen((o) => !o)}
+            aria-expanded={filtersOpen}
+            className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              background: 'transparent',
+              border: 'none',
+              color: filtersActive ? '#3b82f6' : '#94a3b8',
+              cursor: 'pointer',
+              fontSize: 12,
+              padding: '2px 0',
+            }}
+          >
+            <span>{filtersOpen ? '▾' : '▸'}</span>
+            Filters
+            {filtersActive && (
+              <span
+                style={{
+                  fontSize: 11,
+                  background: 'rgba(59,130,246,0.2)',
+                  color: '#3b82f6',
+                  borderRadius: 6,
+                  padding: '0 6px',
+                }}
+              >
+                active
+              </span>
+            )}
+          </button>
+
+          {filtersOpen && (
+            <div
+              style={{
+                marginTop: 8,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+                padding: 10,
+                background: '#1e293b',
+                border: '1px solid #334155',
+                borderRadius: 8,
+              }}
+            >
+              {/* Date presets */}
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {(
+                  [
+                    ['This week', presetThisWeek],
+                    ['Last month', presetLastMonth],
+                  ] as const
+                ).map(([label, fn]) => (
+                  <button
+                    key={label}
+                    onClick={() => {
+                      const { dateFrom: f, dateTo: t } = fn();
+                      setDateFrom(f ? f.slice(0, 10) : '');
+                      setDateTo(t ? t.slice(0, 10) : '');
+                    }}
+                    className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+                    style={{
+                      background: 'transparent',
+                      border: '1px solid #334155',
+                      borderRadius: 6,
+                      color: '#94a3b8',
+                      cursor: 'pointer',
+                      fontSize: 12,
+                      padding: '4px 8px',
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+                <button
+                  onClick={() => {
+                    setDateFrom('');
+                    setDateTo('');
+                  }}
+                  className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid #334155',
+                    borderRadius: 6,
+                    color: '#94a3b8',
+                    cursor: 'pointer',
+                    fontSize: 12,
+                    padding: '4px 8px',
+                  }}
+                >
+                  All time
+                </button>
+              </div>
+
+              {/* Custom date range */}
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <input
+                  type="date"
+                  aria-label="From date"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    padding: '5px 8px',
+                    borderRadius: 6,
+                    background: '#0f172a',
+                    border: '1px solid #334155',
+                    color: '#f1f5f9',
+                    fontSize: 12,
+                    outline: 'none',
+                  }}
+                />
+                <span style={{ color: '#475569', fontSize: 12 }}>–</span>
+                <input
+                  type="date"
+                  aria-label="To date"
+                  value={dateTo}
+                  onChange={(e) => setDateTo(e.target.value)}
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    padding: '5px 8px',
+                    borderRadius: 6,
+                    background: '#0f172a',
+                    border: '1px solid #334155',
+                    color: '#f1f5f9',
+                    fontSize: 12,
+                    outline: 'none',
+                  }}
+                />
+              </div>
+
+              {/* Video filter */}
+              <select
+                aria-label="Filter by video"
+                value={videoId}
+                onChange={(e) => setVideoId(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '6px 8px',
+                  borderRadius: 6,
+                  background: '#0f172a',
+                  border: '1px solid #334155',
+                  color: '#f1f5f9',
+                  fontSize: 12,
+                  outline: 'none',
+                }}
+              >
+                <option value="">All videos</option>
+                {videos.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.title}
+                  </option>
+                ))}
+              </select>
+
+              {filtersActive && (
+                <button
+                  onClick={clearFilters}
+                  className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+                  style={{
+                    alignSelf: 'flex-start',
+                    background: 'transparent',
+                    border: 'none',
+                    color: '#3b82f6',
+                    cursor: 'pointer',
+                    fontSize: 12,
+                    padding: 0,
+                  }}
+                >
+                  Clear filters
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
         {/* ── Conversation list ── */}
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {loading ? (
@@ -630,7 +868,9 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
               >
                 <path d="M6,4 L30,4 A2,2 0 0,1 32,6 L32,24 A2,2 0 0,1 30,26 L10,26 L4,32 L4,6 A2,2 0 0,1 6,4 Z" />
               </svg>
-              {debouncedQuery.trim() ? (
+              {filtersActive ? (
+                <p style={{ margin: 0, fontSize: 13 }}>No conversations match these filters</p>
+              ) : debouncedQuery.trim() ? (
                 <p style={{ margin: 0, fontSize: 13 }}>
                   No matches for <strong style={{ color: '#94a3b8' }}>"{debouncedQuery}"</strong>
                 </p>
