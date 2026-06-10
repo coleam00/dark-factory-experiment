@@ -614,3 +614,124 @@ describe('sources event — hook state via renderHook', () => {
     expect(onComplete).toHaveBeenCalledWith(expect.objectContaining({ sources: [] }));
   });
 });
+
+describe('mid-stream {"error"} payload — issue #244', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('does not call onComplete and throws the server error', async () => {
+    const sseChunks = [
+      'data: "Partial answer"\n\n',
+      'data: {"error":"upstream failed"}\n\n',
+      // Content after the error must not resurrect the stream as a success
+      'data: " more text"\n\n',
+      'data: [DONE]\n\n',
+    ];
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: makeSseStream(sseChunks),
+      }),
+    );
+
+    const onComplete = vi.fn();
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await act(async () => {
+      await expect(result.current.startStream('conv-1', 'hi', onComplete)).rejects.toThrow(
+        'upstream failed',
+      );
+    });
+
+    expect(onComplete).not.toHaveBeenCalled();
+  });
+
+  it('stops reading promptly — does not drain the stream past the error payload', async () => {
+    // The chunk after the error is gated behind a promise that is never released.
+    // If the reader loop kept draining after the error (the old bug), startStream
+    // would block on reader.read() forever and this test would time out.
+    const gate = new Promise<void>(() => {});
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const enc = new TextEncoder();
+        controller.enqueue(enc.encode('data: "Partial answer"\n\n'));
+        controller.enqueue(enc.encode('data: {"error":"upstream failed"}\n\n'));
+        await gate;
+        controller.enqueue(enc.encode('data: [DONE]\n\n'));
+        controller.close();
+      },
+    });
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: stream,
+      }),
+    );
+
+    const onComplete = vi.fn();
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await act(async () => {
+      await expect(result.current.startStream('conv-1', 'hi', onComplete)).rejects.toThrow(
+        'upstream failed',
+      );
+    });
+
+    expect(onComplete).not.toHaveBeenCalled();
+  });
+
+  it('finally still resets all streaming state after a mid-stream error', async () => {
+    const sseChunks = ['data: "Partial"\n\n', 'data: {"error":"boom"}\n\n'];
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: makeSseStream(sseChunks),
+      }),
+    );
+
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await act(async () => {
+      await expect(result.current.startStream('conv-1', 'hi', vi.fn())).rejects.toThrow('boom');
+    });
+
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.streamingContent).toBe('');
+    expect(result.current.streamingSources).toHaveLength(0);
+    expect(result.current.streamingStatus).toBeNull();
+  });
+
+  it('uses the default error message when the error payload is unparseable', async () => {
+    const sseChunks = ['data: {"error"\n\n'];
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: makeSseStream(sseChunks),
+      }),
+    );
+
+    const onComplete = vi.fn();
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await act(async () => {
+      await expect(result.current.startStream('conv-1', 'hi', onComplete)).rejects.toThrow(
+        'Stream error from server',
+      );
+    });
+
+    expect(onComplete).not.toHaveBeenCalled();
+  });
+});
