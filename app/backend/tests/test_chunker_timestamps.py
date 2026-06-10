@@ -55,6 +55,32 @@ class TestChunkVideoTimestamped:
         # Should not produce any chunks from the empty segment
         assert all("Real content" in c["content"] or "Real content" in c["snippet"] for c in result)
 
+    def test_zero_duration_segment_does_not_collapse_timestamps(self) -> None:
+        """A zero-duration segment that splits into multiple sub-chunks keeps the
+        original [start_s, end_s] bounds instead of collapsing to a zero-width span.
+
+        The final transcript segment can have end == start (see _parse_segments).
+        When such a segment is long enough to split, the even-distribution branch
+        must be skipped (duration <= 0) so timestamps are not all pinned to the
+        same instant by a step of 0.
+        """
+        start_s = 42.0
+        # Long, varied text to push HybridChunker into producing >1 sub-chunk.
+        text = " ".join(
+            f"Sentence number {i} describes a distinct topic worth retrieving and citing."
+            for i in range(200)
+        )
+        segments = [{"start": start_s, "end": start_s, "text": text}]
+        result, _ = chunk_video_timestamped(segments)
+
+        assert len(result) >= 1
+        # Every chunk retains the original equal bounds; none received a distributed
+        # value, and the end is never before the start.
+        for chunk in result:
+            assert chunk["start_seconds"] == start_s
+            assert chunk["end_seconds"] == start_s
+            assert chunk["end_seconds"] >= chunk["start_seconds"]
+
 
 class TestChunkVideoFallback:
     def test_produces_monotonic_timestamps(self) -> None:
