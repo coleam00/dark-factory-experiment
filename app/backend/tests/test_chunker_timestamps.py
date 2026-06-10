@@ -66,6 +66,22 @@ class TestChunkVideoTimestamped:
             assert chunk["start_seconds"] == 120.0
             assert chunk["end_seconds"] == 120.0
 
+    def test_negative_duration_segment_keeps_original_boundaries(self) -> None:
+        """A segment where end < start (inverted) keeps [start, end] on every sub-chunk.
+
+        With the old buggy code, step = (end-start)/N < 0, so each sub-chunk would
+        receive a different end_seconds value (decreasing). This test fails with the
+        bug and passes with the fix, making it the true regression guard.
+        """
+        long_text = " ".join(f"sentence {i} about topic {i}." for i in range(400))
+        segments = [{"start": 120.0, "end": 110.0, "text": long_text}]
+        result, _ = chunk_video_timestamped(segments)
+
+        assert len(result) > 1, "precondition: text must be long enough to split"
+        for chunk in result:
+            assert chunk["start_seconds"] == 120.0
+            assert chunk["end_seconds"] == 110.0
+
     def test_positive_duration_segment_still_distributes(self) -> None:
         """Positive-duration segments still get evenly redistributed timestamps."""
         long_text = " ".join(f"sentence {i} about topic {i}." for i in range(400))
