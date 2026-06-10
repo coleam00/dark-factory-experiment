@@ -8,6 +8,8 @@ Verifies:
   - chunk_video_fallback evenly distributes estimated duration across chunks
 """
 
+import pytest
+
 from backend.rag.chunker import chunk_video_fallback, chunk_video_timestamped
 
 
@@ -54,6 +56,46 @@ class TestChunkVideoTimestamped:
         result, _ = chunk_video_timestamped(segments)
         # Should not produce any chunks from the empty segment
         assert all("Real content" in c["content"] or "Real content" in c["snippet"] for c in result)
+
+    def test_zero_duration_segment_splitting_keeps_original_boundary(self) -> None:
+        """A zero-duration segment that splits keeps the original boundary on every sub-chunk."""
+        long_text = " ".join(f"word{i}" for i in range(1500))
+        segments = [{"start": 120.0, "end": 120.0, "text": long_text}]
+        result, _ = chunk_video_timestamped(segments)
+
+        # The split must actually happen for the test to exercise the bug
+        assert len(result) > 1
+        for chunk in result:
+            assert chunk["start_seconds"] == 120.0
+            assert chunk["end_seconds"] == 120.0
+        # Multiple distinct sub-chunks were produced from the one segment
+        contents = [c["content"] for c in result]
+        assert len(set(contents)) == len(contents)
+
+    def test_negative_duration_segment_keeps_original_boundary(self) -> None:
+        """A malformed end < start segment skips redistribution entirely."""
+        long_text = " ".join(f"word{i}" for i in range(1500))
+        segments = [{"start": 120.0, "end": 100.0, "text": long_text}]
+        result, _ = chunk_video_timestamped(segments)
+
+        assert len(result) > 1
+        for chunk in result:
+            assert chunk["start_seconds"] == 120.0
+            assert chunk["end_seconds"] == 100.0
+
+    def test_positive_duration_segment_distributes_evenly(self) -> None:
+        """A real-duration segment still distributes timestamps evenly across sub-chunks."""
+        long_text = " ".join(f"word{i}" for i in range(1500))
+        segments = [{"start": 0.0, "end": 100.0, "text": long_text}]
+        result, _ = chunk_video_timestamped(segments)
+
+        assert len(result) > 1
+        assert result[0]["start_seconds"] == pytest.approx(0.0)
+        assert result[-1]["end_seconds"] == pytest.approx(100.0)
+        for i in range(len(result) - 1):
+            assert result[i]["end_seconds"] == pytest.approx(result[i + 1]["start_seconds"])
+        for chunk in result:
+            assert chunk["end_seconds"] > chunk["start_seconds"]
 
 
 class TestChunkVideoFallback:
