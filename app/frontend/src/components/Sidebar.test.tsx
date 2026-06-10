@@ -59,6 +59,8 @@ describe('Sidebar handleNewChat', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     navigateMock.mockReset();
+    // Sidebar fetches the video-filter dropdown options on mount (issue #294)
+    vi.spyOn(api, 'getVideos').mockResolvedValue([]);
   });
 
   describe('guard logic for empty conversations', () => {
@@ -288,6 +290,8 @@ describe('Sidebar logout', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     navigateMock.mockReset();
+    // Sidebar fetches the video-filter dropdown options on mount (issue #294)
+    vi.spyOn(api, 'getVideos').mockResolvedValue([]);
   });
 
   it('shows the user email and a Log out button when authed', async () => {

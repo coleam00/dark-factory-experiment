@@ -3,8 +3,40 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useConversations } from '../hooks/useConversations';
 import { useToast } from '../hooks/useToast';
-import { type Conversation, createConversation, deleteConversation } from '../lib/api';
+import {
+  type Conversation,
+  type Video,
+  createConversation,
+  deleteConversation,
+  getVideos,
+} from '../lib/api';
 import { VideoExplorer } from './VideoExplorer';
+
+// ── Date helpers for filter presets ──────────────────────────────
+type DatePreset = 'all' | 'week' | 'month' | 'custom';
+
+function toISODate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/** Start of the current ISO week (Monday) as YYYY-MM-DD. */
+function startOfThisWeek(): string {
+  const now = new Date();
+  const sinceMonday = (now.getDay() + 6) % 7;
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - sinceMonday);
+  return toISODate(monday);
+}
+
+/** 30 days ago as YYYY-MM-DD. */
+function thirtyDaysAgo(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 30);
+  return toISODate(d);
+}
 
 // ── Relative time helper ─────────────────────────────────────────
 function formatRelativeTime(dateStr: string): string {
@@ -413,8 +445,34 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
-  const { conversations, loading, refetch, rename, filteredConversations } =
-    useConversations(debouncedQuery);
+  const [datePreset, setDatePreset] = useState<DatePreset>('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [videoId, setVideoId] = useState('');
+  const [videos, setVideos] = useState<Video[]>([]);
+
+  // Presets resolve to a date_from client-side; custom uses both bounds.
+  const effectiveDateFrom =
+    datePreset === 'week'
+      ? startOfThisWeek()
+      : datePreset === 'month'
+        ? thirtyDaysAgo()
+        : datePreset === 'custom'
+          ? dateFrom
+          : '';
+  const effectiveDateTo = datePreset === 'custom' ? dateTo : '';
+
+  const { conversations, loading, refetch, rename, filteredConversations } = useConversations({
+    q: debouncedQuery.trim() || undefined,
+    date_from: effectiveDateFrom || undefined,
+    date_to: effectiveDateTo || undefined,
+    video_id: videoId || undefined,
+  });
+  const hasActiveFilters =
+    debouncedQuery.trim() !== '' ||
+    effectiveDateFrom !== '' ||
+    effectiveDateTo !== '' ||
+    videoId !== '';
   const { user, logout } = useAuth();
   const [creatingNew, setCreatingNew] = useState(false);
   const [newChatError, setNewChatError] = useState<string | null>(null);
@@ -430,6 +488,21 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
     const timer = setTimeout(() => setDebouncedQuery(searchQuery), 250);
     return () => clearTimeout(timer);
   }, [searchQuery]);
+
+  // Populate the video filter dropdown once on mount
+  useEffect(() => {
+    let cancelled = false;
+    getVideos()
+      .then((vids) => {
+        if (!cancelled) setVideos(vids);
+      })
+      .catch(() => {
+        // Dropdown stays empty ("All videos" only) — filtering by video is unavailable
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Store refetch in the shared ref so ChatArea can trigger it
   useEffect(() => {
@@ -601,6 +674,105 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
           />
         </div>
 
+        {/* ── Date & video filters (issue #294) ── */}
+        <div style={{ padding: '0 12px 8px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <select
+            value={datePreset}
+            onChange={(e) => {
+              const preset = e.target.value as DatePreset;
+              setDatePreset(preset);
+              if (preset !== 'custom') {
+                setDateFrom('');
+                setDateTo('');
+              }
+            }}
+            aria-label="Filter by date"
+            className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+            style={{
+              width: '100%',
+              padding: '7px 10px',
+              borderRadius: 8,
+              background: '#1e293b',
+              border: '1px solid #334155',
+              color: '#f1f5f9',
+              fontSize: 13,
+              outline: 'none',
+            }}
+          >
+            <option value="all">All time</option>
+            <option value="week">This week</option>
+            <option value="month">Last month</option>
+            <option value="custom">Custom range</option>
+          </select>
+
+          {datePreset === 'custom' && (
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                aria-label="From date"
+                className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  padding: '6px 8px',
+                  borderRadius: 8,
+                  background: '#1e293b',
+                  border: '1px solid #334155',
+                  color: '#f1f5f9',
+                  fontSize: 12,
+                  outline: 'none',
+                  colorScheme: 'dark',
+                }}
+              />
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                aria-label="To date"
+                className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  padding: '6px 8px',
+                  borderRadius: 8,
+                  background: '#1e293b',
+                  border: '1px solid #334155',
+                  color: '#f1f5f9',
+                  fontSize: 12,
+                  outline: 'none',
+                  colorScheme: 'dark',
+                }}
+              />
+            </div>
+          )}
+
+          <select
+            value={videoId}
+            onChange={(e) => setVideoId(e.target.value)}
+            aria-label="Filter by video"
+            className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+            style={{
+              width: '100%',
+              padding: '7px 10px',
+              borderRadius: 8,
+              background: '#1e293b',
+              border: '1px solid #334155',
+              color: '#f1f5f9',
+              fontSize: 13,
+              outline: 'none',
+            }}
+          >
+            <option value="">All videos</option>
+            {videos.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.title}
+              </option>
+            ))}
+          </select>
+        </div>
+
         {/* ── Conversation list ── */}
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {loading ? (
@@ -630,10 +802,14 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
               >
                 <path d="M6,4 L30,4 A2,2 0 0,1 32,6 L32,24 A2,2 0 0,1 30,26 L10,26 L4,32 L4,6 A2,2 0 0,1 6,4 Z" />
               </svg>
-              {debouncedQuery.trim() ? (
-                <p style={{ margin: 0, fontSize: 13 }}>
-                  No matches for <strong style={{ color: '#94a3b8' }}>"{debouncedQuery}"</strong>
-                </p>
+              {hasActiveFilters ? (
+                debouncedQuery.trim() ? (
+                  <p style={{ margin: 0, fontSize: 13 }}>
+                    No matches for <strong style={{ color: '#94a3b8' }}>"{debouncedQuery}"</strong>
+                  </p>
+                ) : (
+                  <p style={{ margin: 0, fontSize: 13 }}>No conversations match your filters</p>
+                )
               ) : (
                 <>
                   <p style={{ margin: 0, fontSize: 13 }}>No conversations yet</p>

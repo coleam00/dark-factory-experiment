@@ -451,9 +451,51 @@ async def get_conversation(conv_id: str, user_id: str) -> dict | None:
 
 
 async def list_conversations(user_id: str) -> list[dict]:
+    return await list_conversations_filtered(user_id)
+
+
+async def list_conversations_filtered(
+    user_id: str,
+    q: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    video_id: str | None = None,
+) -> list[dict]:
+    """List a user's conversations with optional additive filters (issue #294).
+
+    All filters are AND-combined on top of the mandatory `user_id` ownership
+    guard, which is always `$1` and never optional:
+    - q: case-insensitive title substring (ILIKE).
+    - date_from / date_to: bounds on `updated_at` ("when you last interacted"),
+      as ISO date strings. Both are inclusive calendar days: `date_from` is an
+      inclusive lower bound (>= midnight of that day) and `date_to` is treated
+      as an inclusive day by comparing `< date_to + 1 day`.
+    - video_id: only conversations with at least one message citing the video,
+      via JSONB containment over `messages.sources` (GIN-indexed, migration 0006).
+
+    Ordering is always `updated_at DESC` (newest first).
+    """
+    clauses = ["c.user_id = $1"]
+    args: list[object] = [user_id]
+    if q is not None and q != "":
+        args.append(f"%{q}%")
+        clauses.append(f"c.title ILIKE ${len(args)}")
+    if date_from:
+        args.append(date_from)
+        clauses.append(f"c.updated_at >= ${len(args)}::timestamptz")
+    if date_to:
+        args.append(date_to)
+        clauses.append(f"c.updated_at < (${len(args)}::timestamptz + interval '1 day')")
+    if video_id:
+        args.append(json.dumps([{"video_id": video_id}]))
+        clauses.append(
+            "EXISTS (SELECT 1 FROM messages m "
+            f"WHERE m.conversation_id = c.id AND m.sources @> ${len(args)}::jsonb)"
+        )
+    where = " AND ".join(clauses)
     async with _acquire() as conn:
         rows = await conn.fetch(
-            """
+            f"""
             SELECT c.*,
                    (SELECT content
                     FROM messages
@@ -461,10 +503,10 @@ async def list_conversations(user_id: str) -> list[dict]:
                     ORDER BY created_at DESC
                     LIMIT 1) AS preview
             FROM conversations c
-            WHERE c.user_id = $1
+            WHERE {where}
             ORDER BY c.updated_at DESC
             """,
-            user_id,
+            *args,
         )
     return [dict(r) for r in rows]
 

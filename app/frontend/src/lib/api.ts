@@ -143,7 +143,27 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 // Conversations
-export const getConversations = () => request<Conversation[]>('/conversations');
+export interface ConversationFilters {
+  /** Case-insensitive title substring match */
+  q?: string;
+  /** Inclusive lower bound on updated_at, ISO YYYY-MM-DD */
+  date_from?: string;
+  /** Inclusive upper bound on updated_at (calendar day), ISO YYYY-MM-DD */
+  date_to?: string;
+  /** Only conversations with a message citing this video */
+  video_id?: string;
+}
+
+export const getConversations = (filters?: ConversationFilters) => {
+  const params = new URLSearchParams();
+  if (filters) {
+    for (const [key, value] of Object.entries(filters)) {
+      if (value) params.set(key, value);
+    }
+  }
+  const qs = params.toString();
+  return request<Conversation[]>(`/conversations${qs ? `?${qs}` : ''}`);
+};
 export const searchConversations = (q: string) =>
   request<Conversation[]>(`/conversations/search?q=${encodeURIComponent(q)}`);
 export const createConversation = () =>

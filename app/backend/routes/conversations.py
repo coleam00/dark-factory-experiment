@@ -26,8 +26,27 @@ class ConversationRename(BaseModel):
 
 
 @router.get("/conversations")
-async def list_conversations(current_user: dict[str, Any] = Depends(get_current_user)):
-    return await repository.list_conversations(user_id=str(current_user["id"]))
+async def list_conversations(
+    q: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    video_id: str | None = None,
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
+    """List the current user's conversations, newest first.
+
+    Optional filters compose with AND semantics (issue #294): `q` matches the
+    title case-insensitively, `date_from`/`date_to` bound `updated_at` as
+    inclusive calendar days, and `video_id` keeps conversations with at least
+    one message citing that video.
+    """
+    return await repository.list_conversations_filtered(
+        user_id=str(current_user["id"]),
+        q=q,
+        date_from=date_from,
+        date_to=date_to,
+        video_id=video_id,
+    )
 
 
 @router.post("/conversations", status_code=201)

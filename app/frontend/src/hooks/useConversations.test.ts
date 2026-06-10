@@ -132,22 +132,57 @@ describe('useConversations', () => {
     });
   });
 
-  describe('client-side search', () => {
-    it('filters conversations by title case-insensitively', async () => {
-      const conversations = [
-        { id: '1', title: 'Python Tutorial', created_at: '', updated_at: '', preview: 'Hello' },
-        { id: '2', title: 'JavaScript Guide', created_at: '', updated_at: '', preview: 'Hi' },
-        { id: '3', title: 'python advanced', created_at: '', updated_at: '', preview: 'Hey' },
-      ];
-      vi.spyOn(api, 'getConversations').mockResolvedValue(conversations as api.Conversation[]);
+  describe('server-side filters (issue #294)', () => {
+    it('passes the filter object through to getConversations', async () => {
+      const spy = vi.spyOn(api, 'getConversations').mockResolvedValue([] as api.Conversation[]);
 
-      const { result } = renderHook(() => useConversations('python'));
+      const filters = { q: 'python', date_from: '2026-06-01', video_id: 'vid-1' };
+      const { result } = renderHook(() => useConversations(filters));
 
-      await waitFor(() => expect(result.current.filteredConversations).toHaveLength(2));
-      expect(result.current.filteredConversations.map((c) => c.id)).toEqual(['1', '3']);
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(spy).toHaveBeenCalledWith(filters);
     });
 
-    it('excludes empty conversations from search results', async () => {
+    it('calls getConversations with an empty object when no filters are given', async () => {
+      const spy = vi.spyOn(api, 'getConversations').mockResolvedValue([] as api.Conversation[]);
+
+      const { result } = renderHook(() => useConversations());
+
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(spy).toHaveBeenCalledWith({});
+    });
+
+    it('refetches when a filter value changes', async () => {
+      const spy = vi.spyOn(api, 'getConversations').mockResolvedValue([] as api.Conversation[]);
+
+      const { result, rerender } = renderHook(({ filters }) => useConversations(filters), {
+        initialProps: { filters: { q: 'python' } as api.ConversationFilters },
+      });
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(spy).toHaveBeenCalledTimes(1);
+
+      rerender({ filters: { q: 'python', video_id: 'vid-1' } });
+
+      await waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
+      expect(spy).toHaveBeenLastCalledWith({ q: 'python', video_id: 'vid-1' });
+    });
+
+    it('does not refetch when an identical filter object is passed on re-render', async () => {
+      const spy = vi.spyOn(api, 'getConversations').mockResolvedValue([] as api.Conversation[]);
+
+      const { result, rerender } = renderHook(({ filters }) => useConversations(filters), {
+        initialProps: { filters: { q: 'python' } as api.ConversationFilters },
+      });
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      // Fresh object, same values — must not trigger a second fetch.
+      rerender({ filters: { q: 'python' } });
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(spy).toHaveBeenCalledTimes(1);
+    });
+
+    it('still excludes preview === null rows from server-filtered results', async () => {
       const conversations = [
         { id: '1', title: 'New Conversation', created_at: '', updated_at: '', preview: null },
         {
@@ -160,59 +195,10 @@ describe('useConversations', () => {
       ];
       vi.spyOn(api, 'getConversations').mockResolvedValue(conversations as api.Conversation[]);
 
-      const { result } = renderHook(() => useConversations('New'));
+      const { result } = renderHook(() => useConversations({ q: 'New' }));
 
       await waitFor(() => expect(result.current.filteredConversations).toHaveLength(1));
       expect(result.current.filteredConversations[0].id).toBe('2');
-    });
-
-    it('returns full list when query is empty', async () => {
-      const conversations = [
-        { id: '1', title: 'Chat A', created_at: '', updated_at: '', preview: 'Hello' },
-        { id: '2', title: 'Chat B', created_at: '', updated_at: '', preview: 'World' },
-      ];
-      vi.spyOn(api, 'getConversations').mockResolvedValue(conversations as api.Conversation[]);
-
-      const { result } = renderHook(() => useConversations(''));
-
-      await waitFor(() => expect(result.current.filteredConversations).toHaveLength(2));
-    });
-
-    it('trims whitespace-only queries and returns full list', async () => {
-      const conversations = [
-        { id: '1', title: 'Chat A', created_at: '', updated_at: '', preview: 'Hello' },
-      ];
-      vi.spyOn(api, 'getConversations').mockResolvedValue(conversations as api.Conversation[]);
-
-      const { result } = renderHook(() => useConversations('   '));
-
-      await waitFor(() => expect(result.current.filteredConversations).toHaveLength(1));
-    });
-
-    it('returns empty list when query has no matches', async () => {
-      const conversations = [
-        { id: '1', title: 'Python Tutorial', created_at: '', updated_at: '', preview: 'Hello' },
-      ];
-      vi.spyOn(api, 'getConversations').mockResolvedValue(conversations as api.Conversation[]);
-
-      const { result } = renderHook(() => useConversations('rust'));
-
-      // Wait for the underlying load to settle, then assert the filter returns []
-      await waitFor(() => expect(result.current.loading).toBe(false));
-      expect(result.current.filteredConversations).toHaveLength(0);
-    });
-
-    it('trims leading/trailing whitespace from non-empty queries', async () => {
-      const conversations = [
-        { id: '1', title: 'Python Tutorial', created_at: '', updated_at: '', preview: 'Hello' },
-        { id: '2', title: 'JavaScript', created_at: '', updated_at: '', preview: 'Hi' },
-      ];
-      vi.spyOn(api, 'getConversations').mockResolvedValue(conversations as api.Conversation[]);
-
-      const { result } = renderHook(() => useConversations('  python  '));
-
-      await waitFor(() => expect(result.current.filteredConversations).toHaveLength(1));
-      expect(result.current.filteredConversations[0].id).toBe('1');
     });
   });
 });
