@@ -352,7 +352,7 @@ interface ConvLocationState {
 export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaProps) {
   const navigate = useNavigate();
   const location = useLocation() as Location & { state: ConvLocationState | null };
-  const { messages, setMessages, loading, error, notFound, conversation } = useMessages(
+  const { messages, setMessages, loading, error, notFound, conversation, setConversation } = useMessages(
     conversationId || null,
   );
   const {
@@ -538,13 +538,12 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
       }
 
       // If conversation exists but is unscoped and user has picked a pending scope, set it now
+      // before the message is sent so the server applies the scope to this turn.
       if (conversation && !conversation.video_scope && pendingScope && pendingScope.length > 0) {
         try {
           await setConversationScope(conversationId, pendingScope);
           setPendingScope(null);
-          // Refresh conversation so the scope chip renders
-          window.location.reload();
-          return;
+          setConversation({ ...conversation, video_scope: pendingScope });
         } catch (e) {
           console.error(
             '[ChatArea] Failed to set conversation scope:',

@@ -44,5 +44,5 @@ export function useMessages(conversationId: string | null) {
       .finally(() => setLoading(false));
   }, [conversationId]);
 
-  return { messages, setMessages, loading, error, notFound, conversation };
+  return { messages, setMessages, loading, error, notFound, conversation, setConversation };
 }
