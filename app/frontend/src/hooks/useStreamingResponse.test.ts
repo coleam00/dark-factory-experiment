@@ -439,6 +439,91 @@ describe('status event SSE parsing — hook state transitions', () => {
   });
 });
 
+describe('startStream — regenerate option (issue #280)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('POSTs to the /regenerate endpoint with no body when { regenerate: true }', async () => {
+    const sseChunks = ['data: "Fresh answer"\n\n', 'data: [DONE]\n\n'];
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: makeSseStream(sseChunks),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const onComplete = vi.fn();
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await act(async () => {
+      await result.current.startStream('conv-1', 'last question', onComplete, {
+        regenerate: true,
+      });
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/conversations/conv-1/messages/regenerate');
+    expect(init.method).toBe('POST');
+    expect(init.body).toBeUndefined();
+    // SSE parsing is identical to a normal send
+    expect(onComplete).toHaveBeenCalledWith(
+      expect.objectContaining({ fullText: 'Fresh answer' }),
+    );
+  });
+
+  it('keeps the normal /messages endpoint and body when option is omitted', async () => {
+    const sseChunks = ['data: "Answer"\n\n', 'data: [DONE]\n\n'];
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: makeSseStream(sseChunks),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await act(async () => {
+      await result.current.startStream('conv-1', 'hello', vi.fn());
+    });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/conversations/conv-1/messages');
+    expect(init.body).toBe(JSON.stringify({ content: 'hello' }));
+  });
+
+  it('parses the sources event identically on a regenerate stream', async () => {
+    const sseChunks = [
+      `event: sources\ndata: ${JSON.stringify([mockCitation])}\n\n`,
+      'data: "Fresh"\n\n',
+      'data: [DONE]\n\n',
+    ];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: makeSseStream(sseChunks),
+      }),
+    );
+
+    const onComplete = vi.fn();
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await act(async () => {
+      await result.current.startStream('conv-1', 'q', onComplete, { regenerate: true });
+    });
+
+    expect(onComplete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fullText: 'Fresh',
+        sources: [expect.objectContaining({ chunk_id: 'chunk-1' })],
+      }),
+    );
+  });
+});
+
 describe('abortStream', () => {
   beforeEach(() => {
     vi.clearAllMocks();

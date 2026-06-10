@@ -47,6 +47,7 @@ export function useStreamingResponse(conversationId: string | null) {
       conversationId: string,
       userMessage: string,
       onComplete: (result: StreamResult) => void,
+      options?: { regenerate?: boolean },
     ): Promise<void> => {
       setIsStreaming(true);
       setStreamingContent('');
@@ -61,11 +62,15 @@ export function useStreamingResponse(conversationId: string | null) {
         const abortController = new AbortController();
         streamAbortRef.current = abortController;
 
-        const res = await fetch(`/api/conversations/${conversationId}/messages`, {
+        // Regenerate re-runs the last user turn server-side — no body needed.
+        const url = options?.regenerate
+          ? `/api/conversations/${conversationId}/messages/regenerate`
+          : `/api/conversations/${conversationId}/messages`;
+        const res = await fetch(url, {
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content: userMessage }),
+          ...(options?.regenerate ? {} : { body: JSON.stringify({ content: userMessage }) }),
           signal: abortController.signal,
         });
 

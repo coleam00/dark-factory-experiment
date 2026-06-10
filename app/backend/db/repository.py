@@ -603,6 +603,32 @@ async def list_messages(conversation_id: str, user_id: str) -> list[dict]:
     return results
 
 
+async def delete_last_assistant_message(conversation_id: str, user_id: str) -> str | None:
+    """Delete the most recent assistant message in a conversation (owner-scoped).
+
+    Returns the deleted message id, or None if there is no assistant message
+    or the conversation does not belong to the user.
+    """
+    async with _acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            DELETE FROM messages
+            WHERE id = (
+                SELECT m.id FROM messages m
+                JOIN conversations c ON c.id = m.conversation_id
+                WHERE m.conversation_id = $1 AND c.user_id = $2
+                  AND m.role = 'assistant'
+                ORDER BY m.created_at DESC
+                LIMIT 1
+            )
+            RETURNING id
+            """,
+            conversation_id,
+            user_id,
+        )
+    return row["id"] if row else None
+
+
 # ---------------------------------------------------------------------------
 # Channel sync runs
 # ---------------------------------------------------------------------------

@@ -112,6 +112,82 @@ async def create_message(
     if inserted is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
+    return await _stream_assistant_response(conv_id, user_id, current_user, user_content)
+
+
+# ---------------------------------------------------------------------------
+# POST /api/conversations/{conv_id}/messages/regenerate
+# ---------------------------------------------------------------------------
+
+
+@router.post("/conversations/{conv_id}/messages/regenerate")
+async def regenerate_message(
+    conv_id: str,
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
+    """
+    Re-run the conversation's most recent user turn and stream a fresh
+    assistant answer in place of the old one.
+
+    Invariant ordering matches create_message: ownership check → rate-limit
+    check_and_record → mutate. Regeneration counts against the 25 msg/24h
+    cap (MISSION §10 invariant #1), and because the quota is recorded
+    before the stale answer is deleted, an over-cap user cannot use
+    regenerate to bypass the counter.
+    """
+    user_id = str(current_user["id"])
+
+    # 1. Verify conversation exists AND belongs to current user.
+    # 404 (not 403) — don't leak existence of other users' conversations.
+    conv = await repository.get_conversation(conv_id, user_id=user_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # 2. There must be something to regenerate AND the last turn must be an
+    # assistant answer. Read first so we don't burn a quota slot on a no-op.
+    msgs = await repository.list_messages(conv_id, user_id=user_id)
+    if not msgs or msgs[-1]["role"] != "assistant":
+        raise HTTPException(status_code=409, detail="No assistant message to regenerate")
+    last_user = next((m for m in reversed(msgs) if m["role"] == "user"), None)
+    if last_user is None:
+        raise HTTPException(status_code=409, detail="No prior user message to regenerate from")
+
+    # 3. Enforce the 25 msg / user / 24h cap (MISSION §10 invariant #1) —
+    # BEFORE any mutation, so an over-cap user keeps their old answer and
+    # cannot consume OpenRouter budget.
+    try:
+        await rate_limit.check_and_record(user_id)
+    except rate_limit.RateLimitExceeded as exc:
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": "rate_limit_exceeded",
+                "limit": rate_limit.DAILY_MESSAGE_CAP,
+                "window_hours": rate_limit.WINDOW_HOURS,
+                "reset_at": exc.reset_at.isoformat(),
+            },
+        )
+
+    # 4. Drop the stale assistant answer so the history fed to the model
+    # ends at the user's question.
+    await repository.delete_last_assistant_message(conv_id, user_id)
+
+    # 5. Stream a fresh answer.
+    return await _stream_assistant_response(conv_id, user_id, current_user, last_user["content"])
+
+
+async def _stream_assistant_response(
+    conv_id: str,
+    user_id: str,
+    current_user: dict[str, Any],
+    title_seed: str,
+) -> StreamingResponse:
+    """Shared streaming block for create_message and regenerate_message:
+    load history → wire tools → stream SSE → persist the assistant message.
+
+    ``title_seed`` is the user prompt passed to _maybe_set_conversation_title
+    (a no-op once a title is set, so safe for regenerate).
+    """
     # 4. Retrieve conversation history for LLM context
     all_messages = await repository.list_messages(conv_id, user_id=user_id)
     llm_messages = [{"role": m["role"], "content": m["content"]} for m in all_messages]
@@ -293,7 +369,7 @@ async def create_message(
                 # unexpected errors logged but not re-raised (message was saved above).
                 try:
                     await asyncio.shield(
-                        _maybe_set_conversation_title(conv_id, user_id, user_content)
+                        _maybe_set_conversation_title(conv_id, user_id, title_seed)
                     )
                 except asyncio.CancelledError:
                     pass

@@ -574,6 +574,80 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
     handleSend(msg);
   }, [conversationId, location.state, navigate, handleSend]);
 
+  // ── Regenerate the last assistant response (issue #280) ──
+  // Removes the old answer optimistically, streams a fresh one via the
+  // /regenerate endpoint, and restores the old answer on failure (unlike
+  // a normal send, the old message was already removed from view).
+  const handleRegenerate = useCallback(async () => {
+    if (!conversationId || isStreaming) return;
+
+    const lastMsg = messages[messages.length - 1];
+    if (!lastMsg || lastMsg.role !== 'assistant') return;
+    const removedAssistant = lastMsg;
+    const lastUser = [...messages].reverse().find((m) => m.role === 'user');
+    const lastUserContent = lastUser?.content ?? '';
+
+    setInlineError(null);
+    setFailedMessageText(null);
+
+    // Optimistically remove the old answer; the server reconstructs the
+    // conversation context itself, so the text is only needed locally.
+    setMessages((prev) => prev.filter((m) => m.id !== removedAssistant.id));
+    autoScrollRef.current = true;
+    scrollToBottom();
+
+    try {
+      await startStream(
+        conversationId,
+        lastUserContent,
+        ({ fullText, sources }) => {
+          const assistantMsg: MessageType = {
+            id: `temp-assistant-${Date.now()}`,
+            conversation_id: conversationId,
+            role: 'assistant',
+            content: fullText,
+            created_at: new Date().toISOString(),
+            sources: sources.length > 0 ? sources : undefined,
+          };
+          setMessages((prev) => [...prev, assistantMsg]);
+        },
+        { regenerate: true },
+      );
+      // Pull fresh quota counter — regeneration counts against the cap.
+      refreshAuth();
+    } catch (e) {
+      // Restore the optimistically removed answer (it was the last message).
+      setMessages((prev) => [...prev, removedAssistant]);
+
+      // Intentional abort (navigation or user cancel) — restore silently
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        return;
+      }
+
+      if (e instanceof RateLimitError) {
+        const friendly = `You've hit your daily message limit (${e.limit}/day). Resets at ${formatResetTime(e.resetAt)}.`;
+        setInlineError(friendly);
+        setFailedMessageText(null);
+        addToast(friendly, 'error');
+        refreshAuth();
+        return;
+      }
+
+      const errMsg = e instanceof Error ? e.message : 'Failed to regenerate response';
+      setInlineError('Failed to regenerate the response. Please try again.');
+      addToast(errMsg || 'Network error — could not regenerate', 'error');
+    }
+  }, [
+    conversationId,
+    isStreaming,
+    messages,
+    setMessages,
+    startStream,
+    scrollToBottom,
+    addToast,
+    refreshAuth,
+  ]);
+
   // ── Retry failed message — re-attempt the API call with same content ──
   const handleRetry = useCallback(() => {
     if (!failedMessageText) return;
@@ -601,6 +675,12 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
   // before dispatchedInitialRef fires (#205).
   const showEmptyInConversation =
     messages.length === 0 && !inlineError && !isStreaming && !location.state?.initialMessage;
+
+  // Regenerate is only offered on the latest answer, and only when the
+  // conversation actually ends with an assistant message (nothing to
+  // regenerate after a failed send that left a trailing user message).
+  const lastMessage = messages[messages.length - 1];
+  const lastAssistantId = lastMessage?.role === 'assistant' ? lastMessage.id : undefined;
 
   const handleExport = useCallback(() => {
     try {
@@ -715,6 +795,9 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
                   content={msg.content}
                   sources={msg.sources}
                   onCitationClick={handleCitationClick}
+                  onRegenerate={
+                    !isStreaming && msg.id === lastAssistantId ? handleRegenerate : undefined
+                  }
                 />
               ))
             )}
