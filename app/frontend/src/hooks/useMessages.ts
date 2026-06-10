@@ -30,6 +30,7 @@ export function useMessages(conversationId: string | null) {
           title: data.title,
           created_at: data.created_at,
           updated_at: data.updated_at,
+          scoped_video_ids: data.scoped_video_ids,
         });
       })
       .catch((e) => {
@@ -43,5 +44,5 @@ export function useMessages(conversationId: string | null) {
       .finally(() => setLoading(false));
   }, [conversationId]);
 
-  return { messages, setMessages, loading, error, notFound, conversation };
+  return { messages, setMessages, loading, error, notFound, conversation, setConversation };
 }

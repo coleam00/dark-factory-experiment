@@ -10,6 +10,7 @@ import { exportConversationAsMarkdown } from '../lib/exportMarkdown';
 import { ChatInput, type ChatInputHandle } from './ChatInput';
 import { CitationModal } from './CitationModal';
 import { Message } from './Message';
+import { VideoScopePicker } from './VideoScopePicker';
 
 function formatResetTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -292,9 +293,8 @@ interface ConvLocationState {
 export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaProps) {
   const navigate = useNavigate();
   const location = useLocation() as Location & { state: ConvLocationState | null };
-  const { messages, setMessages, loading, error, notFound, conversation } = useMessages(
-    conversationId || null,
-  );
+  const { messages, setMessages, loading, error, notFound, conversation, setConversation } =
+    useMessages(conversationId || null);
   const {
     streamingContent,
     streamingSources,
@@ -325,6 +325,8 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
   const pendingUserMsgIdRef = useRef<string | null>(null);
   // Citation modal state
   const [selectedCitation, setSelectedCitation] = useState<Citation | null>(null);
+  // Video scope picker modal state (issue #279)
+  const [scopeOpen, setScopeOpen] = useState(false);
 
   // ── Auto-scroll logic ──
   // Defer scroll to the next paint cycle so streaming DOM updates are applied first.
@@ -614,6 +616,17 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
     }
   }, [conversation, messages, addToast]);
 
+  // Update local conversation state after the scope is saved so the
+  // indicator reflects the new selection without a refetch.
+  const handleScopeSaved = useCallback(
+    (ids: string[] | null) => {
+      setConversation((prev) => (prev ? { ...prev, scoped_video_ids: ids } : prev));
+    },
+    [setConversation],
+  );
+
+  const scopedCount = conversation?.scoped_video_ids?.length ?? 0;
+
   return (
     <div
       style={{
@@ -638,53 +651,107 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
           position: 'relative',
         }}
       >
-        {/* ── Export button (visible when conversation is active) ── */}
-        {conversation && messages.length > 0 && (
-          <button
-            onClick={handleExport}
-            title="Export conversation as Markdown"
+        {/* ── Top-right actions: video scope + export ── */}
+        {conversation && (
+          <div
             style={{
               position: 'absolute',
               top: 12,
               right: 24,
-              background: '#1e293b',
-              border: '1px solid rgba(255,255,255,0.08)',
-              borderRadius: 7,
-              color: '#94a3b8',
-              cursor: 'pointer',
-              padding: '5px 8px',
               display: 'flex',
               alignItems: 'center',
-              gap: 5,
-              fontSize: 12,
+              gap: 8,
               zIndex: 5,
-              transition: 'background 0.15s, color 0.15s',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = '#1e293b';
-              e.currentTarget.style.color = '#f1f5f9';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = '#1e293b';
-              e.currentTarget.style.color = '#94a3b8';
             }}
           >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 13 13"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.6"
-              strokeLinecap="round"
-              strokeLinejoin="round"
+            {/* Video scope button (issue #279) */}
+            <button
+              onClick={() => setScopeOpen(true)}
+              title="Choose which videos this conversation can draw from"
+              style={{
+                background: '#1e293b',
+                border:
+                  scopedCount > 0
+                    ? '1px solid rgba(59,130,246,0.5)'
+                    : '1px solid rgba(255,255,255,0.08)',
+                borderRadius: 7,
+                color: scopedCount > 0 ? '#60a5fa' : '#94a3b8',
+                cursor: 'pointer',
+                padding: '5px 8px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                fontSize: 12,
+                transition: 'background 0.15s, color 0.15s',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = '#f1f5f9';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = scopedCount > 0 ? '#60a5fa' : '#94a3b8';
+              }}
             >
-              <path d="M2,9 L2,11.5 A0.5,0.5 0 0,0 2.5,12 L10.5,12 A0.5,0.5 0 0,0 11,11.5 L11,9" />
-              <polyline points="6.5,1 6.5,8.5" />
-              <polyline points="3.5,5.5 6.5,8.5 9.5,5.5" />
-            </svg>
-            Export
-          </button>
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 13 13"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <rect x="1" y="2.5" width="11" height="8" rx="1.5" />
+                <polygon points="5.5,5 8.5,6.5 5.5,8" fill="currentColor" stroke="none" />
+              </svg>
+              {scopedCount > 0 ? `Videos: ${scopedCount} selected` : 'Videos: All'}
+            </button>
+
+            {/* Export button */}
+            {messages.length > 0 && (
+              <button
+                onClick={handleExport}
+                title="Export conversation as Markdown"
+                style={{
+                  background: '#1e293b',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  borderRadius: 7,
+                  color: '#94a3b8',
+                  cursor: 'pointer',
+                  padding: '5px 8px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  fontSize: 12,
+                  transition: 'background 0.15s, color 0.15s',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = '#1e293b';
+                  e.currentTarget.style.color = '#f1f5f9';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = '#1e293b';
+                  e.currentTarget.style.color = '#94a3b8';
+                }}
+              >
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 13 13"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M2,9 L2,11.5 A0.5,0.5 0 0,0 2.5,12 L10.5,12 A0.5,0.5 0 0,0 11,11.5 L11,9" />
+                  <polyline points="6.5,1 6.5,8.5" />
+                  <polyline points="3.5,5.5 6.5,8.5 9.5,5.5" />
+                </svg>
+                Export
+              </button>
+            )}
+          </div>
         )}
 
         {showEmpty && <EmptyState onStarterClick={handleStarterClick} />}
@@ -778,6 +845,16 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
       {/* ── Citation modal ── */}
       {selectedCitation && (
         <CitationModal citation={selectedCitation} onClose={() => setSelectedCitation(null)} />
+      )}
+
+      {/* ── Video scope picker (issue #279) ── */}
+      {scopeOpen && conversationId && (
+        <VideoScopePicker
+          conversationId={conversationId}
+          current={conversation?.scoped_video_ids ?? null}
+          onClose={() => setScopeOpen(false)}
+          onSaved={handleScopeSaved}
+        />
       )}
     </div>
   );

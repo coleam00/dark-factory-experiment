@@ -41,6 +41,11 @@ export interface Conversation {
   created_at: string;
   updated_at: string;
   preview?: string | null;
+  /**
+   * Video ids this conversation is scoped to (issue #279). null/undefined
+   * means unscoped — retrieval searches the whole library.
+   */
+  scoped_video_ids?: string[] | null;
 }
 
 export interface Citation {
@@ -156,6 +161,11 @@ export const renameConversation = (id: string, title: string) =>
   request<Conversation>(`/conversations/${id}`, {
     method: 'PATCH',
     body: JSON.stringify({ title }),
+  });
+export const updateConversationScope = (id: string, videoIds: string[] | null) =>
+  request<Conversation>(`/conversations/${id}/scope`, {
+    method: 'PATCH',
+    body: JSON.stringify({ video_ids: videoIds }),
   });
 
 // Videos
