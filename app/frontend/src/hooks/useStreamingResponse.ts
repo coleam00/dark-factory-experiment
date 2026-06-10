@@ -42,10 +42,13 @@ export function useStreamingResponse(conversationId: string | null) {
     }
   }, []);
 
-  const startStream = useCallback(
+  // Shared fetch + SSE-parse loop used by both startStream (normal send) and
+  // regenerateStream (issue #280). `body` is the JSON request body, or null for
+  // the regenerate endpoint which takes no body.
+  const runStream = useCallback(
     async (
-      conversationId: string,
-      userMessage: string,
+      url: string,
+      body: string | null,
       onComplete: (result: StreamResult) => void,
     ): Promise<void> => {
       setIsStreaming(true);
@@ -61,11 +64,11 @@ export function useStreamingResponse(conversationId: string | null) {
         const abortController = new AbortController();
         streamAbortRef.current = abortController;
 
-        const res = await fetch(`/api/conversations/${conversationId}/messages`, {
+        const res = await fetch(url, {
           method: 'POST',
           credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content: userMessage }),
+          headers: body !== null ? { 'Content-Type': 'application/json' } : undefined,
+          body: body ?? undefined,
           signal: abortController.signal,
         });
 
@@ -218,12 +221,36 @@ export function useStreamingResponse(conversationId: string | null) {
     [],
   );
 
+  const startStream = useCallback(
+    (
+      conversationId: string,
+      userMessage: string,
+      onComplete: (result: StreamResult) => void,
+    ): Promise<void> =>
+      runStream(
+        `/api/conversations/${conversationId}/messages`,
+        JSON.stringify({ content: userMessage }),
+        onComplete,
+      ),
+    [runStream],
+  );
+
+  // Regenerate the last assistant message (issue #280). POSTs to the regenerate
+  // endpoint with no body; reuses the shared SSE machinery so the streaming UX
+  // is identical to a normal send.
+  const regenerateStream = useCallback(
+    (conversationId: string, onComplete: (result: StreamResult) => void): Promise<void> =>
+      runStream(`/api/conversations/${conversationId}/messages/regenerate`, null, onComplete),
+    [runStream],
+  );
+
   return {
     streamingContent,
     streamingSources,
     streamingStatus,
     isStreaming,
     startStream,
+    regenerateStream,
     abortStream,
   };
 }

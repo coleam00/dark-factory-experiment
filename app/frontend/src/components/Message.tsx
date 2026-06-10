@@ -15,6 +15,51 @@ interface MessageProps {
   onCitationClick?: (citation: Citation) => void;
   /** Current tool-call status during streaming (ephemeral progress indicator) */
   streamingStatus?: StreamingStatus | null;
+  /** When provided (last assistant message, not streaming), renders a
+   *  "Regenerate" button that re-runs the last query (issue #280). */
+  onRegenerate?: () => void;
+}
+
+// ── Regenerate button (issue #280) ────────────────────────────────
+function RegenerateButton({ onRegenerate }: { onRegenerate: () => void }) {
+  return (
+    <button
+      onClick={onRegenerate}
+      aria-label="Regenerate response"
+      className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+      style={{
+        marginTop: 10,
+        background: 'transparent',
+        border: 'none',
+        cursor: 'pointer',
+        color: '#94a3b8',
+        fontSize: 12,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 5,
+        padding: 0,
+        transition: 'color 0.15s',
+      }}
+      onMouseEnter={(e) => (e.currentTarget.style.color = '#f1f5f9')}
+      onMouseLeave={(e) => (e.currentTarget.style.color = '#94a3b8')}
+    >
+      <svg
+        width="13"
+        height="13"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <polyline points="23 4 23 10 17 10" />
+        <polyline points="1 20 1 14 7 14" />
+        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+      </svg>
+      Regenerate
+    </button>
+  );
 }
 
 // ── Typing indicator (3 pulsing dots) ────────────────────────────
@@ -167,6 +212,7 @@ export function Message({
   sources,
   onCitationClick,
   streamingStatus,
+  onRegenerate,
 }: MessageProps) {
   const isUser = role === 'user';
   const hasSources = !isUser && Array.isArray(sources) && sources.length > 0;
@@ -204,6 +250,7 @@ export function Message({
           <>
             <MarkdownRenderer content={content} />
             {hasSources && <SourceCitations sources={sources} onCitationClick={onCitationClick} />}
+            {onRegenerate && <RegenerateButton onRegenerate={onRegenerate} />}
           </>
         )}
       </div>

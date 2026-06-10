@@ -439,6 +439,63 @@ describe('status event SSE parsing — hook state transitions', () => {
   });
 });
 
+describe('regenerateStream (issue #280)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('POSTs to the regenerate endpoint with no body and parses tokens + sources', async () => {
+    const sseChunks = [
+      `event: sources\ndata: ${JSON.stringify([mockCitation])}\n\n`,
+      'data: "Fresh answer"\n\n',
+      'data: [DONE]\n\n',
+    ];
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: makeSseStream(sseChunks),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const onComplete = vi.fn();
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await act(async () => {
+      await result.current.regenerateStream('conv-1', onComplete);
+    });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/conversations/conv-1/messages/regenerate');
+    expect(init.method).toBe('POST');
+    expect(init.body).toBeUndefined();
+    expect(onComplete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fullText: 'Fresh answer',
+        sources: [expect.objectContaining({ chunk_id: 'chunk-1' })],
+      }),
+    );
+  });
+
+  it('throws RateLimitError on a 429 response', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 429,
+        json: async () => ({ limit: 25, window_hours: 24, reset_at: '2026-01-02T00:00:00Z' }),
+      }),
+    );
+
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await expect(
+      act(async () => {
+        await result.current.regenerateStream('conv-1', vi.fn());
+      }),
+    ).rejects.toMatchObject({ limit: 25 });
+  });
+});
+
 describe('abortStream', () => {
   beforeEach(() => {
     vi.clearAllMocks();

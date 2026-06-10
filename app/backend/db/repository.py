@@ -603,6 +603,41 @@ async def list_messages(conversation_id: str, user_id: str) -> list[dict]:
     return results
 
 
+async def delete_last_assistant_message(conversation_id: str, user_id: str) -> bool:
+    """Atomically delete the conversation's most recent message *only if* it is
+    an assistant message and the conversation belongs to the user.
+
+    Used by the regenerate flow (issue #280): the stale assistant answer is
+    removed before a fresh one is streamed in its place. The ``role =
+    'assistant'`` guard on the outer DELETE makes "only delete if the *last*
+    message is an assistant message" atomic — no read-then-delete race.
+
+    Returns True if a row was deleted, False otherwise (last message was a
+    user message, empty conversation, or wrong user).
+    """
+    async with _acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            DELETE FROM messages
+            WHERE id = (
+                SELECT m.id FROM messages m
+                JOIN conversations c ON c.id = m.conversation_id
+                WHERE m.conversation_id = $1 AND c.user_id = $2
+                ORDER BY m.created_at DESC
+                LIMIT 1
+            )
+            AND role = 'assistant'
+            RETURNING id
+            """,
+            conversation_id,
+            user_id,
+        )
+    if row is None:
+        return False
+    await touch_conversation(conversation_id, user_id)
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Channel sync runs
 # ---------------------------------------------------------------------------

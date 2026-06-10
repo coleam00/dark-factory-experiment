@@ -112,6 +112,92 @@ async def create_message(
     if inserted is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
+    return await _stream_assistant_response(conv_id, user_id, current_user, user_content)
+
+
+# ---------------------------------------------------------------------------
+# POST /api/conversations/{conv_id}/messages/regenerate
+# ---------------------------------------------------------------------------
+
+
+@router.post("/conversations/{conv_id}/messages/regenerate")
+async def regenerate_message(
+    conv_id: str,
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
+    """
+    Regenerate the most recent assistant response (issue #280).
+
+    Deletes the conversation's last assistant message and re-streams a fresh
+    answer against the existing history. The guards run in the same order as
+    ``create_message`` — ownership (404), then rate-limit (429, before any
+    delete or stream so a capped user keeps their old answer and cannot bypass
+    the 25/day cap), then an atomic "delete only if the last message is an
+    assistant message". The endpoint is tolerant: if the conversation already
+    ends with a user message (e.g. a prior regenerate failed mid-stream and
+    nothing was persisted), it skips the delete and just streams.
+
+    Returns:
+        StreamingResponse with Content-Type: text/event-stream, byte-compatible
+        with a normal send.
+    """
+    user_id = str(current_user["id"])
+
+    # 1. Verify conversation exists AND belongs to current user (404, no leak).
+    conv = await repository.get_conversation(conv_id, user_id=user_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # 2. Need at least one prior user message to regenerate against.
+    all_messages = await repository.list_messages(conv_id, user_id=user_id)
+    last_user_content = next(
+        (m["content"] for m in reversed(all_messages) if m["role"] == "user"), None
+    )
+    if last_user_content is None:
+        raise HTTPException(status_code=409, detail="Nothing to regenerate")
+
+    # 3. Enforce the 25 msg / user / 24h cap (MISSION §10 invariant #1) BEFORE
+    #    deleting anything or streaming, so a rate-limited user keeps their old
+    #    answer and regenerating counts against the cap (cannot be gamed).
+    try:
+        await rate_limit.check_and_record(user_id)
+    except rate_limit.RateLimitExceeded as exc:
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": "rate_limit_exceeded",
+                "limit": rate_limit.DAILY_MESSAGE_CAP,
+                "window_hours": rate_limit.WINDOW_HOURS,
+                "reset_at": exc.reset_at.isoformat(),
+            },
+        )
+
+    # 4. Atomically drop the stale assistant answer. A False result just means
+    #    the conversation already ends with a user message — still safe to stream.
+    await repository.delete_last_assistant_message(conv_id, user_id)
+
+    return await _stream_assistant_response(conv_id, user_id, current_user, last_user_content)
+
+
+# ---------------------------------------------------------------------------
+# Shared streaming pipeline
+# ---------------------------------------------------------------------------
+
+
+async def _stream_assistant_response(
+    conv_id: str,
+    user_id: str,
+    current_user: dict[str, Any],
+    user_content: str,
+) -> StreamingResponse:
+    """Run the tool-driven RAG pipeline and stream the assistant response as SSE.
+
+    Shared by ``create_message`` (normal send) and ``regenerate_message``
+    (issue #280). Assumes ownership and rate-limit guards have already run and,
+    for the send path, that the user message is already persisted. ``user_content``
+    is only used by the ``_maybe_set_conversation_title`` call in the finally
+    block (a no-op on regenerate, since the title is already set).
+    """
     # 4. Retrieve conversation history for LLM context
     all_messages = await repository.list_messages(conv_id, user_id=user_id)
     llm_messages = [{"role": m["role"], "content": m["content"]} for m in all_messages]

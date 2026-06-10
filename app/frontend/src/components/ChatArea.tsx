@@ -301,6 +301,7 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
     streamingStatus,
     isStreaming,
     startStream,
+    regenerateStream,
     abortStream,
   } = useStreamingResponse(conversationId || null);
   const { addToast } = useToast();
@@ -321,6 +322,9 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
   // Inline error state (for failed sends)
   const [inlineError, setInlineError] = useState<string | null>(null);
   const [failedMessageText, setFailedMessageText] = useState<string | null>(null);
+  // When true, the inline-error Retry button re-fires regenerate (issue #280)
+  // instead of resending failedMessageText.
+  const [retryIsRegenerate, setRetryIsRegenerate] = useState(false);
   // Track the temp user message ID so we can remove it on failure
   const pendingUserMsgIdRef = useRef<string | null>(null);
   // Citation modal state
@@ -574,14 +578,94 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
     handleSend(msg);
   }, [conversationId, location.state, navigate, handleSend]);
 
+  // ── Regenerate handler (issue #280) ──
+  // Re-runs the last user query and replaces the last assistant message with a
+  // fresh stream. Counts against the daily cap server-side (rate-limit check
+  // runs before the old message is deleted), so it can't be used to bypass it.
+  const handleRegenerate = useCallback(async () => {
+    if (!conversationId || isStreaming) return;
+    // Only valid when the last message is an assistant reply preceded by a
+    // user message (mirrors the server's "Nothing to regenerate" guard).
+    const last = messages[messages.length - 1];
+    if (!last || last.role !== 'assistant') return;
+    if (!messages.some((m) => m.role === 'user')) return;
+
+    setInlineError(null);
+    setFailedMessageText(null);
+    setRetryIsRegenerate(false);
+
+    // Snapshot the stale assistant message so we can restore it if the request
+    // is rejected before anything is deleted server-side (e.g. rate limit).
+    const snapshot = last;
+    setMessages((prev) => prev.slice(0, -1));
+    autoScrollRef.current = true;
+    scrollToBottom();
+
+    try {
+      await regenerateStream(conversationId, ({ fullText, sources }) => {
+        const assistantMsg: MessageType = {
+          id: `temp-assistant-${Date.now()}`,
+          conversation_id: conversationId,
+          role: 'assistant',
+          content: fullText,
+          created_at: new Date().toISOString(),
+          sources: sources.length > 0 ? sources : undefined,
+        };
+        setMessages((prev) => [...prev, assistantMsg]);
+      });
+      // Pull fresh quota counter so the sidebar updates (regenerate counts).
+      refreshAuth();
+    } catch (e) {
+      // Intentional abort (navigation or user cancel) — no error toast.
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        return;
+      }
+
+      if (e instanceof RateLimitError) {
+        // Capped before any server-side delete — restore the original answer.
+        setMessages((prev) => [...prev, snapshot]);
+        const friendly = `You've hit your daily message limit (${e.limit}/day). Resets at ${formatResetTime(e.resetAt)}.`;
+        setInlineError(friendly);
+        setFailedMessageText(null);
+        addToast(friendly, 'error');
+        refreshAuth();
+        return;
+      }
+
+      // Other errors: the server may have already deleted the old message, so
+      // restoring it would lie (a reload shows server truth). Leave it removed,
+      // surface a retryable inline error. Retry is safe — the endpoint tolerates
+      // a conversation that already ends with a user message.
+      const errMsg = e instanceof Error ? e.message : 'Failed to regenerate';
+      setInlineError('Failed to regenerate the response. Please try again.');
+      setRetryIsRegenerate(true);
+      addToast(errMsg || 'Network error — could not regenerate', 'error');
+    }
+  }, [
+    conversationId,
+    isStreaming,
+    messages,
+    setMessages,
+    regenerateStream,
+    scrollToBottom,
+    addToast,
+    refreshAuth,
+  ]);
+
   // ── Retry failed message — re-attempt the API call with same content ──
   const handleRetry = useCallback(() => {
+    if (retryIsRegenerate) {
+      setRetryIsRegenerate(false);
+      setInlineError(null);
+      handleRegenerate();
+      return;
+    }
     if (!failedMessageText) return;
     const text = failedMessageText;
     setInlineError(null);
     setFailedMessageText(null);
     handleSend(text);
-  }, [failedMessageText, handleSend]);
+  }, [retryIsRegenerate, handleRegenerate, failedMessageText, handleSend]);
 
   // ── Starter click handler ──
   const handleStarterClick = useCallback((text: string) => {
@@ -708,15 +792,20 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
             {showEmptyInConversation ? (
               <EmptyState onStarterClick={handleStarterClick} />
             ) : (
-              messages.map((msg) => (
-                <Message
-                  key={msg.id}
-                  role={msg.role}
-                  content={msg.content}
-                  sources={msg.sources}
-                  onCitationClick={handleCitationClick}
-                />
-              ))
+              messages.map((msg, i) => {
+                const isLast = i === messages.length - 1;
+                const canRegenerate = isLast && msg.role === 'assistant' && !isStreaming;
+                return (
+                  <Message
+                    key={msg.id}
+                    role={msg.role}
+                    content={msg.content}
+                    sources={msg.sources}
+                    onCitationClick={handleCitationClick}
+                    onRegenerate={canRegenerate ? handleRegenerate : undefined}
+                  />
+                );
+              })
             )}
 
             {/* Streaming assistant bubble */}
