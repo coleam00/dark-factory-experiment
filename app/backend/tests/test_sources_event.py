@@ -8,6 +8,8 @@ test_tools.py. This file now only covers citation-object shape, SSE format,
 and persistence round-trip.
 """
 
+import typing
+
 
 class TestCitationObjectShape:
     """Tests that verify citation objects have all required SSE fields."""
@@ -1152,3 +1154,358 @@ class TestChunkExpansionIntegration:
         assert "hello world snippet" in output
         assert "Test Video" in output
         assert "data: [DONE]" in output
+
+
+class TestInterruptedStreamSourcesConsistency:
+    """Regression tests for issue #277: persisted sources must match what the
+    client actually saw live, even when the stream is interrupted or errors
+    mid-flight. The invariant: `event_generator` persists exactly the sources
+    frame that was delivered — None whenever no sources event reached the
+    client (interrupted at the sources yield, upstream error without [DONE],
+    refusal, or no chunks)."""
+
+    # Two chunks from the same video plus a duplicate chunk_id — exercises
+    # both the dedup and the collapse-by-video steps of the finalization
+    # pipeline so divergence between persisted and emitted shapes is visible.
+    TOOL_CHUNKS: typing.ClassVar[list[dict]] = [
+        {
+            "chunk_id": "c1",
+            "video_id": "v1",
+            "video_title": "Test Video",
+            "video_url": "https://youtube.com/watch?v=abc",
+            "start_seconds": 10.0,
+            "end_seconds": 20.0,
+            "snippet": "Snippet one",
+        },
+        {
+            "chunk_id": "c2",
+            "video_id": "v1",
+            "video_title": "Test Video",
+            "video_url": "https://youtube.com/watch?v=abc",
+            "start_seconds": 30.0,
+            "end_seconds": 40.0,
+            "snippet": "Snippet two",
+        },
+        {
+            "chunk_id": "c1",  # duplicate — must be deduped
+            "video_id": "v1",
+            "video_title": "Test Video",
+            "video_url": "https://youtube.com/watch?v=abc",
+            "start_seconds": 10.0,
+            "end_seconds": 20.0,
+            "snippet": "Snippet one",
+        },
+        {
+            "chunk_id": "c3",
+            "video_id": "v2",
+            "video_title": "Other Video",
+            "video_url": "https://youtube.com/watch?v=def",
+            "start_seconds": 5.0,
+            "end_seconds": 15.0,
+            "snippet": "Snippet three",
+        },
+    ]
+
+    async def test_generator_closed_at_sources_yield_persists_none(self) -> None:
+        """Core regression: the generator is closed while suspended at the
+        `yield "event: sources..."` line (client disconnected just as the
+        frame was being sent). The sources were fully processed but never
+        delivered — the live view showed no chips, so the persisted row
+        must have sources=None. Before the fix, the fully-processed
+        citation list was persisted, making reload diverge from live."""
+        import asyncio
+        import json
+        from unittest.mock import AsyncMock, patch
+        from uuid import uuid4
+
+        answer_text = "Grounded answer about the video."
+
+        async def fake_stream(*args, **kwargs):
+            tool_executor = kwargs.get("tool_executor")
+            final_text_out = kwargs.get("final_text_out")
+            if tool_executor is not None:
+                await tool_executor("search_videos", json.dumps({"query": "test"}))
+            yield f"data: {json.dumps(answer_text)}\n\n"
+            if final_text_out is not None:
+                final_text_out.append(answer_text)
+            yield "data: [DONE]\n\n"
+
+        async def mock_execute_tool(
+            name, raw_args, video_id_whitelist=None, embedding_cache=None, is_member=False
+        ):
+            return {"ok": True, "text": "context", "chunks": list(self.TOOL_CHUNKS)}
+
+        fake_user = {"id": str(uuid4()), "email": "t@t"}
+        fake_conv = {
+            "id": str(uuid4()),
+            "user_id": fake_user["id"],
+            "title": "New Conversation",
+        }
+
+        with (
+            patch(
+                "backend.routes.messages.repository.get_conversation",
+                new_callable=AsyncMock,
+                return_value=fake_conv,
+            ),
+            patch(
+                "backend.routes.messages.repository.create_message",
+                new_callable=AsyncMock,
+                side_effect=[
+                    {"id": str(uuid4())},  # user-message insert
+                    {"id": str(uuid4())},  # assistant-message insert (finally)
+                ],
+            ) as mock_create,
+            patch(
+                "backend.routes.messages.repository.list_messages",
+                new_callable=AsyncMock,
+                return_value=[{"role": "user", "content": "hi"}],
+            ),
+            patch(
+                "backend.routes.messages.repository.list_videos",
+                new_callable=AsyncMock,
+                return_value=[{"id": "v1"}, {"id": "v2"}],
+            ),
+            patch(
+                "backend.routes.messages.rate_limit.check_and_record",
+                new_callable=AsyncMock,
+            ),
+            patch("backend.routes.messages.execute_tool", mock_execute_tool),
+            patch("backend.routes.messages.stream_chat", side_effect=fake_stream),
+            patch(
+                "backend.routes.messages._maybe_set_conversation_title",
+                new_callable=AsyncMock,
+            ),
+        ):
+            from backend.routes.messages import MessageCreate, create_message
+
+            resp = await create_message(
+                conv_id=fake_conv["id"],
+                body=MessageCreate(content="hi"),
+                current_user=fake_user,
+            )
+
+            # Drain tokens until the sources frame is handed over — the
+            # generator is now suspended at exactly the sources yield.
+            body_iter = resp.body_iterator
+            async for chunk in body_iter:
+                if chunk.startswith("event: sources"):
+                    break
+
+            # Close the generator at that yield (client disconnect). The
+            # post-yield `emitted_sources = ...` line never runs.
+            await body_iter.aclose()
+
+            # Give the shielded save a moment to complete.
+            await asyncio.sleep(0.1)
+
+        assert mock_create.call_count == 2, (
+            f"expected 2 create_message calls (user + assistant), got {mock_create.call_count}"
+        )
+        assistant_kwargs = mock_create.call_args_list[1].kwargs
+        assert assistant_kwargs["role"] == "assistant"
+        assert assistant_kwargs["sources"] is None, (
+            "stream closed at the sources yield: the client never received the "
+            f"frame, so persisted sources must be None; got {assistant_kwargs['sources']!r}"
+        )
+
+    async def test_upstream_error_without_done_persists_none(self) -> None:
+        """Mid-stream upstream error: stream_chat yields an error payload and
+        returns without [DONE]. No sources event is emitted live, so the
+        persisted row must have sources=None — NOT the raw accumulated tool
+        chunks (which would produce the duplicate/un-collapsed chips from
+        the issue). The partial text content is still persisted."""
+        import json
+        from unittest.mock import AsyncMock, patch
+        from uuid import uuid4
+
+        from httpx import ASGITransport, AsyncClient
+
+        from backend.auth.tokens import encode_token
+        from backend.main import app
+
+        token_one = "The video explains "
+        token_two = "that this "
+
+        async def mock_stream_chat(
+            messages,
+            tools=None,
+            tool_executor=None,
+            max_tool_calls=0,
+            final_text_out=None,
+            **_kwargs,
+        ):
+            if tool_executor is not None:
+                await tool_executor("search_videos", json.dumps({"query": "test"}))
+            yield f"data: {json.dumps(token_one)}\n\n"
+            yield f"data: {json.dumps(token_two)}\n\n"
+            # Upstream flaked: error payload instead of [DONE].
+            yield 'data: {"error": "upstream flaked"}\n\n'
+
+        async def mock_execute_tool(
+            name, raw_args, video_id_whitelist=None, embedding_cache=None, is_member=False
+        ):
+            return {"ok": True, "text": "context", "chunks": list(self.TOOL_CHUNKS)}
+
+        test_user_id = str(uuid4())
+        test_conv_id = str(uuid4())
+        valid_token = encode_token(test_user_id)
+
+        async def mock_get_user_by_id(user_id):
+            return {
+                "id": test_user_id,
+                "email": "test@example.com",
+                "password_hash": "hashed",
+                "created_at": "2026-01-01T00:00:00Z",
+            }
+
+        async def mock_get_conversation(conv_id, user_id):
+            return {
+                "id": test_conv_id,
+                "user_id": test_user_id,
+                "title": "Test",
+                "created_at": "2026-01-01T00:00:00Z",
+            }
+
+        mock_create = AsyncMock(side_effect=[{"id": str(uuid4())}, {"id": str(uuid4())}])
+
+        async def mock_list_messages(conv_id, user_id):
+            return []
+
+        async def mock_list_videos():
+            return [{"id": "v1"}, {"id": "v2"}]
+
+        with (
+            patch("backend.auth.dependencies.users_repo.get_user_by_id", mock_get_user_by_id),
+            patch("backend.db.repository.get_conversation", mock_get_conversation),
+            patch("backend.db.repository.create_message", mock_create),
+            patch("backend.db.repository.list_messages", mock_list_messages),
+            patch("backend.db.repository.list_videos", mock_list_videos),
+            patch("backend.routes.messages.stream_chat", mock_stream_chat),
+            patch("backend.routes.messages.execute_tool", mock_execute_tool),
+        ):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                response = await client.post(
+                    f"/api/conversations/{test_conv_id}/messages",
+                    json={"content": "question about video"},
+                    headers={"Cookie": f"session={valid_token}"},
+                )
+
+        # No sources event reached the client.
+        assert "event: sources" not in response.text, (
+            f"errored stream must not emit a sources event; got: {response.text}"
+        )
+
+        assert mock_create.call_count == 2
+        assistant_kwargs = mock_create.call_args_list[1].kwargs
+        assert assistant_kwargs["role"] == "assistant"
+        assert assistant_kwargs["sources"] is None, (
+            "no sources event was delivered, so persisted sources must be None; "
+            f"got {assistant_kwargs['sources']!r}"
+        )
+        # The partial answer text is still persisted (existing behaviour).
+        assert assistant_kwargs["content"] == token_one + token_two
+
+    async def test_happy_path_persists_exactly_emitted_sources(self) -> None:
+        """Normal completion: the persisted sources must equal the emitted,
+        deduplicated, collapsed list byte-for-byte — one entry per video_id.
+        Guards against the fix regressing the happy path and encodes the
+        issue's 'deduplicated and finalized the same way' requirement."""
+        import json
+        from unittest.mock import AsyncMock, patch
+        from uuid import uuid4
+
+        from httpx import ASGITransport, AsyncClient
+
+        from backend.auth.tokens import encode_token
+        from backend.main import app
+
+        answer_text = "The video explains that this feature works well."
+
+        async def mock_stream_chat(
+            messages,
+            tools=None,
+            tool_executor=None,
+            max_tool_calls=0,
+            final_text_out=None,
+            **_kwargs,
+        ):
+            if tool_executor is not None:
+                await tool_executor("search_videos", json.dumps({"query": "test"}))
+            yield f"data: {json.dumps(answer_text)}\n\n"
+            if final_text_out is not None:
+                final_text_out.append(answer_text)
+            yield "data: [DONE]\n\n"
+
+        async def mock_execute_tool(
+            name, raw_args, video_id_whitelist=None, embedding_cache=None, is_member=False
+        ):
+            return {"ok": True, "text": "context", "chunks": list(self.TOOL_CHUNKS)}
+
+        test_user_id = str(uuid4())
+        test_conv_id = str(uuid4())
+        valid_token = encode_token(test_user_id)
+
+        async def mock_get_user_by_id(user_id):
+            return {
+                "id": test_user_id,
+                "email": "test@example.com",
+                "password_hash": "hashed",
+                "created_at": "2026-01-01T00:00:00Z",
+            }
+
+        async def mock_get_conversation(conv_id, user_id):
+            return {
+                "id": test_conv_id,
+                "user_id": test_user_id,
+                "title": "Test",
+                "created_at": "2026-01-01T00:00:00Z",
+            }
+
+        mock_create = AsyncMock(side_effect=[{"id": str(uuid4())}, {"id": str(uuid4())}])
+
+        async def mock_list_messages(conv_id, user_id):
+            return []
+
+        async def mock_list_videos():
+            return [{"id": "v1"}, {"id": "v2"}]
+
+        with (
+            patch("backend.auth.dependencies.users_repo.get_user_by_id", mock_get_user_by_id),
+            patch("backend.db.repository.get_conversation", mock_get_conversation),
+            patch("backend.db.repository.create_message", mock_create),
+            patch("backend.db.repository.list_messages", mock_list_messages),
+            patch("backend.db.repository.list_videos", mock_list_videos),
+            patch("backend.routes.messages.stream_chat", mock_stream_chat),
+            patch("backend.routes.messages.execute_tool", mock_execute_tool),
+        ):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                response = await client.post(
+                    f"/api/conversations/{test_conv_id}/messages",
+                    json={"content": "question about video"},
+                    headers={"Cookie": f"session={valid_token}"},
+                )
+
+        # Parse the emitted sources frame from the SSE body.
+        output = response.text
+        assert "event: sources" in output
+        marker = "event: sources\ndata: "
+        start = output.index(marker) + len(marker)
+        end = output.index("\n\n", start)
+        emitted = json.loads(output[start:end])
+
+        # Deduped + collapsed: exactly one entry per video_id.
+        emitted_video_ids = [c["video_id"] for c in emitted]
+        assert sorted(emitted_video_ids) == ["v1", "v2"]
+        assert len(emitted_video_ids) == len(set(emitted_video_ids))
+
+        # Persisted sources are exactly what was emitted.
+        assert mock_create.call_count == 2
+        assistant_kwargs = mock_create.call_args_list[1].kwargs
+        assert assistant_kwargs["role"] == "assistant"
+        assert assistant_kwargs["sources"] == emitted, (
+            "persisted sources must equal the emitted sources frame; "
+            f"persisted={assistant_kwargs['sources']!r} emitted={emitted!r}"
+        )
