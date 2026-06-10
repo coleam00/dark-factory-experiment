@@ -55,6 +55,48 @@ class TestChunkVideoTimestamped:
         # Should not produce any chunks from the empty segment
         assert all("Real content" in c["content"] or "Real content" in c["snippet"] for c in result)
 
+    def test_zero_duration_segment_does_not_collapse_timestamps(self) -> None:
+        """A zero-width segment that splits into multiple sub-chunks keeps the
+        original [start, end] bounds instead of step-distributed degenerate spans."""
+        long_text = "This sentence pads the segment so the chunker must split it. " * 200
+        segments = [{"start": 42.0, "end": 42.0, "text": long_text}]
+        result, _ = chunk_video_timestamped(segments)
+
+        assert len(result) >= 1
+        for chunk in result:
+            assert chunk["end_seconds"] >= chunk["start_seconds"]
+            # Original segment bounds preserved — no step-based redistribution.
+            assert chunk["start_seconds"] == 42.0
+            assert chunk["end_seconds"] == 42.0
+
+    def test_negative_duration_segment_keeps_original_bounds(self) -> None:
+        """A segment with end < start (float rounding) is not redistributed,
+        which would produce decreasing timestamps."""
+        long_text = "Another padding sentence to force a multi-chunk split here. " * 200
+        segments = [{"start": 100.0, "end": 99.9, "text": long_text}]
+        result, _ = chunk_video_timestamped(segments)
+
+        assert len(result) >= 1
+        for chunk in result:
+            assert chunk["start_seconds"] == 100.0
+            assert chunk["end_seconds"] == 99.9
+
+    def test_positive_duration_still_distributes(self) -> None:
+        """A positive-duration segment that splits into multiple sub-chunks still
+        gets evenly distributed, increasing, non-degenerate spans."""
+        long_text = "Yet another padding sentence so the chunker splits this up. " * 200
+        segments = [{"start": 10.0, "end": 70.0, "text": long_text}]
+        result, _ = chunk_video_timestamped(segments)
+
+        assert len(result) >= 1
+        if len(result) > 1:
+            assert result[0]["start_seconds"] == 10.0
+            assert result[-1]["end_seconds"] == 70.0
+            for i, chunk in enumerate(result):
+                assert chunk["end_seconds"] > chunk["start_seconds"]
+                if i > 0:
+                    assert chunk["start_seconds"] > result[i - 1]["start_seconds"]
+
 
 class TestChunkVideoFallback:
     def test_produces_monotonic_timestamps(self) -> None:
