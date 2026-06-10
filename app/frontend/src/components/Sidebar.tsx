@@ -446,7 +446,9 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
     debouncedQuery,
     {
       dateFrom: dateFrom || undefined,
-      dateTo: dateTo || undefined,
+      // Append end-of-day so YYYY-MM-DD casts to 23:59:59 in Postgres, not 00:00:00 —
+      // otherwise conversations on the "to" day after midnight would be excluded.
+      dateTo: dateTo ? `${dateTo}T23:59:59` : undefined,
       videoId: videoId || undefined,
     },
   );

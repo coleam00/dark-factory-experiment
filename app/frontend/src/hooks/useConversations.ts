@@ -47,7 +47,9 @@ export function useConversations(searchQuery?: string, filters?: ConversationFil
     }
     // searchQuery only affects the fetch when a server-side filter is active;
     // otherwise it's applied client-side below and must not retrigger a load.
-  }, [filtersActive, filters?.dateFrom, filters?.dateTo, filters?.videoId, searchQuery]);
+    // Use `filtersActive ? searchQuery : null` so typing doesn't retrigger
+    // getConversations() on the non-filter path (null is stable when inactive).
+  }, [filtersActive, filters?.dateFrom, filters?.dateTo, filters?.videoId, filtersActive ? searchQuery : null]);
 
   useEffect(() => {
     load();
