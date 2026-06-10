@@ -161,8 +161,6 @@ CATALOG_ENABLED: bool = os.environ.get("CATALOG_ENABLED", "false").strip().lower
 CATALOG_TIER: str = (
     os.environ.get("CATALOG_TIER", "standard").strip().lower()
 )  # "standard" or "extended"
-# TTL in seconds for the extended prompt-cache tier (Anthropic API requires an integer).
-CATALOG_CACHE_TTL_SECONDS: int = int(os.environ.get("CATALOG_CACHE_TTL_SECONDS", "3600"))
 
 # Cap on how many characters the get_video_transcript tool returns to the
 # model. Long videos can produce 40K+ tokens of transcript; beyond ~30K

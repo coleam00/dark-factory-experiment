@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 
-from backend.config import CATALOG_CACHE_TTL_SECONDS
 from backend.db import repository
 
 logger = logging.getLogger(__name__)
@@ -78,7 +77,7 @@ def build_catalog_block(videos: list[dict], tier: str) -> dict:
 
     cache_control: dict = {"type": "ephemeral"}
     if tier == "extended":
-        cache_control["ttl"] = CATALOG_CACHE_TTL_SECONDS  # integer seconds per Anthropic API
+        cache_control["ttl"] = "1h"  # Anthropic cache_control.ttl enum: "5m" | "1h"
 
     return {
         "type": "text",
