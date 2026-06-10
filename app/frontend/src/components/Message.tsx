@@ -26,22 +26,7 @@ function RegenerateButton({ onRegenerate }: { onRegenerate: () => void }) {
     <button
       onClick={onRegenerate}
       aria-label="Regenerate response"
-      className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
-      style={{
-        marginTop: 10,
-        background: 'transparent',
-        border: 'none',
-        cursor: 'pointer',
-        color: '#94a3b8',
-        fontSize: 12,
-        display: 'flex',
-        alignItems: 'center',
-        gap: 5,
-        padding: 0,
-        transition: 'color 0.15s',
-      }}
-      onMouseEnter={(e) => (e.currentTarget.style.color = '#f1f5f9')}
-      onMouseLeave={(e) => (e.currentTarget.style.color = '#94a3b8')}
+      className="mt-[10px] flex items-center gap-[5px] p-0 bg-transparent border-0 cursor-pointer text-slate-400 text-xs transition-colors duration-150 hover:text-slate-100 focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
     >
       <svg
         width="13"
