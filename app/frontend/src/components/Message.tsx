@@ -208,26 +208,11 @@ export function Message({
             <MarkdownRenderer content={content} />
             {hasSources && <SourceCitations sources={sources} onCitationClick={onCitationClick} />}
             {onRegenerate && (
-              <div style={{ marginTop: 8 }}>
+              <div className="mt-2">
                 <button
                   onClick={onRegenerate}
                   title="Regenerate this response"
-                  className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
-                  style={{
-                    background: 'transparent',
-                    border: 'none',
-                    cursor: 'pointer',
-                    color: '#94a3b8',
-                    fontSize: 12,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 5,
-                    padding: 0,
-                    fontFamily: 'inherit',
-                    transition: 'color 0.15s',
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.color = '#f1f5f9')}
-                  onMouseLeave={(e) => (e.currentTarget.style.color = '#94a3b8')}
+                  className="flex items-center gap-[5px] p-0 bg-transparent border-0 cursor-pointer text-xs text-slate-400 hover:text-slate-100 transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
                 >
                   ↻ Regenerate
                 </button>
