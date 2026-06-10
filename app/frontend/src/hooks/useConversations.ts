@@ -1,7 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { type Conversation, getConversations, renameConversation } from '../lib/api';
+import {
+  type Conversation,
+  filterConversations,
+  getConversations,
+  renameConversation,
+} from '../lib/api';
 
-export function useConversations(searchQuery?: string) {
+export interface ConversationFilters {
+  dateFrom?: string; // yyyy-mm-dd local calendar day (inclusive)
+  dateTo?: string; // yyyy-mm-dd local calendar day (inclusive)
+  videoId?: string;
+}
+
+export function useConversations(searchQuery?: string, filters?: ConversationFilters) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -9,11 +20,41 @@ export function useConversations(searchQuery?: string) {
   // when the user types faster than the network replies.
   const fetchIdRef = useRef(0);
 
+  const dateFrom = filters?.dateFrom;
+  const dateTo = filters?.dateTo;
+  const videoId = filters?.videoId;
+  const filtersActive = !!(dateFrom || dateTo || videoId);
+  const trimmedQuery = (searchQuery ?? '').trim();
+  // Only the filter path refetches on text changes (server applies `q`).
+  // In the default path the client-side title filter handles search without a
+  // refetch, so keep the text query out of `load`'s deps there.
+  const queryDep = filtersActive ? trimmedQuery : '';
+
   const load = useCallback(async () => {
     const myId = ++fetchIdRef.current;
     try {
       setLoading(true);
-      const data = await getConversations();
+      let data: Conversation[];
+      if (filtersActive) {
+        // Convert local calendar days to UTC instants. `date_to` is the start
+        // of the day AFTER the chosen end day, making the upper bound exclusive
+        // so there are no off-by-one-day surprises across timezones.
+        const date_from = dateFrom ? new Date(`${dateFrom}T00:00:00`).toISOString() : undefined;
+        let date_to: string | undefined;
+        if (dateTo) {
+          const next = new Date(`${dateTo}T00:00:00`);
+          next.setDate(next.getDate() + 1);
+          date_to = next.toISOString();
+        }
+        data = await filterConversations({
+          q: trimmedQuery || undefined,
+          date_from,
+          date_to,
+          video_id: videoId || undefined,
+        });
+      } else {
+        data = await getConversations();
+      }
       if (myId === fetchIdRef.current) setConversations(data);
     } catch (e) {
       if (myId === fetchIdRef.current) {
@@ -22,7 +63,8 @@ export function useConversations(searchQuery?: string) {
     } finally {
       if (myId === fetchIdRef.current) setLoading(false);
     }
-  }, []);
+    // trimmedQuery is captured via queryDep (only meaningful when filtersActive).
+  }, [filtersActive, dateFrom, dateTo, videoId, queryDep]);
 
   useEffect(() => {
     load();
@@ -45,10 +87,13 @@ export function useConversations(searchQuery?: string) {
   // Keep conversations unfiltered for guard logic in Sidebar.tsx.
   const withMessages = conversations.filter((c) => c.preview !== null);
 
-  const trimmed = (searchQuery ?? '').trim().toLowerCase();
-  const filteredConversations = trimmed
-    ? withMessages.filter((c) => c.title.toLowerCase().includes(trimmed))
-    : withMessages;
+  // When server-side filters are active the backend already applied the text
+  // query, so skip the client-side title filter to avoid double-filtering.
+  const trimmed = trimmedQuery.toLowerCase();
+  const filteredConversations =
+    trimmed && !filtersActive
+      ? withMessages.filter((c) => c.title.toLowerCase().includes(trimmed))
+      : withMessages;
 
   return {
     conversations,

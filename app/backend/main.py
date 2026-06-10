@@ -103,7 +103,15 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 # Routes (imported here to keep main.py clean)
 # ---------------------------------------------------------------------------
-from backend.routes import admin, auth, channels, conversations, ingest, messages  # noqa: E402
+from backend.routes import (  # noqa: E402
+    admin,
+    auth,
+    channels,
+    conversation_filters,
+    conversations,
+    ingest,
+    messages,
+)
 
 # Auth routes are public (signup/login don't require a session; /me and /logout
 # rely on their own dependency/cookie behaviour).
@@ -112,6 +120,9 @@ app.include_router(auth.router, prefix="/api")
 # User-scoped routes require authentication — MISSION.md §10 invariant:
 # "All chat access requires authentication — there is no anonymous mode."
 _auth_required = [Depends(get_current_user)]
+# Must register before conversations.router: /conversations/filter would
+# otherwise be captured by /conversations/{conv_id}.
+app.include_router(conversation_filters.router, prefix="/api", dependencies=_auth_required)
 app.include_router(conversations.router, prefix="/api", dependencies=_auth_required)
 app.include_router(messages.router, prefix="/api", dependencies=_auth_required)
 

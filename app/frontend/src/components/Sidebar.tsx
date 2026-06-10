@@ -3,7 +3,13 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useConversations } from '../hooks/useConversations';
 import { useToast } from '../hooks/useToast';
-import { type Conversation, createConversation, deleteConversation } from '../lib/api';
+import {
+  type Conversation,
+  type Video,
+  createConversation,
+  deleteConversation,
+  getVideos,
+} from '../lib/api';
 import { VideoExplorer } from './VideoExplorer';
 
 // ── Relative time helper ─────────────────────────────────────────
@@ -413,8 +419,20 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
-  const { conversations, loading, refetch, rename, filteredConversations } =
-    useConversations(debouncedQuery);
+  // Date + video filters (combine with the text search, server-side).
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [videoFilterId, setVideoFilterId] = useState('');
+  const [videos, setVideos] = useState<Video[]>([]);
+  const filtersActive = !!(dateFrom || dateTo || videoFilterId);
+  const { conversations, loading, refetch, rename, filteredConversations } = useConversations(
+    debouncedQuery,
+    {
+      dateFrom: dateFrom || undefined,
+      dateTo: dateTo || undefined,
+      videoId: videoFilterId || undefined,
+    },
+  );
   const { user, logout } = useAuth();
   const [creatingNew, setCreatingNew] = useState(false);
   const [newChatError, setNewChatError] = useState<string | null>(null);
@@ -430,6 +448,28 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
     const timer = setTimeout(() => setDebouncedQuery(searchQuery), 250);
     return () => clearTimeout(timer);
   }, [searchQuery]);
+
+  // Populate the video filter dropdown once on mount. Non-fatal: if the list
+  // can't load, the dropdown simply stays at "All videos".
+  useEffect(() => {
+    let cancelled = false;
+    getVideos()
+      .then((vids) => {
+        if (!cancelled) setVideos(vids);
+      })
+      .catch(() => {
+        /* video filter just stays empty */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleClearFilters = () => {
+    setDateFrom('');
+    setDateTo('');
+    setVideoFilterId('');
+  };
 
   // Store refetch in the shared ref so ChatArea can trigger it
   useEffect(() => {
@@ -601,6 +641,88 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
           />
         </div>
 
+        {/* ── Date + video filters ── */}
+        <div
+          style={{ padding: '0 12px 8px', display: 'flex', flexDirection: 'column', gap: 6 }}
+        >
+          <div style={{ display: 'flex', gap: 6 }}>
+            <input
+              type="date"
+              aria-label="Filter from date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              style={{
+                flex: 1,
+                minWidth: 0,
+                padding: '6px 8px',
+                borderRadius: 8,
+                background: '#1e293b',
+                border: '1px solid #334155',
+                color: '#f1f5f9',
+                fontSize: 13,
+                outline: 'none',
+              }}
+            />
+            <input
+              type="date"
+              aria-label="Filter to date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              style={{
+                flex: 1,
+                minWidth: 0,
+                padding: '6px 8px',
+                borderRadius: 8,
+                background: '#1e293b',
+                border: '1px solid #334155',
+                color: '#f1f5f9',
+                fontSize: 13,
+                outline: 'none',
+              }}
+            />
+          </div>
+          <select
+            aria-label="Filter by video"
+            value={videoFilterId}
+            onChange={(e) => setVideoFilterId(e.target.value)}
+            style={{
+              width: '100%',
+              padding: '6px 8px',
+              borderRadius: 8,
+              background: '#1e293b',
+              border: '1px solid #334155',
+              color: '#f1f5f9',
+              fontSize: 13,
+              outline: 'none',
+            }}
+          >
+            <option value="">All videos</option>
+            {videos.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.title}
+              </option>
+            ))}
+          </select>
+          {filtersActive && (
+            <button
+              onClick={handleClearFilters}
+              className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+              style={{
+                alignSelf: 'flex-start',
+                background: 'transparent',
+                border: '1px solid #334155',
+                borderRadius: 8,
+                color: '#94a3b8',
+                cursor: 'pointer',
+                fontSize: 12,
+                padding: '4px 10px',
+              }}
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
+
         {/* ── Conversation list ── */}
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {loading ? (
@@ -630,10 +752,14 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
               >
                 <path d="M6,4 L30,4 A2,2 0 0,1 32,6 L32,24 A2,2 0 0,1 30,26 L10,26 L4,32 L4,6 A2,2 0 0,1 6,4 Z" />
               </svg>
-              {debouncedQuery.trim() ? (
-                <p style={{ margin: 0, fontSize: 13 }}>
-                  No matches for <strong style={{ color: '#94a3b8' }}>"{debouncedQuery}"</strong>
-                </p>
+              {debouncedQuery.trim() || filtersActive ? (
+                debouncedQuery.trim() ? (
+                  <p style={{ margin: 0, fontSize: 13 }}>
+                    No matches for <strong style={{ color: '#94a3b8' }}>"{debouncedQuery}"</strong>
+                  </p>
+                ) : (
+                  <p style={{ margin: 0, fontSize: 13 }}>No conversations match your filters</p>
+                )
               ) : (
                 <>
                   <p style={{ margin: 0, fontSize: 13 }}>No conversations yet</p>

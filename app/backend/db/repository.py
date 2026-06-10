@@ -12,6 +12,7 @@ import json
 import logging
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 import asyncpg
 
@@ -523,6 +524,73 @@ async def search_conversations_by_title(user_id: str, query: str, limit: int = 2
             pattern,
             limit,
         )
+    return [dict(r) for r in rows]
+
+
+async def filter_conversations(
+    user_id: str,
+    *,
+    query: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    video_id: str | None = None,
+) -> list[dict]:
+    """Return conversations owned by *user_id*, narrowed by optional filters.
+
+    All supplied filters are AND-combined. Rows carry the exact shape of
+    `list_conversations` (``c.*`` plus a ``preview`` correlated subquery) and the
+    same ``ORDER BY c.updated_at DESC`` ordering, so the sidebar renders them
+    identically. With no optional filter supplied this returns the same set as
+    `list_conversations`.
+
+    Filters:
+      - ``query``: case-insensitive title substring (ILIKE). Same un-escaped
+        ``%``/``_`` semantics as `search_conversations_by_title`.
+      - ``date_from``: lower bound on ``updated_at``, inclusive (``>=``).
+      - ``date_to``: upper bound on ``updated_at``, exclusive (``<``). Callers
+        pass the start of the day *after* the desired range so there are no
+        off-by-one-day surprises.
+      - ``video_id``: keep only conversations with at least one message whose
+        ``sources`` JSONB array cites this video. Messages with NULL/empty
+        ``sources`` simply don't match.
+
+    The SQL text is assembled from static fragments only; every user value is
+    bound as a ``$n`` parameter — no user data is ever interpolated into the
+    query string.
+    """
+    clauses = ["c.user_id = $1"]
+    params: list[Any] = [user_id]
+
+    if query is not None:
+        params.append(f"%{query}%")
+        clauses.append(f"c.title ILIKE ${len(params)}")
+    if date_from is not None:
+        params.append(date_from)
+        clauses.append(f"c.updated_at >= ${len(params)}")
+    if date_to is not None:
+        params.append(date_to)
+        clauses.append(f"c.updated_at < ${len(params)}")
+    if video_id is not None:
+        params.append(json.dumps([{"video_id": video_id}]))
+        clauses.append(
+            "EXISTS (SELECT 1 FROM messages m "
+            f"WHERE m.conversation_id = c.id AND m.sources @> ${len(params)}::jsonb)"
+        )
+
+    where_sql = " AND ".join(clauses)
+    sql = f"""
+        SELECT c.*,
+               (SELECT content
+                FROM messages
+                WHERE conversation_id = c.id
+                ORDER BY created_at DESC
+                LIMIT 1) AS preview
+        FROM conversations c
+        WHERE {where_sql}
+        ORDER BY c.updated_at DESC
+    """
+    async with _acquire() as conn:
+        rows = await conn.fetch(sql, *params)
     return [dict(r) for r in rows]
 
 

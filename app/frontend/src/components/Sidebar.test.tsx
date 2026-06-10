@@ -59,6 +59,7 @@ describe('Sidebar handleNewChat', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     navigateMock.mockReset();
+    vi.spyOn(api, 'getVideos').mockResolvedValue([] as api.Video[]);
   });
 
   describe('guard logic for empty conversations', () => {
@@ -288,6 +289,7 @@ describe('Sidebar logout', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     navigateMock.mockReset();
+    vi.spyOn(api, 'getVideos').mockResolvedValue([] as api.Video[]);
   });
 
   it('shows the user email and a Log out button when authed', async () => {
@@ -337,5 +339,81 @@ describe('Sidebar logout', () => {
     expect(logoutMock).toHaveBeenCalledTimes(1);
     expect(navigateMock).toHaveBeenCalledWith('/login');
     expect(onClose).toHaveBeenCalled();
+  });
+});
+
+describe('Sidebar filters', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    navigateMock.mockReset();
+    vi.spyOn(api, 'getVideos').mockResolvedValue([
+      { id: 'vid-1', title: 'Intro to RAG', description: '', url: '', created_at: '' },
+      { id: 'vid-2', title: 'Vectors 101', description: '', url: '', created_at: '' },
+    ] as api.Video[]);
+  });
+
+  it('renders the date inputs and the video dropdown populated from getVideos', async () => {
+    render(
+      <MemoryRouter>
+        <Sidebar activeConversationId={undefined} isOpen={true} onClose={vi.fn()} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByLabelText('Filter from date')).toBeInTheDocument();
+    expect(screen.getByLabelText('Filter to date')).toBeInTheDocument();
+    expect(screen.getByLabelText('Filter by video')).toBeInTheDocument();
+    expect(await screen.findByRole('option', { name: 'Intro to RAG' })).toBeInTheDocument();
+  });
+
+  it('shows a Clear filters button only once a filter is set, and clears it', async () => {
+    render(
+      <MemoryRouter>
+        <Sidebar activeConversationId={undefined} isOpen={true} onClose={vi.fn()} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByRole('button', { name: /clear filters/i })).not.toBeInTheDocument();
+
+    const from = screen.getByLabelText('Filter from date') as HTMLInputElement;
+    await act(async () => {
+      fireEvent.change(from, { target: { value: '2026-05-01' } });
+    });
+
+    const clearBtn = screen.getByRole('button', { name: /clear filters/i });
+    expect(clearBtn).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(clearBtn);
+    });
+
+    expect(from.value).toBe('');
+    expect(screen.queryByRole('button', { name: /clear filters/i })).not.toBeInTheDocument();
+  });
+
+  it('shows filter-specific empty copy when a filter is active and no matches', async () => {
+    const { useConversations } = await import('../hooks/useConversations');
+    vi.mocked(useConversations).mockReturnValue({
+      conversations: [] as api.Conversation[],
+      loading: false,
+      error: null,
+      refetch: vi.fn().mockResolvedValue(undefined),
+      rename: vi.fn(),
+      filteredConversations: [] as api.Conversation[],
+    });
+
+    render(
+      <MemoryRouter>
+        <Sidebar activeConversationId={undefined} isOpen={true} onClose={vi.fn()} />
+      </MemoryRouter>,
+    );
+
+    // Wait for the options to load before selecting one.
+    await screen.findByRole('option', { name: 'Intro to RAG' });
+    const video = screen.getByLabelText('Filter by video') as HTMLSelectElement;
+    await act(async () => {
+      fireEvent.change(video, { target: { value: 'vid-1' } });
+    });
+
+    expect(screen.getByText('No conversations match your filters')).toBeInTheDocument();
   });
 });

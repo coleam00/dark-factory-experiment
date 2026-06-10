@@ -146,6 +146,27 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 export const getConversations = () => request<Conversation[]>('/conversations');
 export const searchConversations = (q: string) =>
   request<Conversation[]>(`/conversations/search?q=${encodeURIComponent(q)}`);
+
+export interface ConversationFilterParams {
+  q?: string;
+  date_from?: string; // ISO 8601 UTC instant (inclusive lower bound)
+  date_to?: string; // ISO 8601 UTC instant (exclusive upper bound)
+  video_id?: string;
+}
+
+/**
+ * Server-side conversation filtering by title text, updated_at range, and
+ * cited video. All params are optional and AND-combined; results come back
+ * newest-first. Only defined, non-empty keys are sent.
+ */
+export const filterConversations = (params: ConversationFilterParams) => {
+  const qs = new URLSearchParams();
+  if (params.q) qs.set('q', params.q);
+  if (params.date_from) qs.set('date_from', params.date_from);
+  if (params.date_to) qs.set('date_to', params.date_to);
+  if (params.video_id) qs.set('video_id', params.video_id);
+  return request<Conversation[]>(`/conversations/filter?${qs.toString()}`);
+};
 export const createConversation = () =>
   request<Conversation>('/conversations', { method: 'POST', body: '{}' });
 export const getConversation = (id: string) =>

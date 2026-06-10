@@ -215,4 +215,60 @@ describe('useConversations', () => {
       expect(result.current.filteredConversations[0].id).toBe('1');
     });
   });
+
+  describe('date/video filters', () => {
+    it('uses getConversations and never filterConversations when no filters set', async () => {
+      const convos = [{ id: '1', title: 'A', created_at: '', updated_at: '', preview: 'x' }];
+      const getSpy = vi
+        .spyOn(api, 'getConversations')
+        .mockResolvedValue(convos as api.Conversation[]);
+      const filterSpy = vi
+        .spyOn(api, 'filterConversations')
+        .mockResolvedValue([] as api.Conversation[]);
+
+      const { result } = renderHook(() => useConversations('', {}));
+
+      await waitFor(() => expect(result.current.filteredConversations).toHaveLength(1));
+      expect(getSpy).toHaveBeenCalled();
+      expect(filterSpy).not.toHaveBeenCalled();
+    });
+
+    it('calls filterConversations with q, video_id and an exclusive next-day date_to', async () => {
+      const convos = [{ id: '1', title: 'A', created_at: '', updated_at: '', preview: 'x' }];
+      vi.spyOn(api, 'getConversations').mockResolvedValue([] as api.Conversation[]);
+      const filterSpy = vi
+        .spyOn(api, 'filterConversations')
+        .mockResolvedValue(convos as api.Conversation[]);
+
+      const { result } = renderHook(() =>
+        useConversations('rag', { dateFrom: '2026-05-01', dateTo: '2026-05-08', videoId: 'vid-9' }),
+      );
+
+      await waitFor(() => expect(filterSpy).toHaveBeenCalled());
+      const arg = filterSpy.mock.calls[0][0];
+      expect(arg.q).toBe('rag');
+      expect(arg.video_id).toBe('vid-9');
+      expect(arg.date_from).toBe(new Date('2026-05-01T00:00:00').toISOString());
+      // dateTo is rendered as the start of the NEXT day (exclusive upper bound).
+      expect(arg.date_to).toBe(new Date('2026-05-09T00:00:00').toISOString());
+
+      // Client-side title filter is skipped when server filters are active, so
+      // the row stays even though its title doesn't contain "rag".
+      await waitFor(() => expect(result.current.filteredConversations).toHaveLength(1));
+    });
+
+    it('still excludes preview === null rows in the filter path', async () => {
+      const convos = [
+        { id: '1', title: 'A', created_at: '', updated_at: '', preview: 'x' },
+        { id: '2', title: 'B', created_at: '', updated_at: '', preview: null },
+      ];
+      vi.spyOn(api, 'getConversations').mockResolvedValue([] as api.Conversation[]);
+      vi.spyOn(api, 'filterConversations').mockResolvedValue(convos as api.Conversation[]);
+
+      const { result } = renderHook(() => useConversations('', { videoId: 'vid-9' }));
+
+      await waitFor(() => expect(result.current.filteredConversations).toHaveLength(1));
+      expect(result.current.filteredConversations[0].id).toBe('1');
+    });
+  });
 });
