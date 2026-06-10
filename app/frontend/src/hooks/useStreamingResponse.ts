@@ -184,8 +184,7 @@ export function useStreamingResponse(conversationId: string | null) {
                 // Use default message
               }
               streamError = new Error(errMsg);
-              // Exit the outer reader loop too — keep neither reading nor draining
-              // the rest of the stream after a server-reported failure.
+              // Break the outer loop too — do not drain the rest of a failed stream.
               break streamLoop;
             } else if (data) {
               // Tokens are JSON-encoded strings to safely handle newlines/special chars
