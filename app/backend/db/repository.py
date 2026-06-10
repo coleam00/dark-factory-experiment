@@ -745,3 +745,31 @@ async def list_sync_videos_for_run(sync_run_id: str) -> list[dict]:
             sync_run_id,
         )
     return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Conversation video references (for sidebar filtering)
+# ---------------------------------------------------------------------------
+
+
+async def list_conversation_video_refs(user_id: str) -> list[dict]:
+    """Distinct (conversation_id, video_id) pairs cited in a user's messages.
+
+    Walks messages.sources JSONB (array of citation objects, each with a
+    video_id) joined through conversations for owner scoping.
+    """
+    async with _acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT DISTINCT m.conversation_id, src->>'video_id' AS video_id
+            FROM messages m
+            JOIN conversations c ON c.id = m.conversation_id
+            CROSS JOIN LATERAL jsonb_array_elements(m.sources) AS src
+            WHERE c.user_id = $1
+              AND m.sources IS NOT NULL
+              AND jsonb_typeof(m.sources) = 'array'
+              AND src->>'video_id' IS NOT NULL
+            """,
+            user_id,
+        )
+    return [dict(r) for r in rows]

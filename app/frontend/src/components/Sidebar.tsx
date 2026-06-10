@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useConversations } from '../hooks/useConversations';
 import { useToast } from '../hooks/useToast';
-import { type Conversation, createConversation, deleteConversation } from '../lib/api';
+import { type Conversation, createConversation, deleteConversation, getVideos } from '../lib/api';
 import { VideoExplorer } from './VideoExplorer';
 
 // ── Relative time helper ─────────────────────────────────────────
@@ -21,6 +21,14 @@ function formatRelativeTime(dateStr: string): string {
   if (diffHrs < 24) return `${diffHrs}h ago`;
   if (diffDays < 7) return `${diffDays}d ago`;
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+// ── Format a local Date as YYYY-MM-DD ────────────────────────────
+function toISODateLocal(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 // ── Skeleton row ─────────────────────────────────────────────────
@@ -413,8 +421,36 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
-  const { conversations, loading, refetch, rename, filteredConversations } =
-    useConversations(debouncedQuery);
+
+  const [datePreset, setDatePreset] = useState<'all' | '7d' | '30d' | 'custom'>('all');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
+  const [videoId, setVideoId] = useState('');
+  const [videos, setVideos] = useState<{ id: string; title: string }[]>([]);
+
+  // Compute dateFrom / dateTo from preset
+  const today = toISODateLocal(new Date());
+  let dateFrom: string | null = null;
+  let dateTo: string | null = null;
+  if (datePreset === '7d') {
+    const d = new Date();
+    d.setDate(d.getDate() - 6);
+    dateFrom = toISODateLocal(d);
+  } else if (datePreset === '30d') {
+    const d = new Date();
+    d.setDate(d.getDate() - 29);
+    dateFrom = toISODateLocal(d);
+  } else if (datePreset === 'custom') {
+    dateFrom = customFrom || null;
+    dateTo = customTo || null;
+  }
+
+  const { conversations, loading, refetch, rename, filteredConversations } = useConversations({
+    searchQuery: debouncedQuery,
+    dateFrom,
+    dateTo,
+    videoId: videoId || null,
+  });
   const { user, logout } = useAuth();
   const [creatingNew, setCreatingNew] = useState(false);
   const [newChatError, setNewChatError] = useState<string | null>(null);
@@ -424,6 +460,15 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
   const [explorerOpen, setExplorerOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const { addToast } = useToast();
+
+  // Fetch videos once for the filter dropdown
+  useEffect(() => {
+    getVideos()
+      .then((data) => setVideos(data))
+      .catch((e) => {
+        console.error('[Sidebar] Failed to load videos:', e);
+      });
+  }, []);
 
   // Debounce search query — 250ms per issue #92
   useEffect(() => {
@@ -437,6 +482,18 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
       conversationsRef.current = refetch;
     }
   }, [refetch, conversationsRef]);
+
+  const hasActiveFilters =
+    debouncedQuery.trim().length > 0 || datePreset !== 'all' || videoId !== '';
+
+  const clearFilters = () => {
+    setSearchQuery('');
+    setDebouncedQuery('');
+    setDatePreset('all');
+    setCustomFrom('');
+    setCustomTo('');
+    setVideoId('');
+  };
 
   // ── New Chat ──
   const handleNewChat = async () => {
@@ -601,6 +658,114 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
           />
         </div>
 
+        {/* ── Filter row ── */}
+        <div style={{ padding: '0 12px 8px', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <select
+            aria-label="Filter by date"
+            value={datePreset}
+            onChange={(e) => setDatePreset(e.target.value as typeof datePreset)}
+            style={{
+              flex: '1 1 100px',
+              padding: '6px 8px',
+              borderRadius: 6,
+              background: '#1e293b',
+              border: '1px solid #334155',
+              color: '#f1f5f9',
+              fontSize: 12,
+              outline: 'none',
+              cursor: 'pointer',
+            }}
+          >
+            <option value="all">All time</option>
+            <option value="7d">Last 7 days</option>
+            <option value="30d">Last 30 days</option>
+            <option value="custom">Custom…</option>
+          </select>
+
+          {datePreset === 'custom' && (
+            <>
+              <input
+                type="date"
+                aria-label="From date"
+                value={customFrom}
+                onChange={(e) => setCustomFrom(e.target.value)}
+                max={today}
+                style={{
+                  flex: '1 1 90px',
+                  padding: '6px 8px',
+                  borderRadius: 6,
+                  background: '#1e293b',
+                  border: '1px solid #334155',
+                  color: '#f1f5f9',
+                  fontSize: 12,
+                  outline: 'none',
+                }}
+              />
+              <input
+                type="date"
+                aria-label="To date"
+                value={customTo}
+                onChange={(e) => setCustomTo(e.target.value)}
+                max={today}
+                style={{
+                  flex: '1 1 90px',
+                  padding: '6px 8px',
+                  borderRadius: 6,
+                  background: '#1e293b',
+                  border: '1px solid #334155',
+                  color: '#f1f5f9',
+                  fontSize: 12,
+                  outline: 'none',
+                }}
+              />
+            </>
+          )}
+
+          <select
+            aria-label="Filter by video"
+            value={videoId}
+            onChange={(e) => setVideoId(e.target.value)}
+            style={{
+              flex: '1 1 120px',
+              padding: '6px 8px',
+              borderRadius: 6,
+              background: '#1e293b',
+              border: '1px solid #334155',
+              color: '#f1f5f9',
+              fontSize: 12,
+              outline: 'none',
+              cursor: 'pointer',
+            }}
+          >
+            <option value="">All videos</option>
+            {videos.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.title}
+              </option>
+            ))}
+          </select>
+
+          {hasActiveFilters && (
+            <button
+              onClick={clearFilters}
+              aria-label="Clear filters"
+              className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+              style={{
+                padding: '6px 10px',
+                borderRadius: 6,
+                background: 'transparent',
+                border: '1px solid rgba(255,255,255,0.1)',
+                color: '#94a3b8',
+                fontSize: 12,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
+
         {/* ── Conversation list ── */}
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {loading ? (
@@ -630,10 +795,8 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
               >
                 <path d="M6,4 L30,4 A2,2 0 0,1 32,6 L32,24 A2,2 0 0,1 30,26 L10,26 L4,32 L4,6 A2,2 0 0,1 6,4 Z" />
               </svg>
-              {debouncedQuery.trim() ? (
-                <p style={{ margin: 0, fontSize: 13 }}>
-                  No matches for <strong style={{ color: '#94a3b8' }}>"{debouncedQuery}"</strong>
-                </p>
+              {hasActiveFilters ? (
+                <p style={{ margin: 0, fontSize: 13 }}>No conversations match your filters</p>
               ) : (
                 <>
                   <p style={{ margin: 0, fontSize: 13 }}>No conversations yet</p>

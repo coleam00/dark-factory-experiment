@@ -161,6 +161,14 @@ export const renameConversation = (id: string, title: string) =>
 // Videos
 export const getVideos = () => request<Video[]>('/videos');
 
+export interface ConversationVideoRef {
+  conversation_id: string;
+  video_id: string;
+}
+
+export const getConversationVideoRefs = () =>
+  request<ConversationVideoRef[]>('/conversation-videos');
+
 export interface IngestVideoBody {
   title: string;
   description: string;

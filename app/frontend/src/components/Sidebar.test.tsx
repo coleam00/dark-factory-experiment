@@ -339,3 +339,130 @@ describe('Sidebar logout', () => {
     expect(onClose).toHaveBeenCalled();
   });
 });
+
+describe('Sidebar filters', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    navigateMock.mockReset();
+  });
+
+  it('selecting "Last 7 days" passes a dateFrom ~6 days ago and null dateTo', async () => {
+    const useConversationsMock = vi.fn(() => ({
+      conversations: [] as api.Conversation[],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+      rename: vi.fn(),
+      filteredConversations: [] as api.Conversation[],
+    }));
+
+    const { useConversations } = await import('../hooks/useConversations');
+    vi.mocked(useConversations).mockImplementation(useConversationsMock);
+
+    render(
+      <MemoryRouter>
+        <Sidebar activeConversationId={undefined} isOpen={true} onClose={vi.fn()} />
+      </MemoryRouter>,
+    );
+
+    const dateSelect = screen.getByLabelText('Filter by date');
+    await act(async () => {
+      fireEvent.change(dateSelect, { target: { value: '7d' } });
+    });
+
+    const calls = useConversationsMock.mock.calls as unknown as [
+      { dateFrom?: string; dateTo?: string | null },
+    ][];
+    const args = calls[calls.length - 1][0];
+    expect(args.dateFrom).toBeDefined();
+    expect(args.dateTo).toBeNull();
+  });
+
+  it('selecting a video passes its id', async () => {
+    const useConversationsMock = vi.fn(() => ({
+      conversations: [] as api.Conversation[],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+      rename: vi.fn(),
+      filteredConversations: [] as api.Conversation[],
+    }));
+
+    const { useConversations } = await import('../hooks/useConversations');
+    vi.mocked(useConversations).mockImplementation(useConversationsMock);
+
+    vi.spyOn(api, 'getVideos').mockResolvedValue([
+      { id: 'vid-1', title: 'Python 101' } as api.Video,
+    ]);
+
+    render(
+      <MemoryRouter>
+        <Sidebar activeConversationId={undefined} isOpen={true} onClose={vi.fn()} />
+      </MemoryRouter>,
+    );
+
+    // Wait for videos to load
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    const videoSelect = screen.getByLabelText('Filter by video');
+    await act(async () => {
+      fireEvent.change(videoSelect, { target: { value: 'vid-1' } });
+    });
+
+    const calls = useConversationsMock.mock.calls as unknown as [{ videoId?: string | null }][];
+    const args = calls[calls.length - 1][0];
+    expect(args.videoId).toBe('vid-1');
+  });
+
+  it('choosing "Custom…" reveals the two date inputs', async () => {
+    render(
+      <MemoryRouter>
+        <Sidebar activeConversationId={undefined} isOpen={true} onClose={vi.fn()} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByLabelText('From date')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('To date')).not.toBeInTheDocument();
+
+    const dateSelect = screen.getByLabelText('Filter by date');
+    await act(async () => {
+      fireEvent.change(dateSelect, { target: { value: 'custom' } });
+    });
+
+    expect(screen.getByLabelText('From date')).toBeInTheDocument();
+    expect(screen.getByLabelText('To date')).toBeInTheDocument();
+  });
+
+  it('empty list + active filter renders "No conversations match your filters"', async () => {
+    const { useConversations } = await import('../hooks/useConversations');
+    vi.mocked(useConversations).mockReturnValueOnce({
+      conversations: [] as api.Conversation[],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+      rename: vi.fn(),
+      filteredConversations: [] as api.Conversation[],
+    });
+
+    render(
+      <MemoryRouter>
+        <Sidebar activeConversationId={undefined} isOpen={true} onClose={vi.fn()} />
+      </MemoryRouter>,
+    );
+
+    // Type into search to activate filters
+    const searchInput = screen.getByPlaceholderText('Search conversations...');
+    await act(async () => {
+      fireEvent.change(searchInput, { target: { value: 'xyz' } });
+    });
+
+    // Wait for debounce
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 300));
+    });
+
+    expect(screen.getByText('No conversations match your filters')).toBeInTheDocument();
+  });
+});
