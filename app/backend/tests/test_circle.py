@@ -7,6 +7,7 @@ The function MUST never raise — it always returns a bool. We exercise:
 - non-200 from access_groups (fail-closed)
 - timeout (fail-closed)
 - inactive member
+- member with no `active` field (fail-closed)
 - member exists but NOT in paid access group
 - empty / malformed config
 - malformed response shape
@@ -107,6 +108,30 @@ async def test_inactive_member_returns_false():
     )
 
     assert await circle.verify_paid_member("inactive@example.com") is False
+
+
+@respx.mock
+async def test_member_missing_active_field_fails_closed():
+    """No `active` key on the member object must deny (fail-closed paid gate).
+
+    The access_groups endpoint is deliberately NOT mocked: a correct fix
+    short-circuits before step 2, so respx would raise on any call to it.
+    """
+    respx.get("https://app.circle.so/api/admin/v2/community_members/search").mock(
+        return_value=httpx.Response(200, json={"id": 999})
+    )
+
+    assert await circle.verify_paid_member("unknown-status@example.com") is False
+
+
+@respx.mock
+async def test_records_wrapped_member_missing_active_fails_closed():
+    """Same as above for the `records`-wrapped search shape, which often omits status."""
+    respx.get("https://app.circle.so/api/admin/v2/community_members/search").mock(
+        return_value=httpx.Response(200, json={"records": [{"id": 999}]})
+    )
+
+    assert await circle.verify_paid_member("unknown-status@example.com") is False
 
 
 @respx.mock

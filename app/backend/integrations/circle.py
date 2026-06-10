@@ -64,8 +64,10 @@ async def verify_paid_member(email: str) -> bool:
             member = _extract_member(r.json())
             if member is None:
                 return False
-            if not member.get("active", True):
-                # Inactive members lose access immediately.
+            if not member.get("active", False):
+                # Inactive members lose access immediately. A missing `active` field
+                # also denies: this is a paid-access gate and the contract is
+                # fail-closed — no explicit active signal means no access.
                 return False
             member_id = member.get("id")
             if not member_id:
