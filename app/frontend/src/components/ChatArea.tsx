@@ -323,6 +323,8 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
   const [failedMessageText, setFailedMessageText] = useState<string | null>(null);
   // Track the temp user message ID so we can remove it on failure
   const pendingUserMsgIdRef = useRef<string | null>(null);
+  // Stash the last assistant message during a regenerate so error paths can restore it
+  const removedAssistantMsgRef = useRef<MessageType | null>(null);
   // Citation modal state
   const [selectedCitation, setSelectedCitation] = useState<Citation | null>(null);
 
@@ -583,6 +585,63 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
     handleSend(text);
   }, [failedMessageText, handleSend]);
 
+  // ── Regenerate the last assistant response ──
+  const handleRegenerate = useCallback(async () => {
+    if (!conversationId || isStreaming) return;
+
+    const lastMsg = messages[messages.length - 1];
+    if (!lastMsg || lastMsg.role !== 'assistant') return;
+
+    setInlineError(null);
+    setFailedMessageText(null);
+
+    removedAssistantMsgRef.current = lastMsg;
+    setMessages((prev) => prev.slice(0, -1));
+    autoScrollRef.current = true;
+
+    try {
+      await startStream(
+        conversationId,
+        '',
+        ({ fullText, sources }) => {
+          const assistantMsg: MessageType = {
+            id: `temp-assistant-${Date.now()}`,
+            conversation_id: conversationId,
+            role: 'assistant',
+            content: fullText,
+            created_at: new Date().toISOString(),
+            sources: sources.length > 0 ? sources : undefined,
+          };
+          setMessages((prev) => [...prev, assistantMsg]);
+        },
+        { regenerate: true },
+      );
+      removedAssistantMsgRef.current = null;
+      refreshAuth();
+    } catch (e) {
+      const removed = removedAssistantMsgRef.current;
+      removedAssistantMsgRef.current = null;
+
+      if (removed) {
+        setMessages((prev) => [...prev, removed]);
+      }
+
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        return;
+      }
+
+      if (e instanceof RateLimitError) {
+        const friendly = `You've hit your daily message limit (${e.limit}/day). Resets at ${formatResetTime(e.resetAt)}.`;
+        setInlineError(friendly);
+        addToast(friendly, 'error');
+        refreshAuth();
+        return;
+      }
+
+      addToast('Failed to regenerate response. Please try again.', 'error');
+    }
+  }, [conversationId, isStreaming, messages, setMessages, startStream, addToast, refreshAuth]);
+
   // ── Starter click handler ──
   const handleStarterClick = useCallback((text: string) => {
     chatInputRef.current?.setInputText(text);
@@ -715,6 +774,13 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
                   content={msg.content}
                   sources={msg.sources}
                   onCitationClick={handleCitationClick}
+                  onRegenerate={
+                    msg.id === messages[messages.length - 1]?.id &&
+                    msg.role === 'assistant' &&
+                    !isStreaming
+                      ? handleRegenerate
+                      : undefined
+                  }
                 />
               ))
             )}

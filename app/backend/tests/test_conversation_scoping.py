@@ -235,6 +235,45 @@ async def test_post_message_into_other_users_conversation_returns_404():
 # ---------------------------------------------------------------------------
 
 
+async def test_delete_message_returns_false_for_wrong_owner(monkeypatch):
+    """`delete_message` is a no-op and returns False when the ownership
+    predicate causes Postgres to report DELETE 0. Mirrors the existing
+    fake-connection scoping tests without needing a real DB."""
+    from backend.db import repository
+
+    class _FakeConn:
+        async def execute(self, *args, **kwargs):
+            return "DELETE 0"
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+    class _FakeAcquire:
+        async def __aenter__(self) -> _FakeConn:
+            return _FakeConn()
+
+        async def __aexit__(self, *exc):
+            return False
+
+        def __await__(self):
+            async def _do():
+                return _FakeConn()
+
+            return _do().__await__()
+
+    class _FakePool:
+        def acquire(self):
+            return _FakeAcquire()
+
+    monkeypatch.setattr(repository, "get_pg_pool", lambda: _FakePool())
+
+    result = await repository.delete_message("msg-1", "conv-1", "wrong-user")
+    assert result is False
+
+
 async def test_repository_functions_require_user_id():
     """Every conversation/message repo function must take user_id.
     This is a structural invariant — forgetting it is how cross-user leaks
@@ -252,6 +291,7 @@ async def test_repository_functions_require_user_id():
         "delete_conversation",
         "create_message",
         "list_messages",
+        "delete_message",
     ]
     for name in scoped:
         fn = getattr(repository, name)

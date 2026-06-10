@@ -54,74 +54,22 @@ class MessageCreate(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# POST /api/conversations/{conv_id}/messages
+# Shared streaming helper
 # ---------------------------------------------------------------------------
 
 
-@router.post("/conversations/{conv_id}/messages")
-async def create_message(
+async def _stream_assistant_response(
     conv_id: str,
-    body: MessageCreate,
-    current_user: dict[str, Any] = Depends(get_current_user),
-):
+    user_id: str,
+    current_user: dict[str, Any],
+    llm_messages: list[dict[str, str]],
+    user_content: str,
+) -> StreamingResponse:
+    """Stream an assistant response for the given conversation history.
+
+    Shared body of ``create_message`` and ``regenerate_message`` — tool
+    plumbing, SSE generation, and assistant-message persistence.
     """
-    Send a user message and stream the RAG-grounded assistant response.
-
-    Returns:
-        StreamingResponse with Content-Type: text/event-stream
-        Each SSE event: "data: <token>\n\n"
-        Final event: "data: [DONE]\n\n"
-    """
-    user_id = str(current_user["id"])
-
-    # 1. Verify conversation exists AND belongs to current user.
-    # 404 (not 403) — don't leak existence of other users' conversations.
-    conv = await repository.get_conversation(conv_id, user_id=user_id)
-    if not conv:
-        raise HTTPException(status_code=404, detail="Conversation not found")
-
-    # 2. Enforce the 25 msg / user / 24h cap (MISSION §10 invariant #1).
-    #    Must run BEFORE any LLM or DB write so a rate-limited user cannot
-    #    consume OpenRouter budget or leave an orphan user-message row. The
-    #    audit row is inserted inside `check_and_record` on pass — partial
-    #    streams still count, users can't game the counter by aborting.
-    try:
-        await rate_limit.check_and_record(user_id)
-    except rate_limit.RateLimitExceeded as exc:
-        return JSONResponse(
-            status_code=429,
-            content={
-                "error": "rate_limit_exceeded",
-                "limit": rate_limit.DAILY_MESSAGE_CAP,
-                "window_hours": rate_limit.WINDOW_HOURS,
-                "reset_at": exc.reset_at.isoformat(),
-            },
-        )
-
-    # Content is already validated non-empty by Pydantic; strip for storage
-    user_content = body.content.strip()
-
-    # 3. Persist the user message. create_message re-checks ownership atomically
-    # so a race between the check above and insert can't leak cross-user.
-    inserted = await repository.create_message(
-        conversation_id=conv_id,
-        user_id=user_id,
-        role="user",
-        content=user_content,
-    )
-    if inserted is None:
-        raise HTTPException(status_code=404, detail="Conversation not found")
-
-    # 4. Retrieve conversation history for LLM context
-    all_messages = await repository.list_messages(conv_id, user_id=user_id)
-    llm_messages = [{"role": m["role"], "content": m["content"]} for m in all_messages]
-
-    # 5. Set up tool plumbing. All retrieval happens inside the LLM loop via
-    # tool calls — no pre-retrieval runs here. The executor closure collects
-    # every chunk returned by any tool call so the final SSE `sources` event
-    # lists exactly what the model actually read. The video_id whitelist is
-    # only consulted by the transcript tool (it guards against hallucinated
-    # ids); the search tools ignore it.
     source_citations: list[dict] = []
     tool_chunks_acc: list[dict] = []
     embedding_cache: dict[str, list[float]] = {}
@@ -304,6 +252,137 @@ async def create_message(
         event_generator(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /api/conversations/{conv_id}/messages
+# ---------------------------------------------------------------------------
+
+
+@router.post("/conversations/{conv_id}/messages")
+async def create_message(
+    conv_id: str,
+    body: MessageCreate,
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
+    """
+    Send a user message and stream the RAG-grounded assistant response.
+
+    Returns:
+        StreamingResponse with Content-Type: text/event-stream
+        Each SSE event: "data: <token>\n\n"
+        Final event: "data: [DONE]\n\n"
+    """
+    user_id = str(current_user["id"])
+
+    # 1. Verify conversation exists AND belongs to current user.
+    # 404 (not 403) — don't leak existence of other users' conversations.
+    conv = await repository.get_conversation(conv_id, user_id=user_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # 2. Enforce the 25 msg / user / 24h cap (MISSION §10 invariant #1).
+    #    Must run BEFORE any LLM or DB write so a rate-limited user cannot
+    #    consume OpenRouter budget or leave an orphan user-message row. The
+    #    audit row is inserted inside `check_and_record` on pass — partial
+    #    streams still count, users can't game the counter by aborting.
+    try:
+        await rate_limit.check_and_record(user_id)
+    except rate_limit.RateLimitExceeded as exc:
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": "rate_limit_exceeded",
+                "limit": rate_limit.DAILY_MESSAGE_CAP,
+                "window_hours": rate_limit.WINDOW_HOURS,
+                "reset_at": exc.reset_at.isoformat(),
+            },
+        )
+
+    # Content is already validated non-empty by Pydantic; strip for storage
+    user_content = body.content.strip()
+
+    # 3. Persist the user message. create_message re-checks ownership atomically
+    # so a race between the check above and insert can't leak cross-user.
+    inserted = await repository.create_message(
+        conversation_id=conv_id,
+        user_id=user_id,
+        role="user",
+        content=user_content,
+    )
+    if inserted is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # 4. Retrieve conversation history for LLM context
+    all_messages = await repository.list_messages(conv_id, user_id=user_id)
+    llm_messages = [{"role": m["role"], "content": m["content"]} for m in all_messages]
+
+    return await _stream_assistant_response(
+        conv_id, user_id, current_user, llm_messages, user_content
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /api/conversations/{conv_id}/messages/regenerate
+# ---------------------------------------------------------------------------
+
+
+@router.post("/conversations/{conv_id}/messages/regenerate")
+async def regenerate_message(
+    conv_id: str,
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
+    """
+    Regenerate the most recent assistant response.
+
+    Deletes the last assistant message and re-streams a new answer from
+    the existing user question. Counts as a normal send against the
+    daily rate limit.
+    """
+    user_id = str(current_user["id"])
+
+    # 1. Verify ownership (404, no existence leak).
+    conv = await repository.get_conversation(conv_id, user_id=user_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # 2. Load history and validate that the last message is an assistant
+    #    message preceded by at least one user message.
+    messages = await repository.list_messages(conv_id, user_id=user_id)
+    if (
+        not messages
+        or messages[-1]["role"] != "assistant"
+        or not any(m["role"] == "user" for m in messages[:-1])
+    ):
+        raise HTTPException(status_code=409, detail="No assistant response to regenerate")
+
+    # 3. Enforce the same rate-limit gate as a normal send BEFORE deleting
+    #    the old answer so a capped user keeps their existing response.
+    try:
+        await rate_limit.check_and_record(user_id)
+    except rate_limit.RateLimitExceeded as exc:
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": "rate_limit_exceeded",
+                "limit": rate_limit.DAILY_MESSAGE_CAP,
+                "window_hours": rate_limit.WINDOW_HOURS,
+                "reset_at": exc.reset_at.isoformat(),
+            },
+        )
+
+    # 4. Delete the old assistant message.
+    deleted = await repository.delete_message(messages[-1]["id"], conv_id, user_id)
+    if not deleted:
+        raise HTTPException(status_code=409, detail="No assistant response to regenerate")
+
+    # 5. Re-submit the prior history (the existing user question is reused).
+    llm_messages = [{"role": m["role"], "content": m["content"]} for m in messages[:-1]]
+    last_user_content = next(m["content"] for m in reversed(messages[:-1]) if m["role"] == "user")
+
+    return await _stream_assistant_response(
+        conv_id, user_id, current_user, llm_messages, last_user_content
     )
 
 

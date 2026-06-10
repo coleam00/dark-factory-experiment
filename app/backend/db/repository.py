@@ -577,6 +577,28 @@ async def create_message(
     }
 
 
+async def delete_message(message_id: str, conversation_id: str, user_id: str) -> bool:
+    """Delete a message. Returns False if the message or owning conversation
+    doesn't match (atomic ownership check, same pattern as create_message)."""
+    async with _acquire() as conn:
+        result = await conn.execute(
+            """
+            DELETE FROM messages
+            WHERE id = $1 AND conversation_id = $2
+              AND EXISTS (
+                  SELECT 1 FROM conversations WHERE id = $2 AND user_id = $3
+              )
+            """,
+            message_id,
+            conversation_id,
+            user_id,
+        )
+        if result == "DELETE 0":
+            return False
+    await touch_conversation(conversation_id, user_id)
+    return True
+
+
 async def list_messages(conversation_id: str, user_id: str) -> list[dict]:
     """Return messages only if the conversation belongs to the given user."""
     async with _acquire() as conn:
