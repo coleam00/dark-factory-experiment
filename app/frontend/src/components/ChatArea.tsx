@@ -5,14 +5,41 @@ import { useMessages } from '../hooks/useMessages';
 import { useStreamingResponse } from '../hooks/useStreamingResponse';
 import { useToast } from '../hooks/useToast';
 import type { Citation, Message as MessageType } from '../lib/api';
-import { RateLimitError, createConversation } from '../lib/api';
+import { RateLimitError, createConversation, setConversationScope } from '../lib/api';
 import { exportConversationAsMarkdown } from '../lib/exportMarkdown';
 import { ChatInput, type ChatInputHandle } from './ChatInput';
 import { CitationModal } from './CitationModal';
 import { Message } from './Message';
+import { VideoScopePicker } from './VideoScopePicker';
 
 function formatResetTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+// ── Scope chip ────────────────────────────────────────────────────
+function ScopeChip({ count }: { count: number }) {
+  return (
+    <div
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        background: 'rgba(59,130,246,0.12)',
+        border: '1px solid rgba(59,130,246,0.25)',
+        borderRadius: 20,
+        padding: '4px 12px',
+        color: '#60a5fa',
+        fontSize: 13,
+        fontWeight: 500,
+      }}
+    >
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="7" cy="7" r="5.5" />
+        <path d="M7 4v3l2 1.5" />
+      </svg>
+      Scoped to {count} video{count === 1 ? '' : 's'}
+    </div>
+  );
 }
 
 // ── Skeleton message rows ─────────────────────────────────────────
@@ -58,9 +85,10 @@ function SkeletonMessages() {
 // ── Empty / landing state ─────────────────────────────────────────
 interface EmptyStateProps {
   onStarterClick: (text: string) => void;
+  onFocusVideos: () => void;
 }
 
-function EmptyState({ onStarterClick }: EmptyStateProps) {
+function EmptyState({ onStarterClick, onFocusVideos }: EmptyStateProps) {
   const starters = [
     'How do I use subagents in Claude Code?',
     'How should I structure an agent team?',
@@ -99,6 +127,38 @@ function EmptyState({ onStarterClick }: EmptyStateProps) {
         This AI has access to transcripts from Cole Medin&apos;s YouTube channel and the Dynamous
         course + workshop library.
       </p>
+      <button
+        onClick={onFocusVideos}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          marginBottom: 16,
+          padding: '6px 14px',
+          background: 'rgba(59,130,246,0.1)',
+          border: '1px solid rgba(59,130,246,0.25)',
+          borderRadius: 8,
+          color: '#60a5fa',
+          fontSize: 13,
+          fontWeight: 500,
+          cursor: 'pointer',
+          transition: 'background 0.15s, border-color 0.15s',
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = 'rgba(59,130,246,0.18)';
+          e.currentTarget.style.borderColor = 'rgba(59,130,246,0.4)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = 'rgba(59,130,246,0.1)';
+          e.currentTarget.style.borderColor = 'rgba(59,130,246,0.25)';
+        }}
+      >
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="7" cy="7" r="5.5" />
+          <path d="M7 4v3l2 1.5" />
+        </svg>
+        🎯 Focus on specific videos
+      </button>
       <div
         style={{ display: 'flex', flexDirection: 'column', gap: 10, width: '100%', maxWidth: 400 }}
       >
@@ -325,6 +385,9 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
   const pendingUserMsgIdRef = useRef<string | null>(null);
   // Citation modal state
   const [selectedCitation, setSelectedCitation] = useState<Citation | null>(null);
+  // Video scope picker state
+  const [scopePickerOpen, setScopePickerOpen] = useState(false);
+  const [pendingScope, setPendingScope] = useState<string[] | null>(null);
 
   // ── Auto-scroll logic ──
   // Defer scroll to the next paint cycle so streaming DOM updates are applied first.
@@ -459,7 +522,8 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
       if (!conversationId) {
         if (isStreaming) return;
         try {
-          const conv = await createConversation();
+          const conv = await createConversation(pendingScope ?? undefined);
+          setPendingScope(null);
           navigate(`/c/${conv.id}`, {
             state: { initialMessage: content } satisfies ConvLocationState,
           });
@@ -471,6 +535,24 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
           addToast('Could not create conversation. Please try again.', 'error');
         }
         return;
+      }
+
+      // If conversation exists but is unscoped and user has picked a pending scope, set it now
+      if (conversation && !conversation.video_scope && pendingScope && pendingScope.length > 0) {
+        try {
+          await setConversationScope(conversationId, pendingScope);
+          setPendingScope(null);
+          // Refresh conversation so the scope chip renders
+          window.location.reload();
+          return;
+        } catch (e) {
+          console.error(
+            '[ChatArea] Failed to set conversation scope:',
+            e instanceof Error ? e.message : String(e),
+          );
+          addToast('Could not set video scope. Please try again.', 'error');
+          return;
+        }
       }
 
       if (isStreaming) return;
@@ -589,6 +671,15 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
     chatInputRef.current?.focus();
   }, []);
 
+  const handleFocusVideos = useCallback(() => {
+    setScopePickerOpen(true);
+  }, []);
+
+  const handleScopeConfirm = useCallback((ids: string[]) => {
+    setPendingScope(ids);
+    setScopePickerOpen(false);
+  }, []);
+
   // ── Render ──
   const showEmpty = !conversationId;
   const showNotFound = !loading && notFound && !showEmpty;
@@ -687,7 +778,14 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
           </button>
         )}
 
-        {showEmpty && <EmptyState onStarterClick={handleStarterClick} />}
+        {/* Scope chip when conversation is scoped */}
+        {conversation?.video_scope && conversation.video_scope.length > 0 && (
+          <div style={{ padding: '12px 24px 0', display: 'flex', justifyContent: 'center' }}>
+            <ScopeChip count={conversation.video_scope.length} />
+          </div>
+        )}
+
+        {showEmpty && <EmptyState onStarterClick={handleStarterClick} onFocusVideos={handleFocusVideos} />}
 
         {showSkeleton && <SkeletonMessages />}
 
@@ -706,7 +804,7 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
             style={{ padding: '24px 24px 0', display: 'flex', flexDirection: 'column' }}
           >
             {showEmptyInConversation ? (
-              <EmptyState onStarterClick={handleStarterClick} />
+              <EmptyState onStarterClick={handleStarterClick} onFocusVideos={handleFocusVideos} />
             ) : (
               messages.map((msg) => (
                 <Message
@@ -774,6 +872,16 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
           onStop={abortStream}
         />
       </div>
+
+      {/* ── Video scope picker ── */}
+      {scopePickerOpen && (
+        <VideoScopePicker
+          open={scopePickerOpen}
+          initialSelected={pendingScope ?? []}
+          onConfirm={handleScopeConfirm}
+          onClose={() => setScopePickerOpen(false)}
+        />
+      )}
 
       {/* ── Citation modal ── */}
       {selectedCitation && (

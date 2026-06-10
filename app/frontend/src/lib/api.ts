@@ -41,6 +41,7 @@ export interface Conversation {
   created_at: string;
   updated_at: string;
   preview?: string | null;
+  video_scope?: string[] | null;
 }
 
 export interface Citation {
@@ -146,8 +147,17 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 export const getConversations = () => request<Conversation[]>('/conversations');
 export const searchConversations = (q: string) =>
   request<Conversation[]>(`/conversations/search?q=${encodeURIComponent(q)}`);
-export const createConversation = () =>
-  request<Conversation>('/conversations', { method: 'POST', body: '{}' });
+export const createConversation = (videoScope?: string[]) =>
+  request<Conversation>('/conversations', {
+    method: 'POST',
+    body: JSON.stringify(videoScope ? { video_scope: videoScope } : {}),
+  });
+
+export const setConversationScope = (id: string, videoIds: string[]) =>
+  request<Conversation>(`/conversations/${id}/scope`, {
+    method: 'PATCH',
+    body: JSON.stringify({ video_ids: videoIds }),
+  });
 export const getConversation = (id: string) =>
   request<ConversationWithMessages>(`/conversations/${id}`);
 export const deleteConversation = (id: string) =>

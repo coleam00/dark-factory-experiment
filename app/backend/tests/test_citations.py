@@ -117,7 +117,12 @@ async def _post_message(*, answer_tokens: list[str], retrieved_chunks: list[dict
         yield "data: [DONE]\n\n"
 
     async def mock_execute_tool(
-        name, raw_args, video_id_whitelist=None, embedding_cache=None, is_member=False
+        name,
+        raw_args,
+        video_id_whitelist=None,
+        embedding_cache=None,
+        is_member=False,
+        allowed_video_ids=None,
     ):
         return {"ok": True, "text": "ctx", "chunks": retrieved_chunks}
 

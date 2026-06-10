@@ -144,6 +144,9 @@ async def create_message(
         # turn won't change behavior mid-flight.
         is_member_for_turn = bool(current_user.get("is_member", False))
 
+        scope = conv.get("video_scope")
+        allowed_video_ids = list(scope) if scope else None
+
         async def _executor(name: str, raw_args: str) -> str:
             # Pass `None` (not empty set) when the whitelist failed to load so
             # the transcript tool falls back to open lookups instead of rejecting
@@ -155,6 +158,7 @@ async def create_message(
                 video_id_whitelist=whitelist,
                 embedding_cache=embedding_cache,
                 is_member=is_member_for_turn,
+                allowed_video_ids=allowed_video_ids,
             )
             if result.get("ok") and result.get("chunks"):
                 tool_chunks_acc.extend(result["chunks"])

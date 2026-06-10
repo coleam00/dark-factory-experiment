@@ -30,6 +30,7 @@ export function useMessages(conversationId: string | null) {
           title: data.title,
           created_at: data.created_at,
           updated_at: data.updated_at,
+          video_scope: data.video_scope,
         });
       })
       .catch((e) => {
