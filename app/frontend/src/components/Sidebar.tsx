@@ -3,7 +3,13 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useConversations } from '../hooks/useConversations';
 import { useToast } from '../hooks/useToast';
-import { type Conversation, createConversation, deleteConversation } from '../lib/api';
+import {
+  type Conversation,
+  type Video,
+  createConversation,
+  deleteConversation,
+  getVideos,
+} from '../lib/api';
 import { VideoExplorer } from './VideoExplorer';
 
 // ── Relative time helper ─────────────────────────────────────────
@@ -413,8 +419,19 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
-  const { conversations, loading, refetch, rename, filteredConversations } =
-    useConversations(debouncedQuery);
+  const [videoFilter, setVideoFilter] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [videos, setVideos] = useState<Video[]>([]);
+  const hasActiveFilters = Boolean(videoFilter || dateFrom || dateTo);
+  const { conversations, loading, refetch, rename, filteredConversations } = useConversations(
+    debouncedQuery,
+    {
+      videoId: videoFilter || undefined,
+      dateFrom: dateFrom || undefined,
+      dateTo: dateTo || undefined,
+    },
+  );
   const { user, logout } = useAuth();
   const [creatingNew, setCreatingNew] = useState(false);
   const [newChatError, setNewChatError] = useState<string | null>(null);
@@ -430,6 +447,27 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
     const timer = setTimeout(() => setDebouncedQuery(searchQuery), 250);
     return () => clearTimeout(timer);
   }, [searchQuery]);
+
+  // Load the video list once for the filter dropdown
+  useEffect(() => {
+    let cancelled = false;
+    getVideos()
+      .then((vs) => {
+        if (!cancelled) setVideos(vs);
+      })
+      .catch(() => {
+        // Dropdown stays at "All videos" — filtering by video is just unavailable.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleClearFilters = () => {
+    setVideoFilter('');
+    setDateFrom('');
+    setDateTo('');
+  };
 
   // Store refetch in the shared ref so ChatArea can trigger it
   useEffect(() => {
@@ -601,6 +639,108 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
           />
         </div>
 
+        {/* ── Filters: video + date range ── */}
+        <div
+          style={{
+            padding: '0 12px 8px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+          }}
+        >
+          <select
+            value={videoFilter}
+            onChange={(e) => setVideoFilter(e.target.value)}
+            aria-label="Filter by video"
+            className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+            style={{
+              width: '100%',
+              padding: '7px 10px',
+              borderRadius: 8,
+              background: '#1e293b',
+              border: '1px solid #334155',
+              color: videoFilter ? '#f1f5f9' : '#94a3b8',
+              fontSize: 13,
+              outline: 'none',
+              transition: 'border-color 0.15s',
+            }}
+            onFocus={(e) => (e.currentTarget.style.borderColor = '#3b82f6')}
+            onBlur={(e) => (e.currentTarget.style.borderColor = '#334155')}
+          >
+            <option value="">All videos</option>
+            {videos.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.title}
+              </option>
+            ))}
+          </select>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <input
+              type="date"
+              value={dateFrom}
+              max={dateTo || undefined}
+              onChange={(e) => setDateFrom(e.target.value)}
+              aria-label="Filter from date"
+              className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+              style={{
+                flex: 1,
+                minWidth: 0,
+                padding: '6px 8px',
+                borderRadius: 8,
+                background: '#1e293b',
+                border: '1px solid #334155',
+                color: dateFrom ? '#f1f5f9' : '#94a3b8',
+                fontSize: 12,
+                outline: 'none',
+                colorScheme: 'dark',
+                transition: 'border-color 0.15s',
+              }}
+              onFocus={(e) => (e.currentTarget.style.borderColor = '#3b82f6')}
+              onBlur={(e) => (e.currentTarget.style.borderColor = '#334155')}
+            />
+            <input
+              type="date"
+              value={dateTo}
+              min={dateFrom || undefined}
+              onChange={(e) => setDateTo(e.target.value)}
+              aria-label="Filter to date"
+              className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+              style={{
+                flex: 1,
+                minWidth: 0,
+                padding: '6px 8px',
+                borderRadius: 8,
+                background: '#1e293b',
+                border: '1px solid #334155',
+                color: dateTo ? '#f1f5f9' : '#94a3b8',
+                fontSize: 12,
+                outline: 'none',
+                colorScheme: 'dark',
+                transition: 'border-color 0.15s',
+              }}
+              onFocus={(e) => (e.currentTarget.style.borderColor = '#3b82f6')}
+              onBlur={(e) => (e.currentTarget.style.borderColor = '#334155')}
+            />
+          </div>
+          {hasActiveFilters && (
+            <button
+              onClick={handleClearFilters}
+              className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+              style={{
+                alignSelf: 'flex-start',
+                background: 'transparent',
+                border: 'none',
+                color: '#3b82f6',
+                cursor: 'pointer',
+                fontSize: 12,
+                padding: '2px 4px',
+              }}
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
+
         {/* ── Conversation list ── */}
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {loading ? (
@@ -630,7 +770,34 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
               >
                 <path d="M6,4 L30,4 A2,2 0 0,1 32,6 L32,24 A2,2 0 0,1 30,26 L10,26 L4,32 L4,6 A2,2 0 0,1 6,4 Z" />
               </svg>
-              {debouncedQuery.trim() ? (
+              {hasActiveFilters ? (
+                <>
+                  <p style={{ margin: 0, fontSize: 13 }}>No conversations match your filters</p>
+                  <button
+                    onClick={handleClearFilters}
+                    className="active:brightness-90 focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+                    style={{
+                      marginTop: 10,
+                      background: 'transparent',
+                      border: '1px solid rgba(59,130,246,0.4)',
+                      borderRadius: 8,
+                      color: '#3b82f6',
+                      cursor: 'pointer',
+                      fontSize: 13,
+                      padding: '7px 16px',
+                      transition: 'background 0.15s, filter 0.15s',
+                    }}
+                    onMouseEnter={(e) =>
+                      (e.currentTarget.style.background = 'rgba(59,130,246,0.1)')
+                    }
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = 'transparent';
+                    }}
+                  >
+                    Clear filters
+                  </button>
+                </>
+              ) : debouncedQuery.trim() ? (
                 <p style={{ margin: 0, fontSize: 13 }}>
                   No matches for <strong style={{ color: '#94a3b8' }}>"{debouncedQuery}"</strong>
                 </p>

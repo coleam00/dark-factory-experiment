@@ -284,6 +284,80 @@ describe('Sidebar handleNewChat', () => {
   });
 });
 
+describe('Sidebar filters', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    navigateMock.mockReset();
+  });
+
+  it('shows the filtered empty state and resets filters via Clear filters', async () => {
+    vi.spyOn(api, 'getVideos').mockResolvedValue([
+      {
+        id: 'v1',
+        title: 'Video One',
+        description: '',
+        url: 'https://youtube.com/watch?v=v1',
+        created_at: '2024-01-01T00:00:00Z',
+      },
+    ] as api.Video[]);
+
+    render(
+      <MemoryRouter>
+        <Sidebar activeConversationId={undefined} isOpen={true} onClose={vi.fn()} />
+      </MemoryRouter>,
+    );
+
+    // Wait for the video list to populate the dropdown
+    await screen.findByRole('option', { name: 'Video One' });
+    const select = screen.getByLabelText('Filter by video') as HTMLSelectElement;
+
+    await act(async () => {
+      fireEvent.change(select, { target: { value: 'v1' } });
+    });
+
+    // filteredConversations is [] (mocked) — filtered empty state shows
+    expect(screen.getByText('No conversations match your filters')).toBeInTheDocument();
+
+    const clearButtons = screen.getAllByRole('button', { name: 'Clear filters' });
+    await act(async () => {
+      fireEvent.click(clearButtons[0]);
+    });
+
+    expect(select.value).toBe('');
+    expect(screen.queryByText('No conversations match your filters')).not.toBeInTheDocument();
+    expect(screen.getByText('No conversations yet')).toBeInTheDocument();
+  });
+
+  it('resets date filters via Clear filters', async () => {
+    vi.spyOn(api, 'getVideos').mockResolvedValue([] as api.Video[]);
+
+    render(
+      <MemoryRouter>
+        <Sidebar activeConversationId={undefined} isOpen={true} onClose={vi.fn()} />
+      </MemoryRouter>,
+    );
+
+    const fromInput = screen.getByLabelText('Filter from date') as HTMLInputElement;
+    const toInput = screen.getByLabelText('Filter to date') as HTMLInputElement;
+
+    await act(async () => {
+      fireEvent.change(fromInput, { target: { value: '2026-06-01' } });
+      fireEvent.change(toInput, { target: { value: '2026-06-07' } });
+    });
+
+    expect(fromInput.value).toBe('2026-06-01');
+    expect(toInput.value).toBe('2026-06-07');
+
+    const clearButtons = screen.getAllByRole('button', { name: 'Clear filters' });
+    await act(async () => {
+      fireEvent.click(clearButtons[0]);
+    });
+
+    expect(fromInput.value).toBe('');
+    expect(toInput.value).toBe('');
+  });
+});
+
 describe('Sidebar logout', () => {
   beforeEach(() => {
     vi.clearAllMocks();

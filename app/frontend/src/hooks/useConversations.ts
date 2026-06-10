@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { type Conversation, getConversations, renameConversation } from '../lib/api';
 
-export function useConversations(searchQuery?: string) {
+export interface ConversationListFilters {
+  videoId?: string;
+  /** YYYY-MM-DD (inclusive) */
+  dateFrom?: string;
+  /** YYYY-MM-DD (inclusive) */
+  dateTo?: string;
+}
+
+export function useConversations(searchQuery?: string, filters?: ConversationListFilters) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -9,11 +17,15 @@ export function useConversations(searchQuery?: string) {
   // when the user types faster than the network replies.
   const fetchIdRef = useRef(0);
 
+  const videoId = filters?.videoId;
+  const dateFrom = filters?.dateFrom;
+  const dateTo = filters?.dateTo;
+
   const load = useCallback(async () => {
     const myId = ++fetchIdRef.current;
     try {
       setLoading(true);
-      const data = await getConversations();
+      const data = await getConversations({ videoId, dateFrom, dateTo });
       if (myId === fetchIdRef.current) setConversations(data);
     } catch (e) {
       if (myId === fetchIdRef.current) {
@@ -22,7 +34,7 @@ export function useConversations(searchQuery?: string) {
     } finally {
       if (myId === fetchIdRef.current) setLoading(false);
     }
-  }, []);
+  }, [videoId, dateFrom, dateTo]);
 
   useEffect(() => {
     load();

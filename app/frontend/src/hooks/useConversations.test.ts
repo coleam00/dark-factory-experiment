@@ -215,4 +215,81 @@ describe('useConversations', () => {
       expect(result.current.filteredConversations[0].id).toBe('1');
     });
   });
+
+  describe('server-side filters', () => {
+    it('passes video and date filters to getConversations', async () => {
+      const spy = vi
+        .spyOn(api, 'getConversations')
+        .mockResolvedValue([] as api.Conversation[]);
+
+      renderHook(() =>
+        useConversations('', { videoId: 'v1', dateFrom: '2026-06-01', dateTo: '2026-06-07' }),
+      );
+
+      await waitFor(() =>
+        expect(spy).toHaveBeenCalledWith({
+          videoId: 'v1',
+          dateFrom: '2026-06-01',
+          dateTo: '2026-06-07',
+        }),
+      );
+    });
+
+    it('refetches when the filters argument changes', async () => {
+      const spy = vi
+        .spyOn(api, 'getConversations')
+        .mockResolvedValue([] as api.Conversation[]);
+
+      type Props = { filters?: { videoId?: string; dateFrom?: string; dateTo?: string } };
+      const { result, rerender } = renderHook(
+        ({ filters }: Props) => useConversations('', filters),
+        { initialProps: {} as Props },
+      );
+
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(spy).toHaveBeenCalledTimes(1);
+
+      rerender({ filters: { videoId: 'v2' } });
+
+      await waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
+      expect(spy).toHaveBeenLastCalledWith({
+        videoId: 'v2',
+        dateFrom: undefined,
+        dateTo: undefined,
+      });
+    });
+
+    it('does not refetch on rerender when filter values are unchanged', async () => {
+      const spy = vi
+        .spyOn(api, 'getConversations')
+        .mockResolvedValue([] as api.Conversation[]);
+
+      const { result, rerender } = renderHook(
+        ({ filters }: { filters?: { videoId?: string } }) => useConversations('', filters),
+        { initialProps: { filters: { videoId: 'v1' } } },
+      );
+
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(spy).toHaveBeenCalledTimes(1);
+
+      // New object identity, same values — useCallback deps are the values.
+      rerender({ filters: { videoId: 'v1' } });
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(spy).toHaveBeenCalledTimes(1);
+    });
+
+    it('applies the client-side title filter on top of server-filtered results', async () => {
+      const conversations = [
+        { id: '1', title: 'Python Tutorial', created_at: '', updated_at: '', preview: 'Hello' },
+        { id: '2', title: 'JavaScript Guide', created_at: '', updated_at: '', preview: 'Hi' },
+      ];
+      vi.spyOn(api, 'getConversations').mockResolvedValue(conversations as api.Conversation[]);
+
+      const { result } = renderHook(() => useConversations('python', { videoId: 'v1' }));
+
+      await waitFor(() => expect(result.current.filteredConversations).toHaveLength(1));
+      expect(result.current.filteredConversations[0].id).toBe('1');
+    });
+  });
 });

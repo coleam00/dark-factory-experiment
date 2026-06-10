@@ -6,6 +6,7 @@ belongs to another user returns 404, not 403 — don't leak existence.
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -26,8 +27,22 @@ class ConversationRename(BaseModel):
 
 
 @router.get("/conversations")
-async def list_conversations(current_user: dict[str, Any] = Depends(get_current_user)):
-    return await repository.list_conversations(user_id=str(current_user["id"]))
+async def list_conversations(
+    q: str | None = None,
+    video_id: str | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
+    if date_from and date_to and date_from > date_to:
+        raise HTTPException(status_code=422, detail="date_from must be on or before date_to")
+    return await repository.list_conversations(
+        user_id=str(current_user["id"]),
+        q=q,
+        video_id=video_id,
+        date_from=date_from,
+        date_to=date_to,
+    )
 
 
 @router.post("/conversations", status_code=201)

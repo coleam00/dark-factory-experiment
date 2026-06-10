@@ -11,7 +11,8 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from typing import Any
 
 import asyncpg
 
@@ -450,10 +451,63 @@ async def get_conversation(conv_id: str, user_id: str) -> dict | None:
     return dict(row) if row else None
 
 
-async def list_conversations(user_id: str) -> list[dict]:
+def _build_conversation_filters(
+    *,
+    q: str | None,
+    video_id: str | None,
+    date_from: date | None,
+    date_to: date | None,
+    start_index: int,
+) -> tuple[list[str], list[Any]]:
+    """Build optional WHERE fragments for conversation list filtering.
+
+    Returns fixed SQL condition fragments (placeholders numbered from
+    start_index) and the matching params. User input only ever travels
+    through the params list — never into the SQL text itself.
+    """
+    conditions: list[str] = []
+    params: list[Any] = []
+    n = start_index
+    if q is not None:
+        conditions.append(f"c.title ILIKE ${n}")
+        params.append(f"%{q}%")
+        n += 1
+    if video_id is not None:
+        conditions.append(
+            "EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id "
+            f"AND m.sources @> jsonb_build_array(jsonb_build_object('video_id', ${n}::text)))"
+        )
+        params.append(video_id)
+        n += 1
+    if date_from is not None:
+        conditions.append(f"c.created_at >= ${n}::date")
+        params.append(date_from)
+        n += 1
+    if date_to is not None:
+        # Inclusive end day: anything strictly before the day after date_to.
+        conditions.append(f"c.created_at < (${n}::date + interval '1 day')")
+        params.append(date_to)
+        n += 1
+    return conditions, params
+
+
+async def list_conversations(
+    user_id: str,
+    *,
+    q: str | None = None,
+    video_id: str | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+) -> list[dict]:
+    conditions, params = _build_conversation_filters(
+        q=q, video_id=video_id, date_from=date_from, date_to=date_to, start_index=2
+    )
+    filter_sql = ""
+    if conditions:
+        filter_sql = " AND " + " AND ".join(conditions)
     async with _acquire() as conn:
         rows = await conn.fetch(
-            """
+            f"""
             SELECT c.*,
                    (SELECT content
                     FROM messages
@@ -461,10 +515,11 @@ async def list_conversations(user_id: str) -> list[dict]:
                     ORDER BY created_at DESC
                     LIMIT 1) AS preview
             FROM conversations c
-            WHERE c.user_id = $1
+            WHERE c.user_id = $1{filter_sql}
             ORDER BY c.updated_at DESC
             """,
             user_id,
+            *params,
         )
     return [dict(r) for r in rows]
 
