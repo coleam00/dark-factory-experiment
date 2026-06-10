@@ -767,7 +767,7 @@ class TestRefusalSourcesSuppressionIntegration:
             yield done_chunk
 
         async def mock_execute_tool(
-            name, raw_args, video_id_whitelist=None, embedding_cache=None, is_member=False
+            name, raw_args, video_id_whitelist=None, embedding_cache=None, is_member=False, video_id_filter=None
         ):
             return {"ok": True, "text": "context", "chunks": source_citations}
 
@@ -871,7 +871,7 @@ class TestRefusalSourcesSuppressionIntegration:
             yield done_chunk
 
         async def mock_execute_tool(
-            name, raw_args, video_id_whitelist=None, embedding_cache=None, is_member=False
+            name, raw_args, video_id_whitelist=None, embedding_cache=None, is_member=False, video_id_filter=None
         ):
             return {"ok": True, "text": "context", "chunks": source_citations}
 
@@ -976,7 +976,7 @@ class TestRefusalSourcesSuppressionIntegration:
             yield done_chunk
 
         async def mock_execute_tool(
-            name, raw_args, video_id_whitelist=None, embedding_cache=None, is_member=False
+            name, raw_args, video_id_whitelist=None, embedding_cache=None, is_member=False, video_id_filter=None
         ):
             return {"ok": True, "text": "context", "chunks": source_citations}
 
@@ -1091,7 +1091,7 @@ class TestChunkExpansionIntegration:
             yield done_chunk
 
         async def mock_execute_tool(
-            name, raw_args, video_id_whitelist=None, embedding_cache=None, is_member=False
+            name, raw_args, video_id_whitelist=None, embedding_cache=None, is_member=False, video_id_filter=None
         ):
             return {"ok": True, "text": "context", "chunks": source_citations}
 

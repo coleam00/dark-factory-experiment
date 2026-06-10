@@ -253,6 +253,7 @@ async def keyword_search(
     top_k: int,
     language: str = "english",
     allowed_source_types: list[str] | None = None,
+    video_id_filter: list[str] | None = None,
 ) -> list[dict]:
     """
     Return top-K chunks matching a full-text query using tsvector.
@@ -265,6 +266,10 @@ async def keyword_search(
             this list are excluded. Defaults to ['youtube'] which is the
             backwards-compatible behavior for callers that don't yet know
             about Dynamous content (issue #147).
+        video_id_filter: Conversation-scope filter (issue #279) — when not None,
+            only chunks whose video_id is in this list are returned. None means
+            no video filtering (search the whole library). Composes with
+            allowed_source_types; it does not replace it.
 
     Returns:
         List of chunk dicts with keys: id, video_id, content, chunk_index,
@@ -272,9 +277,10 @@ async def keyword_search(
     """
     if allowed_source_types is None:
         allowed_source_types = ["youtube"]
-    async with _acquire() as conn:
-        rows = await conn.fetch(
-            """
+    # Build the SQL/args conditionally so the unscoped path stays byte-for-byte
+    # identical to the pre-#279 query (no extra clause, no extra param).
+    if video_id_filter is None:
+        sql = """
             SELECT id, video_id, content, chunk_index, start_seconds, end_seconds, snippet,
                    ts_rank(search_vector, plainto_tsquery($1)) AS rank
             FROM chunks
@@ -282,11 +288,22 @@ async def keyword_search(
               AND source_type = ANY($3::text[])
             ORDER BY rank DESC
             LIMIT $2
-            """,
-            query,
-            top_k,
-            allowed_source_types,
-        )
+            """
+        args: tuple = (query, top_k, allowed_source_types)
+    else:
+        sql = """
+            SELECT id, video_id, content, chunk_index, start_seconds, end_seconds, snippet,
+                   ts_rank(search_vector, plainto_tsquery($1)) AS rank
+            FROM chunks
+            WHERE search_vector @@ plainto_tsquery($1)
+              AND source_type = ANY($3::text[])
+              AND video_id = ANY($4::text[])
+            ORDER BY rank DESC
+            LIMIT $2
+            """
+        args = (query, top_k, allowed_source_types, video_id_filter)
+    async with _acquire() as conn:
+        rows = await conn.fetch(sql, *args)
     return [dict(r) for r in rows]
 
 
@@ -294,6 +311,7 @@ async def vector_search_pg(
     query_embedding: list[float],
     top_k: int,
     allowed_source_types: list[str] | None = None,
+    video_id_filter: list[str] | None = None,
 ) -> list[dict]:
     """
     Return top-K chunks by pgvector cosine similarity.
@@ -311,6 +329,10 @@ async def vector_search_pg(
             compatibility (issue #147). The pool's `hnsw.iterative_scan =
             relaxed_order` setting (see db/postgres.py) keeps the HNSW index
             usable under this filter.
+        video_id_filter: Conversation-scope filter (issue #279) — when not None,
+            only chunks whose video_id is in this list are returned. None means
+            no video filtering (search the whole library). Composes with
+            allowed_source_types; it does not replace it.
 
     Returns:
         List of chunk dicts with keys: id, video_id, content, chunk_index,
@@ -319,20 +341,31 @@ async def vector_search_pg(
     if allowed_source_types is None:
         allowed_source_types = ["youtube"]
     embedding_json = json.dumps(query_embedding)
-    async with _acquire() as conn:
-        rows = await conn.fetch(
-            """
+    # Build the SQL/args conditionally so the unscoped path stays byte-for-byte
+    # identical to the pre-#279 query (no extra clause, no extra param).
+    if video_id_filter is None:
+        sql = """
             SELECT id, video_id, content, chunk_index, start_seconds, end_seconds, snippet,
                    embedding::vector <=> $1::vector AS distance
             FROM chunks
             WHERE source_type = ANY($3::text[])
             ORDER BY distance
             LIMIT $2
-            """,
-            embedding_json,
-            top_k,
-            allowed_source_types,
-        )
+            """
+        args: tuple = (embedding_json, top_k, allowed_source_types)
+    else:
+        sql = """
+            SELECT id, video_id, content, chunk_index, start_seconds, end_seconds, snippet,
+                   embedding::vector <=> $1::vector AS distance
+            FROM chunks
+            WHERE source_type = ANY($3::text[])
+              AND video_id = ANY($4::text[])
+            ORDER BY distance
+            LIMIT $2
+            """
+        args = (embedding_json, top_k, allowed_source_types, video_id_filter)
+    async with _acquire() as conn:
+        rows = await conn.fetch(sql, *args)
     return [dict(r) for r in rows]
 
 
@@ -415,20 +448,35 @@ async def replace_chunks_for_video(
 # ---------------------------------------------------------------------------
 
 
-async def create_conversation(*, user_id: str, title: str = "New Conversation") -> dict:
+async def create_conversation(
+    *,
+    user_id: str,
+    title: str = "New Conversation",
+    scoped_video_ids: list[str] | None = None,
+) -> dict:
+    """Create a conversation, optionally scoped to a subset of videos.
+
+    ``scoped_video_ids`` is the immutable-at-creation video filter (issue #279).
+    A non-empty list restricts every retrieval in this conversation to those
+    ``video_id``s; ``None`` or an empty list stores NULL and searches the whole
+    library (the default behavior). Empty lists are normalized to NULL so the
+    retrieval layer can treat "no scope" uniformly.
+    """
     conv_id = _new_id()
     now = _now()
+    scoped = scoped_video_ids or None
     async with _acquire() as conn:
         await conn.execute(
             """
-            INSERT INTO conversations (id, user_id, title, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO conversations (id, user_id, title, created_at, updated_at, scoped_video_ids)
+            VALUES ($1, $2, $3, $4, $5, $6)
             """,
             conv_id,
             user_id,
             title,
             now,
             now,
+            scoped,
         )
     return {
         "id": conv_id,
@@ -436,6 +484,7 @@ async def create_conversation(*, user_id: str, title: str = "New Conversation") 
         "title": title,
         "created_at": now,
         "updated_at": now,
+        "scoped_video_ids": scoped,
     }
 
 

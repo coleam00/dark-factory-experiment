@@ -152,10 +152,17 @@ class TestRetrieveHybrid:
 
             # Verify correct arguments passed (over-fetch factor applied)
             mock_kw.assert_called_once_with(
-                "test query", top_k=fetch_k, language="english", allowed_source_types=["youtube"]
+                "test query",
+                top_k=fetch_k,
+                language="english",
+                allowed_source_types=["youtube"],
+                video_id_filter=None,
             )
             mock_vec.assert_called_once_with(
-                [0.1] * 1536, top_k=fetch_k, allowed_source_types=["youtube"]
+                [0.1] * 1536,
+                top_k=fetch_k,
+                allowed_source_types=["youtube"],
+                video_id_filter=None,
             )
 
             # Verify result shape has all required citation fields

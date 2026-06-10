@@ -80,6 +80,12 @@ async def create_message(
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
+    # Per-conversation video scope (issue #279). Set once at creation and
+    # immutable thereafter; None/empty means "search the whole library". This
+    # is the only consumer — it's threaded into the tool executor below so
+    # every retrieval in this turn (and every later turn) respects the scope.
+    scoped_video_ids: list[str] | None = conv.get("scoped_video_ids") or None
+
     # 2. Enforce the 25 msg / user / 24h cap (MISSION §10 invariant #1).
     #    Must run BEFORE any LLM or DB write so a rate-limited user cannot
     #    consume OpenRouter budget or leave an orphan user-message row. The
@@ -139,6 +145,14 @@ async def create_message(
             )
             video_id_whitelist = set()
 
+        # When the conversation is scoped (issue #279), narrow the transcript
+        # whitelist to the in-scope videos so the model can't pull an
+        # out-of-scope full transcript. Intersect with the loaded library set so
+        # ids that no longer exist drop out. The search tools enforce scope via
+        # ``video_id_filter`` below; this is the transcript tool's guard.
+        if scoped_video_ids:
+            video_id_whitelist = video_id_whitelist & set(scoped_video_ids)
+
         # Captured at the start of the turn so the entire tool sequence sees
         # consistent ACL — even if /me later flips is_member, the in-flight
         # turn won't change behavior mid-flight.
@@ -155,6 +169,7 @@ async def create_message(
                 video_id_whitelist=whitelist,
                 embedding_cache=embedding_cache,
                 is_member=is_member_for_turn,
+                video_id_filter=scoped_video_ids,
             )
             if result.get("ok") and result.get("chunks"):
                 tool_chunks_acc.extend(result["chunks"])

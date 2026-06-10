@@ -5,6 +5,7 @@ import { useConversations } from '../hooks/useConversations';
 import { useToast } from '../hooks/useToast';
 import { type Conversation, createConversation, deleteConversation } from '../lib/api';
 import { VideoExplorer } from './VideoExplorer';
+import { VideoScopePicker } from './VideoScopePicker';
 
 // ── Relative time helper ─────────────────────────────────────────
 function formatRelativeTime(dateStr: string): string {
@@ -422,6 +423,7 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState(false);
   const [explorerOpen, setExplorerOpen] = useState(false);
+  const [scopePickerOpen, setScopePickerOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const { addToast } = useToast();
 
@@ -461,6 +463,15 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
     } finally {
       setCreatingNew(false);
     }
+  };
+
+  // ── Scoped new chat (issue #279) ──
+  // The picker creates the conversation itself; we just refresh the list and
+  // navigate to it.
+  const handleScopedCreated = async (conv: Conversation) => {
+    await refetch();
+    navigate(`/c/${conv.id}`);
+    onClose();
   };
 
   // ── Delete flow ──
@@ -568,6 +579,56 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
               <line x1="2" y1="7" x2="12" y2="7" />
             </svg>
             {creatingNew ? 'Creating…' : 'New Chat'}
+          </button>
+
+          {/* Scope-to-videos affordance (issue #279) — opens a picker that
+              creates a conversation restricted to the chosen videos. */}
+          <button
+            onClick={() => setScopePickerOpen(true)}
+            title="Start a chat scoped to specific videos"
+            className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+            style={{
+              width: '100%',
+              marginTop: 6,
+              background: 'transparent',
+              color: '#94a3b8',
+              border: '1px solid rgba(255,255,255,0.08)',
+              borderRadius: 8,
+              padding: '7px 16px',
+              cursor: 'pointer',
+              fontWeight: 500,
+              fontSize: 13,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
+              transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = '#1e293b';
+              e.currentTarget.style.color = '#f1f5f9';
+              e.currentTarget.style.borderColor = 'rgba(59,130,246,0.4)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent';
+              e.currentTarget.style.color = '#94a3b8';
+              e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)';
+            }}
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 14 14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <rect x="1" y="2" width="12" height="10" rx="2" />
+              <polygon points="5,4.5 9.5,7 5,9.5" fill="currentColor" stroke="none" />
+            </svg>
+            Scope to videos
           </button>
 
           {newChatError && (
@@ -854,6 +915,13 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
 
       {/* ── Video Explorer panel ── */}
       <VideoExplorer isOpen={explorerOpen} onClose={() => setExplorerOpen(false)} />
+
+      {/* ── Scope-to-videos picker (issue #279) ── */}
+      <VideoScopePicker
+        isOpen={scopePickerOpen}
+        onClose={() => setScopePickerOpen(false)}
+        onCreated={handleScopedCreated}
+      />
     </>
   );
 }

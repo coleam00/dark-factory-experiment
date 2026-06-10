@@ -705,6 +705,43 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
             ref={messagesWrapperRef}
             style={{ padding: '24px 24px 0', display: 'flex', flexDirection: 'column' }}
           >
+            {/* Scope banner (issue #279) — read-only indicator that this
+                conversation is restricted to a subset of videos. */}
+            {conversation?.scoped_video_ids && conversation.scoped_video_ids.length > 0 && (
+              <div
+                data-testid="scope-banner"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  alignSelf: 'flex-start',
+                  background: 'rgba(59,130,246,0.1)',
+                  border: '1px solid rgba(59,130,246,0.3)',
+                  borderRadius: 8,
+                  padding: '6px 12px',
+                  marginBottom: 16,
+                  fontSize: 13,
+                  color: '#93c5fd',
+                }}
+              >
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 14 14"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <rect x="1" y="2" width="12" height="10" rx="2" />
+                  <polygon points="5,4.5 9.5,7 5,9.5" fill="currentColor" stroke="none" />
+                </svg>
+                Scoped to {conversation.scoped_video_ids.length} video
+                {conversation.scoped_video_ids.length === 1 ? '' : 's'}
+              </div>
+            )}
+
             {showEmptyInConversation ? (
               <EmptyState onStarterClick={handleStarterClick} />
             ) : (

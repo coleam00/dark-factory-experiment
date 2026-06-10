@@ -30,6 +30,9 @@ export function useMessages(conversationId: string | null) {
           title: data.title,
           created_at: data.created_at,
           updated_at: data.updated_at,
+          // Surface the per-conversation video scope (issue #279) so ChatArea
+          // can render the "Scoped to N videos" banner.
+          scoped_video_ids: data.scoped_video_ids,
         });
       })
       .catch((e) => {
