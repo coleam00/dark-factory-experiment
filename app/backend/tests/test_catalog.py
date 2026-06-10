@@ -71,7 +71,7 @@ def test_build_catalog_block_standard() -> None:
 def test_build_catalog_block_extended() -> None:
     videos = [{"id": "vid-abc", "title": "My Video", "url": "https://youtube.com/watch?v=abc"}]
     block = catalog.build_catalog_block(videos, "extended")
-    assert block["cache_control"] == {"type": "ephemeral", "ttl": 3600}
+    assert block["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
 
 
 def test_build_catalog_block_untitled_fallback() -> None:
@@ -263,13 +263,16 @@ async def test_build_system_prompt_catalog_treats_missing_source_type_as_youtube
 # ---------------------------------------------------------------------------
 
 
-def test_build_catalog_block_extended_ttl_is_integer() -> None:
-    """CATALOG_TIER='extended' must produce an integer ttl, not a string."""
-    with patch("backend.rag.catalog.CATALOG_CACHE_TTL_SECONDS", 3600):
-        videos = [{"id": "v", "title": "Vid", "url": "https://youtu.be/x"}]
-        block = catalog.build_catalog_block(videos, "extended")
-    assert isinstance(block["cache_control"]["ttl"], int)
-    assert block["cache_control"]["ttl"] == 3600
+def test_build_catalog_block_extended_ttl_is_anthropic_duration() -> None:
+    """Anthropic's cache_control.ttl only accepts the strings "5m" or "1h".
+
+    Regression test for #246: the extended tier previously sent integer
+    seconds (3600), which the API does not accept.
+    """
+    videos = [{"id": "v", "title": "Vid", "url": "https://youtu.be/x"}]
+    block = catalog.build_catalog_block(videos, "extended")
+    assert block["cache_control"]["ttl"] == "1h"
+    assert not isinstance(block["cache_control"]["ttl"], int)
 
 
 def test_build_catalog_block_missing_url() -> None:
