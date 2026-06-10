@@ -537,6 +537,113 @@ describe('conversationId reset — state clears on navigation', () => {
   });
 });
 
+describe('mid-stream error event', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('rejects without calling onComplete when an error payload arrives after partial tokens', async () => {
+    const sseChunks = [
+      'data: "Partial "\n\n',
+      'data: {"error": "upstream model failure"}\n\n',
+      'data: "should never be appended"\n\n',
+      'data: [DONE]\n\n',
+    ];
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: makeSseStream(sseChunks),
+      }),
+    );
+
+    const onComplete = vi.fn();
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await act(async () => {
+      await expect(result.current.startStream('conv-1', 'hi', onComplete)).rejects.toThrow(
+        /upstream model failure/,
+      );
+    });
+
+    expect(onComplete).not.toHaveBeenCalled();
+    // finally cleanup still ran exactly once
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.streamingContent).toBe('');
+    expect(result.current.streamingStatus).toBeNull();
+  });
+
+  it('stops reading promptly after the error event instead of draining the stream', async () => {
+    const enc = new TextEncoder();
+    const remaining = [
+      'data: "Partial "\n\n',
+      'data: {"error": "upstream model failure"}\n\n',
+      'data: "sentinel"\n\n',
+      'data: [DONE]\n\n',
+    ];
+    // Pull-based stream: chunks are only handed out as the consumer reads.
+    // If the reader loop kept spinning after the error, the [DONE] chunk
+    // would be pulled; with the fix it must remain unread.
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        const chunk = remaining.shift();
+        if (chunk === undefined) {
+          controller.close();
+        } else {
+          controller.enqueue(enc.encode(chunk));
+        }
+      },
+    });
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: stream,
+      }),
+    );
+
+    const onComplete = vi.fn();
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await act(async () => {
+      await expect(result.current.startStream('conv-1', 'hi', onComplete)).rejects.toThrow(
+        /upstream model failure/,
+      );
+    });
+
+    expect(onComplete).not.toHaveBeenCalled();
+    expect(remaining).toContain('data: [DONE]\n\n');
+  });
+
+  it('falls back to the default message when the error payload is malformed JSON', async () => {
+    const sseChunks = ['data: {"error" oops\n\n'];
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: makeSseStream(sseChunks),
+      }),
+    );
+
+    const onComplete = vi.fn();
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await act(async () => {
+      await expect(result.current.startStream('conv-1', 'hi', onComplete)).rejects.toThrow(
+        /Stream error from server/,
+      );
+    });
+
+    expect(onComplete).not.toHaveBeenCalled();
+  });
+});
+
 describe('sources event — hook state via renderHook', () => {
   beforeEach(() => {
     vi.clearAllMocks();

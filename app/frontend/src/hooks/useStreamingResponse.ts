@@ -107,7 +107,7 @@ export function useStreamingResponse(conversationId: string | null) {
         // Buffer for incomplete SSE data between reader.read() calls
         let buffer = '';
 
-        while (true) {
+        readLoop: while (true) {
           const { done, value } = await reader.read();
           if (done) break;
 
@@ -184,7 +184,9 @@ export function useStreamingResponse(conversationId: string | null) {
                 // Use default message
               }
               streamError = new Error(errMsg);
-              break;
+              // Stop reading entirely — the rest of the stream (and any buffered
+              // remainder) is intentionally discarded on a server error.
+              break readLoop;
             } else if (data) {
               // Tokens are JSON-encoded strings to safely handle newlines/special chars
               let token = data;
@@ -203,8 +205,10 @@ export function useStreamingResponse(conversationId: string | null) {
           }
         }
 
-        // Stream completed successfully
-        onComplete({ fullText, sources });
+        // Only commit the result if the stream completed without a server error
+        if (!streamError) {
+          onComplete({ fullText, sources });
+        }
       } finally {
         // Always reset streaming state — React 18 batches this with the onComplete
         // state updates, ensuring a seamless transition to the persisted message.
