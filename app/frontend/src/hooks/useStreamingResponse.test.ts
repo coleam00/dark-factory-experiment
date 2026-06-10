@@ -614,3 +614,139 @@ describe('sources event — hook state via renderHook', () => {
     expect(onComplete).toHaveBeenCalledWith(expect.objectContaining({ sources: [] }));
   });
 });
+
+describe('mid-stream error payload — issue #244', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('rejects and never calls onComplete on a {"error"} payload', async () => {
+    const sseChunks = [
+      'data: "Partial answer"\n\n',
+      'data: {"error": "upstream exploded"}\n\n',
+      // These must never be consumed/committed once the error is seen
+      'data: " more text"\n\n',
+      'data: [DONE]\n\n',
+    ];
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: makeSseStream(sseChunks),
+      }),
+    );
+
+    const onComplete = vi.fn();
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await act(async () => {
+      await expect(result.current.startStream('conv-1', 'hi', onComplete)).rejects.toThrow(
+        'upstream exploded',
+      );
+    });
+
+    expect(onComplete).not.toHaveBeenCalled();
+  });
+
+  it('stops the reader loop promptly instead of draining to done', async () => {
+    const encoder = new TextEncoder();
+    const read = vi
+      .fn()
+      .mockResolvedValueOnce({
+        done: false,
+        value: encoder.encode('data: "Partial answer"\n\n'),
+      })
+      .mockResolvedValueOnce({
+        done: false,
+        value: encoder.encode('data: {"error": "upstream exploded"}\n\n'),
+      })
+      .mockResolvedValueOnce({
+        done: false,
+        value: encoder.encode('data: " more text"\n\n'),
+      })
+      .mockResolvedValue({ done: true, value: undefined });
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: { getReader: () => ({ read }) },
+      }),
+    );
+
+    const onComplete = vi.fn();
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await act(async () => {
+      await expect(result.current.startStream('conv-1', 'hi', onComplete)).rejects.toThrow(
+        'upstream exploded',
+      );
+    });
+
+    // read() called exactly twice: the token chunk, then the error chunk.
+    // The third (" more text") and beyond are never read — the outer loop exited.
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(onComplete).not.toHaveBeenCalled();
+  });
+
+  it('runs the finally cleanup exactly once (state fully reset after error)', async () => {
+    const sseChunks = [
+      'data: "Partial answer"\n\n',
+      'data: {"error": "upstream exploded"}\n\n',
+      'data: [DONE]\n\n',
+    ];
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: makeSseStream(sseChunks),
+      }),
+    );
+
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await act(async () => {
+      await expect(result.current.startStream('conv-1', 'hi', vi.fn())).rejects.toThrow(
+        'upstream exploded',
+      );
+    });
+
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.streamingContent).toBe('');
+    expect(result.current.streamingSources).toHaveLength(0);
+    expect(result.current.streamingStatus).toBeNull();
+  });
+
+  it('falls back to the default message on malformed error JSON', async () => {
+    const sseChunks = [
+      'data: "Partial answer"\n\n',
+      'data: {"error" not-json\n\n',
+      'data: [DONE]\n\n',
+    ];
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: makeSseStream(sseChunks),
+      }),
+    );
+
+    const onComplete = vi.fn();
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await act(async () => {
+      await expect(result.current.startStream('conv-1', 'hi', onComplete)).rejects.toThrow(
+        'Stream error from server',
+      );
+    });
+
+    expect(onComplete).not.toHaveBeenCalled();
+  });
+});
