@@ -439,6 +439,57 @@ describe('status event SSE parsing — hook state transitions', () => {
   });
 });
 
+describe('startRegenerate', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('POSTs to the regenerate endpoint with no body and parses tokens + sources', async () => {
+    const citation = {
+      chunk_id: 'chunk-1',
+      video_id: 'vid-1',
+      video_title: 'Test Video',
+      video_url: 'https://www.youtube.com/watch?v=abc123',
+      start_seconds: 10,
+      end_seconds: 20,
+      snippet: 'Test snippet text',
+    };
+    const sseChunks = [
+      `event: sources\ndata: ${JSON.stringify([citation])}\n\n`,
+      'data: "Fresh answer"\n\n',
+      'data: [DONE]\n\n',
+    ];
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: makeSseStream(sseChunks),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const onComplete = vi.fn();
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await act(async () => {
+      await result.current.startRegenerate('conv-1', onComplete);
+    });
+
+    // Hits the regenerate endpoint, not /messages.
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/conversations/conv-1/regenerate');
+    expect(init.method).toBe('POST');
+    expect(init.body).toBeUndefined();
+
+    // Parses tokens + sources identically to startStream.
+    expect(onComplete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fullText: 'Fresh answer',
+        sources: [expect.objectContaining({ chunk_id: 'chunk-1' })],
+      }),
+    );
+  });
+});
+
 describe('abortStream', () => {
   beforeEach(() => {
     vi.clearAllMocks();

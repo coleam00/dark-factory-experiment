@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { Citation } from '../lib/api';
 import { Message } from './Message';
@@ -147,5 +147,31 @@ describe('Message — citation chip segment_count label', () => {
       />,
     );
     expect(screen.queryByText(/segments/)).not.toBeInTheDocument();
+  });
+});
+
+describe('Message — Regenerate button', () => {
+  it('renders the Regenerate button for an assistant message when onRegenerate is provided', () => {
+    render(
+      <Message role="assistant" content="Answer text." onRegenerate={vi.fn()} />,
+    );
+    expect(screen.getByRole('button', { name: /Regenerate/ })).toBeInTheDocument();
+  });
+
+  it('calls onRegenerate when the button is clicked', () => {
+    const onRegenerate = vi.fn();
+    render(<Message role="assistant" content="Answer text." onRegenerate={onRegenerate} />);
+    fireEvent.click(screen.getByRole('button', { name: /Regenerate/ }));
+    expect(onRegenerate).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not render the button when onRegenerate is omitted', () => {
+    render(<Message role="assistant" content="Answer text." />);
+    expect(screen.queryByRole('button', { name: /Regenerate/ })).not.toBeInTheDocument();
+  });
+
+  it('does not render the button for a user message even if onRegenerate is passed', () => {
+    render(<Message role="user" content="My question." onRegenerate={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: /Regenerate/ })).not.toBeInTheDocument();
   });
 });

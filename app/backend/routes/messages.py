@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -116,7 +116,152 @@ async def create_message(
     all_messages = await repository.list_messages(conv_id, user_id=user_id)
     llm_messages = [{"role": m["role"], "content": m["content"]} for m in all_messages]
 
-    # 5. Set up tool plumbing. All retrieval happens inside the LLM loop via
+    # 5. Persist the completed assistant message + best-effort title update.
+    #    Both writes are shielded so a client disconnect mid-stream can't drop
+    #    the save (see _build_streaming_response for the full rationale).
+    async def _persist(assistant_text: str, sources_to_persist: list[dict] | None) -> None:
+        try:
+            await asyncio.shield(
+                repository.create_message(
+                    conversation_id=conv_id,
+                    user_id=user_id,
+                    role="assistant",
+                    content=assistant_text,
+                    sources=sources_to_persist,
+                )
+            )
+        except asyncio.CancelledError:
+            logger.info(
+                "Client disconnected mid-persist; shielded create_message continues in background"
+            )
+        except Exception as exc:
+            logger.error("Failed to persist assistant message: %s", exc)
+            raise
+        # Title auto-generation is best-effort: client-disconnect swallowed,
+        # unexpected errors logged but not re-raised (message was saved above).
+        try:
+            await asyncio.shield(_maybe_set_conversation_title(conv_id, user_id, user_content))
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:
+            logger.warning("Failed to update conversation title: %s", exc)
+
+    return _build_streaming_response(
+        conv_id=conv_id,
+        user_id=user_id,
+        current_user=current_user,
+        llm_messages=llm_messages,
+        persist=_persist,
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /api/conversations/{conv_id}/regenerate
+# ---------------------------------------------------------------------------
+
+
+@router.post("/conversations/{conv_id}/regenerate")
+async def regenerate_message(
+    conv_id: str,
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
+    """
+    Re-run the RAG flow against the existing conversation history (with the
+    trailing assistant message excluded) and stream a fresh assistant answer
+    that replaces the old one in place.
+
+    Counts as exactly one message against the daily cap — regenerate cannot be
+    used to bypass MISSION §10 invariant #1.
+
+    Returns:
+        StreamingResponse with Content-Type: text/event-stream (same wire
+        format as create_message).
+    """
+    user_id = str(current_user["id"])
+
+    # 1. Verify conversation exists AND belongs to current user.
+    conv = await repository.get_conversation(conv_id, user_id=user_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # 2. There must be a trailing assistant message to regenerate. Validate
+    #    BEFORE charging the rate limit so an invalid request doesn't burn quota.
+    all_messages = await repository.list_messages(conv_id, user_id=user_id)
+    if not all_messages or all_messages[-1]["role"] != "assistant":
+        raise HTTPException(status_code=409, detail="No assistant response to regenerate")
+
+    # 3. Enforce the 25 msg / user / 24h cap (MISSION §10 invariant #1).
+    #    A regenerate is one message; the audit row is inserted on pass so it
+    #    cannot be used to sneak past the cap.
+    try:
+        await rate_limit.check_and_record(user_id)
+    except rate_limit.RateLimitExceeded as exc:
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": "rate_limit_exceeded",
+                "limit": rate_limit.DAILY_MESSAGE_CAP,
+                "window_hours": rate_limit.WINDOW_HOURS,
+                "reset_at": exc.reset_at.isoformat(),
+            },
+        )
+
+    # 4. Build history excluding the trailing assistant message — the model
+    #    answers the same last user turn afresh.
+    llm_messages = [
+        {"role": m["role"], "content": m["content"]} for m in all_messages[:-1]
+    ]
+
+    # 5. Persist by replacing the most-recent assistant message in place. No
+    #    title generation — the conversation is already titled.
+    async def _persist(assistant_text: str, sources_to_persist: list[dict] | None) -> None:
+        try:
+            await asyncio.shield(
+                repository.replace_last_assistant_message(
+                    conversation_id=conv_id,
+                    user_id=user_id,
+                    content=assistant_text,
+                    sources=sources_to_persist,
+                )
+            )
+        except asyncio.CancelledError:
+            logger.info(
+                "Client disconnected mid-persist; shielded replace continues in background"
+            )
+        except Exception as exc:
+            logger.error("Failed to persist regenerated assistant message: %s", exc)
+            raise
+
+    return _build_streaming_response(
+        conv_id=conv_id,
+        user_id=user_id,
+        current_user=current_user,
+        llm_messages=llm_messages,
+        persist=_persist,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Shared streaming response builder
+# ---------------------------------------------------------------------------
+
+
+def _build_streaming_response(
+    *,
+    conv_id: str,
+    user_id: str,
+    current_user: dict[str, Any],
+    llm_messages: list[dict[str, Any]],
+    persist: Callable[[str, list[dict] | None], Awaitable[None]],
+) -> StreamingResponse:
+    """Wire up the tool-driven RAG stream and return a StreamingResponse.
+
+    Shared by create_message and regenerate_message — the only difference
+    between the two flows is the ``persist`` callback (insert-new vs.
+    replace-last), so everything from tool setup through SSE generation lives
+    here to guarantee zero behavioral drift between the two paths.
+    """
+    # Set up tool plumbing. All retrieval happens inside the LLM loop via
     # tool calls — no pre-retrieval runs here. The executor closure collects
     # every chunk returned by any tool call so the final SSE `sources` event
     # lists exactly what the model actually read. The video_id whitelist is
@@ -126,58 +271,62 @@ async def create_message(
     tool_chunks_acc: list[dict] = []
     embedding_cache: dict[str, list[float]] = {}
     tools_param: list[dict] | None = None
-    executor = None
+    executor: Callable[[str, str], Awaitable[str]] | None = None
     max_tool_calls = 0
-    if LLM_TOOLS_ENABLED:
-        try:
-            all_videos = await repository.list_videos()
-            video_id_whitelist: set[str] = {v["id"] for v in all_videos if v.get("id")}
-        except Exception as exc:
-            logger.warning(
-                "Failed to load video whitelist for tool use; transcript tool calls will be unguarded: %s",
-                exc,
-            )
-            video_id_whitelist = set()
 
-        # Captured at the start of the turn so the entire tool sequence sees
-        # consistent ACL — even if /me later flips is_member, the in-flight
-        # turn won't change behavior mid-flight.
-        is_member_for_turn = bool(current_user.get("is_member", False))
-
-        async def _executor(name: str, raw_args: str) -> str:
-            # Pass `None` (not empty set) when the whitelist failed to load so
-            # the transcript tool falls back to open lookups instead of rejecting
-            # every id.
-            whitelist = video_id_whitelist if video_id_whitelist else None
-            result = await execute_tool(
-                name,
-                raw_args,
-                video_id_whitelist=whitelist,
-                embedding_cache=embedding_cache,
-                is_member=is_member_for_turn,
-            )
-            if result.get("ok") and result.get("chunks"):
-                tool_chunks_acc.extend(result["chunks"])
-            return serialize_tool_result(result)
-
-        tools_param = TOOL_SCHEMAS
-        executor = _executor
-        max_tool_calls = LLM_TOOLS_MAX_PER_TURN
+    # The video-whitelist load is async, so it runs at the top of
+    # event_generator (a sync function can't await) rather than here.
 
     # 6. Stream the response. The model drives retrieval via tool calls;
     # chunks it pulls flow into source_citations via tool_chunks_acc.
     # ``final_text_buf`` receives the assistant's final-round text so the
     # refusal check ignores inter-round commentary ("let me try semantic").
     async def event_generator() -> AsyncGenerator[str, None]:
+        nonlocal tools_param, executor, max_tool_calls
+        if LLM_TOOLS_ENABLED:
+            try:
+                all_videos = await repository.list_videos()
+                video_id_whitelist: set[str] = {v["id"] for v in all_videos if v.get("id")}
+            except Exception as exc:
+                logger.warning(
+                    "Failed to load video whitelist for tool use; transcript tool calls will be unguarded: %s",
+                    exc,
+                )
+                video_id_whitelist = set()
+
+            # Captured at the start of the turn so the entire tool sequence sees
+            # consistent ACL — even if /me later flips is_member, the in-flight
+            # turn won't change behavior mid-flight.
+            is_member_for_turn = bool(current_user.get("is_member", False))
+
+            async def _executor(name: str, raw_args: str) -> str:
+                # Pass `None` (not empty set) when the whitelist failed to load so
+                # the transcript tool falls back to open lookups instead of rejecting
+                # every id.
+                whitelist = video_id_whitelist if video_id_whitelist else None
+                result = await execute_tool(
+                    name,
+                    raw_args,
+                    video_id_whitelist=whitelist,
+                    embedding_cache=embedding_cache,
+                    is_member=is_member_for_turn,
+                )
+                if result.get("ok") and result.get("chunks"):
+                    tool_chunks_acc.extend(result["chunks"])
+                return serialize_tool_result(result)
+
+            tools_param = TOOL_SCHEMAS
+            executor = _executor
+            max_tool_calls = LLM_TOOLS_MAX_PER_TURN
+
         full_response: list[str] = []
         final_text_buf: list[str] = []
         # Two-tier citations (issue #176): strip `[c:<id>]` markers from the
         # stream; use them at [DONE] to flag is_cited on retrieved chunks.
         marker_stripper = CitationMarkerStripper()
         try:
-            # is_member_for_turn is captured above when tools are wired.
-            # Re-bind to a local that's always defined so we can pass it
-            # to stream_chat regardless of whether tools are enabled
+            # Re-bind is_member to a local that's always defined so we can pass
+            # it to stream_chat regardless of whether tools are enabled
             # (catalog filtering belongs to the prompt, not the tools).
             turn_is_member = bool(current_user.get("is_member") or False)
             async for sse_chunk in stream_chat(
@@ -247,13 +396,12 @@ async def create_message(
             # (the model runs several tool rounds before composing the final
             # answer). Some clients/proxies abort long fetches in that window,
             # which cancels this generator's task. Without asyncio.shield, the
-            # `await repository.create_message(...)` re-raises CancelledError
+            # `await repository.<persist>(...)` re-raises CancelledError
             # immediately — and because CancelledError is a BaseException (not
             # Exception) in Python 3.11, it bypasses the try/except below and
-            # silently drops the save. Shielding runs the save as a detached
-            # task that completes independently of the client's connection
-            # state; we catch the re-raised CancelledError so the generator
-            # can exit cleanly.
+            # silently drops the save. Shielding (inside the persist callback)
+            # runs the save as a detached task that completes independently of
+            # the client's connection state.
             assistant_text = _extract_text_from_sse(full_response)
             if assistant_text:
                 # Apply the same refusal detection used for the live SSE
@@ -272,33 +420,7 @@ async def create_message(
                     if not source_citations or _is_refusal(refusal_check_text)
                     else source_citations
                 )
-                try:
-                    await asyncio.shield(
-                        repository.create_message(
-                            conversation_id=conv_id,
-                            user_id=user_id,
-                            role="assistant",
-                            content=assistant_text,
-                            sources=sources_to_persist,
-                        )
-                    )
-                except asyncio.CancelledError:
-                    logger.info(
-                        "Client disconnected mid-persist; shielded create_message continues in background"
-                    )
-                except Exception as exc:
-                    logger.error("Failed to persist assistant message: %s", exc)
-                    raise
-                # Title auto-generation is best-effort: client-disconnect swallowed,
-                # unexpected errors logged but not re-raised (message was saved above).
-                try:
-                    await asyncio.shield(
-                        _maybe_set_conversation_title(conv_id, user_id, user_content)
-                    )
-                except asyncio.CancelledError:
-                    pass
-                except Exception as exc:
-                    logger.warning("Failed to update conversation title: %s", exc)
+                await persist(assistant_text, sources_to_persist)
 
     return StreamingResponse(
         event_generator(),

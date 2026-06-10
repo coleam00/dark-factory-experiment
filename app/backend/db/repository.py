@@ -577,6 +577,68 @@ async def create_message(
     }
 
 
+async def replace_last_assistant_message(
+    *,
+    conversation_id: str,
+    user_id: str,
+    content: str,
+    sources: list[dict] | None = None,
+) -> dict | None:
+    """Atomically delete the most recent assistant message and insert a
+    replacement (used by the regenerate flow).
+
+    Returns None if the conversation does not belong to the user. The delete
+    and insert run in a single transaction so a reload can never observe the
+    conversation with the old assistant message removed but no replacement.
+    """
+    msg_id = _new_id()
+    now = _now()
+    sources_json = json.dumps(sources) if sources is not None else None
+    async with _acquire() as conn, conn.transaction():
+        # Ownership gate — mirror create_message's cross-user guard. If the
+        # conversation isn't owned by this user, do nothing and signal None.
+        owned = await conn.fetchval(
+            "SELECT 1 FROM conversations WHERE id = $1 AND user_id = $2",
+            conversation_id,
+            user_id,
+        )
+        if not owned:
+            return None
+        # Delete only the single most-recent assistant message.
+        await conn.execute(
+            """
+            DELETE FROM messages
+            WHERE id = (
+                SELECT id FROM messages
+                WHERE conversation_id = $1 AND role = 'assistant'
+                ORDER BY created_at DESC
+                LIMIT 1
+            )
+            """,
+            conversation_id,
+        )
+        await conn.execute(
+            """
+            INSERT INTO messages (id, conversation_id, role, content, sources, created_at)
+            VALUES ($1, $2, 'assistant', $3, $4::jsonb, $5)
+            """,
+            msg_id,
+            conversation_id,
+            content,
+            sources_json,
+            now,
+        )
+    await touch_conversation(conversation_id, user_id)
+    return {
+        "id": msg_id,
+        "conversation_id": conversation_id,
+        "role": "assistant",
+        "content": content,
+        "sources": sources,
+        "created_at": now,
+    }
+
+
 async def list_messages(conversation_id: str, user_id: str) -> list[dict]:
     """Return messages only if the conversation belongs to the given user."""
     async with _acquire() as conn:
