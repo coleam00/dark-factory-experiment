@@ -1152,3 +1152,580 @@ class TestChunkExpansionIntegration:
         assert "hello world snippet" in output
         assert "Test Video" in output
         assert "data: [DONE]" in output
+
+
+class TestFinalizeSources:
+    """Unit tests for _finalize_sources helper."""
+
+    def test_dedup_preserves_first_seen_order(self) -> None:
+        from backend.routes.messages import _finalize_sources
+
+        chunks = [
+            {
+                "chunk_id": "c1",
+                "video_id": "v1",
+                "video_title": "V1",
+                "video_url": "u1",
+                "start_seconds": 10.0,
+                "end_seconds": 20.0,
+                "snippet": "s1",
+            },
+            {
+                "chunk_id": "c2",
+                "video_id": "v2",
+                "video_title": "V2",
+                "video_url": "u2",
+                "start_seconds": 30.0,
+                "end_seconds": 40.0,
+                "snippet": "s2",
+            },
+            {
+                "chunk_id": "c1",
+                "video_id": "v1",
+                "video_title": "V1",
+                "video_url": "u1",
+                "start_seconds": 50.0,
+                "end_seconds": 60.0,
+                "snippet": "s3",
+            },
+        ]
+        result = _finalize_sources(chunks, "", "answer")
+        assert len(result) == 2
+        assert result[0]["chunk_id"] == "c1"
+        assert result[1]["chunk_id"] == "c2"
+        # first-seen start_seconds preserved for c1
+        assert result[0]["start_seconds"] == 10.0
+
+    def test_collapse_by_video(self) -> None:
+        from backend.routes.messages import _finalize_sources
+
+        chunks = [
+            {
+                "chunk_id": "c1",
+                "video_id": "v1",
+                "video_title": "V1",
+                "video_url": "u1",
+                "start_seconds": 10.0,
+                "end_seconds": 20.0,
+                "snippet": "s1",
+            },
+            {
+                "chunk_id": "c2",
+                "video_id": "v1",
+                "video_title": "V1",
+                "video_url": "u1",
+                "start_seconds": 30.0,
+                "end_seconds": 40.0,
+                "snippet": "s2",
+            },
+            {
+                "chunk_id": "c3",
+                "video_id": "v2",
+                "video_title": "V2",
+                "video_url": "u2",
+                "start_seconds": 5.0,
+                "end_seconds": 15.0,
+                "snippet": "s3",
+            },
+        ]
+        result = _finalize_sources(chunks, "", "answer")
+        assert len(result) == 2
+        v1 = next(r for r in result if r["video_id"] == "v1")
+        v2 = next(r for r in result if r["video_id"] == "v2")
+        assert v1["segment_count"] == 2
+        assert v2["segment_count"] == 1
+
+    def test_cap_uncited(self) -> None:
+        from backend.config import CITATIONS_MAX_COUNT
+        from backend.routes.messages import _finalize_sources
+
+        chunks = [
+            {
+                "chunk_id": f"c{i}",
+                "video_id": f"v{i}",
+                "video_title": f"V{i}",
+                "video_url": f"u{i}",
+                "start_seconds": float(i),
+                "end_seconds": float(i + 1),
+                "snippet": f"s{i}",
+            }
+            for i in range(CITATIONS_MAX_COUNT + 5)
+        ]
+        result = _finalize_sources(chunks, "", "answer")
+        assert len(result) == CITATIONS_MAX_COUNT
+
+    def test_cited_always_passes_through(self) -> None:
+        from backend.config import CITATIONS_MAX_COUNT
+        from backend.routes.messages import _finalize_sources
+
+        chunks = [
+            {
+                "chunk_id": f"c{i}",
+                "video_id": f"v{i}",
+                "video_title": f"V{i}",
+                "video_url": f"u{i}",
+                "start_seconds": float(i),
+                "end_seconds": float(i + 1),
+                "snippet": f"s{i}",
+            }
+            for i in range(CITATIONS_MAX_COUNT + 5)
+        ]
+        # Mark the last chunk as cited via marker_text
+        marker_text = f"some text [c:c{CITATIONS_MAX_COUNT + 4}] more"
+        result = _finalize_sources(chunks, marker_text, "answer")
+        # Cited chunk passes through, uncited are capped
+        uncited_result = [r for r in result if not r.get("is_cited")]
+        assert len(uncited_result) == CITATIONS_MAX_COUNT
+        cited_ids = {r["chunk_id"] for r in result if r.get("is_cited")}
+        assert f"c{CITATIONS_MAX_COUNT + 4}" in cited_ids
+
+    def test_refusal_returns_empty(self) -> None:
+        from backend.routes.messages import _finalize_sources
+
+        chunks = [
+            {
+                "chunk_id": "c1",
+                "video_id": "v1",
+                "video_title": "V1",
+                "video_url": "u1",
+                "start_seconds": 10.0,
+                "end_seconds": 20.0,
+                "snippet": "s1",
+            },
+        ]
+        result = _finalize_sources(chunks, "", "I can't help with that.")
+        assert result == []
+
+    def test_empty_input(self) -> None:
+        from backend.routes.messages import _finalize_sources
+
+        assert _finalize_sources([], "", "") == []
+
+    def test_purity_no_mutation(self) -> None:
+        from backend.routes.messages import _finalize_sources
+
+        raw = [
+            {
+                "chunk_id": "c1",
+                "video_id": "v1",
+                "video_title": "V1",
+                "video_url": "u1",
+                "start_seconds": 10.0,
+                "end_seconds": 20.0,
+                "snippet": "s1",
+            },
+        ]
+        first = _finalize_sources(raw, "", "answer")
+        second = _finalize_sources(raw, "", "answer")
+        assert first == second
+        # Original dict was not mutated with is_cited key
+        assert "is_cited" not in raw[0]
+
+    def test_idempotence_no_double_collapse(self) -> None:
+        from backend.routes.messages import _finalize_sources
+
+        raw = [
+            {
+                "chunk_id": "c1",
+                "video_id": "v1",
+                "video_title": "V1",
+                "video_url": "u1",
+                "start_seconds": 10.0,
+                "end_seconds": 20.0,
+                "snippet": "s1",
+            },
+            {
+                "chunk_id": "c2",
+                "video_id": "v1",
+                "video_title": "V1",
+                "video_url": "u1",
+                "start_seconds": 30.0,
+                "end_seconds": 40.0,
+                "snippet": "s2",
+            },
+        ]
+        first = _finalize_sources(raw, "", "answer")
+        second = _finalize_sources(raw, "", "answer")
+        assert first == second
+        assert first[0]["segment_count"] == 2
+
+
+class TestInterruptedStreamSources:
+    """Regression tests for issue #277: interrupted streams must persist
+    the same finalized sources that were emitted live.
+    """
+
+    async def test_interrupted_stream_persists_finalized_sources(self) -> None:
+        import json
+        from unittest.mock import AsyncMock, patch
+        from uuid import uuid4
+
+        from httpx import ASGITransport, AsyncClient
+
+        from backend.auth.tokens import encode_token
+        from backend.main import app
+
+        answer_token = json.dumps("The video explains it works.")
+        answer_chunk = f"data: {answer_token}\n\n"
+        error_chunk = 'data: {"error": "upstream flake"}\n\n'
+
+        tool_chunks = [
+            {
+                "chunk_id": "c1",
+                "video_id": "v1",
+                "video_title": "V1",
+                "video_url": "u1",
+                "start_seconds": 10.0,
+                "end_seconds": 20.0,
+                "snippet": "s1",
+            },
+            {
+                "chunk_id": "c2",
+                "video_id": "v1",
+                "video_title": "V1",
+                "video_url": "u1",
+                "start_seconds": 30.0,
+                "end_seconds": 40.0,
+                "snippet": "s2",
+            },
+            {
+                "chunk_id": "c3",
+                "video_id": "v2",
+                "video_title": "V2",
+                "video_url": "u2",
+                "start_seconds": 5.0,
+                "end_seconds": 15.0,
+                "snippet": "s3",
+            },
+            {
+                "chunk_id": "c1",
+                "video_id": "v1",
+                "video_title": "V1",
+                "video_url": "u1",
+                "start_seconds": 10.0,
+                "end_seconds": 20.0,
+                "snippet": "s1",
+            },
+        ]
+
+        async def mock_stream_chat(
+            messages,
+            tools=None,
+            tool_executor=None,
+            max_tool_calls=0,
+            final_text_out=None,
+            **_kwargs,
+        ):
+            if tool_executor is not None:
+                await tool_executor("search_videos", json.dumps({"query": "test"}))
+            yield answer_chunk
+            # Do NOT touch final_text_out — interrupted stream.
+            yield error_chunk
+
+        async def mock_execute_tool(
+            name, raw_args, video_id_whitelist=None, embedding_cache=None, is_member=False
+        ):
+            return {"ok": True, "text": "context", "chunks": tool_chunks}
+
+        test_user_id = str(uuid4())
+        test_conv_id = str(uuid4())
+        valid_token = encode_token(test_user_id)
+
+        async def mock_get_user_by_id(user_id):
+            return {
+                "id": test_user_id,
+                "email": "test@example.com",
+                "password_hash": "hashed",
+                "created_at": "2026-01-01T00:00:00Z",
+            }
+
+        async def mock_get_conversation(conv_id, user_id):
+            return {
+                "id": test_conv_id,
+                "user_id": test_user_id,
+                "title": "Test",
+                "created_at": "2026-01-01T00:00:00Z",
+            }
+
+        mock_create = AsyncMock(side_effect=[{"id": str(uuid4())}, {"id": str(uuid4())}])
+
+        async def mock_list_messages(conv_id, user_id):
+            return []
+
+        async def mock_list_videos():
+            return [
+                {"id": "v1", "title": "V1", "url": "u1"},
+                {"id": "v2", "title": "V2", "url": "u2"},
+            ]
+
+        with (
+            patch("backend.auth.dependencies.users_repo.get_user_by_id", mock_get_user_by_id),
+            patch("backend.db.repository.get_conversation", mock_get_conversation),
+            patch("backend.db.repository.create_message", mock_create),
+            patch("backend.db.repository.list_messages", mock_list_messages),
+            patch("backend.db.repository.list_videos", mock_list_videos),
+            patch("backend.routes.messages.stream_chat", mock_stream_chat),
+            patch("backend.routes.messages.execute_tool", mock_execute_tool),
+        ):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                await client.post(
+                    f"/api/conversations/{test_conv_id}/messages",
+                    json={"content": "question about video"},
+                    headers={"Cookie": f"session={valid_token}"},
+                )
+
+        assert mock_create.call_count == 2, f"expected 2 calls, got {mock_create.call_count}"
+        assistant_kwargs = mock_create.call_args_list[1].kwargs
+        assert assistant_kwargs["role"] == "assistant"
+        sources = assistant_kwargs["sources"]
+        assert sources is not None
+        assert len(sources) == 2
+        # One entry per video, v1 collapsed with segment_count == 2
+        v1 = next(s for s in sources if s["video_id"] == "v1")
+        v2 = next(s for s in sources if s["video_id"] == "v2")
+        assert v1["segment_count"] == 2
+        assert v2["segment_count"] == 1
+        # No duplicate video_id or chunk_id
+        assert len({s["video_id"] for s in sources}) == len(sources)
+        assert len({s["chunk_id"] for s in sources}) == len(sources)
+        # Length respects the cap
+        from backend.config import CITATIONS_MAX_COUNT
+
+        assert len(sources) <= CITATIONS_MAX_COUNT
+
+    async def test_interrupted_emitted_sources_match_persisted(self) -> None:
+        import json
+        import re
+        from unittest.mock import AsyncMock, patch
+        from uuid import uuid4
+
+        from httpx import ASGITransport, AsyncClient
+
+        from backend.auth.tokens import encode_token
+        from backend.main import app
+
+        answer_token = json.dumps("The video explains it works.")
+        answer_chunk = f"data: {answer_token}\n\n"
+        error_chunk = 'data: {"error": "upstream flake"}\n\n'
+
+        tool_chunks = [
+            {
+                "chunk_id": "c1",
+                "video_id": "v1",
+                "video_title": "V1",
+                "video_url": "u1",
+                "start_seconds": 10.0,
+                "end_seconds": 20.0,
+                "snippet": "s1",
+            },
+            {
+                "chunk_id": "c2",
+                "video_id": "v1",
+                "video_title": "V1",
+                "video_url": "u1",
+                "start_seconds": 30.0,
+                "end_seconds": 40.0,
+                "snippet": "s2",
+            },
+            {
+                "chunk_id": "c3",
+                "video_id": "v2",
+                "video_title": "V2",
+                "video_url": "u2",
+                "start_seconds": 5.0,
+                "end_seconds": 15.0,
+                "snippet": "s3",
+            },
+            {
+                "chunk_id": "c1",
+                "video_id": "v1",
+                "video_title": "V1",
+                "video_url": "u1",
+                "start_seconds": 10.0,
+                "end_seconds": 20.0,
+                "snippet": "s1",
+            },
+        ]
+
+        async def mock_stream_chat(
+            messages,
+            tools=None,
+            tool_executor=None,
+            max_tool_calls=0,
+            final_text_out=None,
+            **_kwargs,
+        ):
+            if tool_executor is not None:
+                await tool_executor("search_videos", json.dumps({"query": "test"}))
+            yield answer_chunk
+            yield error_chunk
+
+        async def mock_execute_tool(
+            name, raw_args, video_id_whitelist=None, embedding_cache=None, is_member=False
+        ):
+            return {"ok": True, "text": "context", "chunks": tool_chunks}
+
+        test_user_id = str(uuid4())
+        test_conv_id = str(uuid4())
+        valid_token = encode_token(test_user_id)
+
+        async def mock_get_user_by_id(user_id):
+            return {
+                "id": test_user_id,
+                "email": "test@example.com",
+                "password_hash": "hashed",
+                "created_at": "2026-01-01T00:00:00Z",
+            }
+
+        async def mock_get_conversation(conv_id, user_id):
+            return {
+                "id": test_conv_id,
+                "user_id": test_user_id,
+                "title": "Test",
+                "created_at": "2026-01-01T00:00:00Z",
+            }
+
+        mock_create = AsyncMock(side_effect=[{"id": str(uuid4())}, {"id": str(uuid4())}])
+
+        async def mock_list_messages(conv_id, user_id):
+            return []
+
+        async def mock_list_videos():
+            return [
+                {"id": "v1", "title": "V1", "url": "u1"},
+                {"id": "v2", "title": "V2", "url": "u2"},
+            ]
+
+        with (
+            patch("backend.auth.dependencies.users_repo.get_user_by_id", mock_get_user_by_id),
+            patch("backend.db.repository.get_conversation", mock_get_conversation),
+            patch("backend.db.repository.create_message", mock_create),
+            patch("backend.db.repository.list_messages", mock_list_messages),
+            patch("backend.db.repository.list_videos", mock_list_videos),
+            patch("backend.routes.messages.stream_chat", mock_stream_chat),
+            patch("backend.routes.messages.execute_tool", mock_execute_tool),
+        ):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                response = await client.post(
+                    f"/api/conversations/{test_conv_id}/messages",
+                    json={"content": "question about video"},
+                    headers={"Cookie": f"session={valid_token}"},
+                )
+
+        output = response.text
+        # Sources frame must appear before the error payload.
+        sources_match = re.search(r"event: sources\ndata: (.+?)\n\n", output)
+        assert sources_match is not None, f"Expected sources event in output: {output}"
+        sources_event_index = output.find("event: sources")
+        error_index = output.find('{"error"')
+        assert sources_event_index < error_index, (
+            "Sources event must precede error payload in SSE stream"
+        )
+
+        parsed_sources = json.loads(sources_match.group(1))
+        persisted_sources = mock_create.call_args_list[1].kwargs["sources"]
+        assert parsed_sources == persisted_sources, (
+            f"Live emitted sources must match persisted sources; "
+            f"emitted={parsed_sources!r}, persisted={persisted_sources!r}"
+        )
+
+    async def test_interrupted_refusal_persists_none_and_emits_nothing(self) -> None:
+        import json
+        from unittest.mock import AsyncMock, patch
+        from uuid import uuid4
+
+        from httpx import ASGITransport, AsyncClient
+
+        from backend.auth.tokens import encode_token
+        from backend.main import app
+
+        refusal_text = "I can't help with that."
+        refusal_chunk = f"data: {json.dumps(refusal_text)}\n\n"
+        error_chunk = 'data: {"error": "upstream flake"}\n\n'
+
+        source_citations = [
+            {
+                "chunk_id": "c1",
+                "video_id": "v1",
+                "video_title": "Test Video",
+                "video_url": "u",
+                "start_seconds": 10.0,
+                "end_seconds": 20.0,
+                "snippet": "Test snippet",
+            }
+        ]
+
+        async def mock_stream_chat(
+            messages,
+            tools=None,
+            tool_executor=None,
+            max_tool_calls=0,
+            final_text_out=None,
+            **_kwargs,
+        ):
+            if tool_executor is not None:
+                await tool_executor("search_videos", json.dumps({"query": "test"}))
+            yield refusal_chunk
+            yield error_chunk
+
+        async def mock_execute_tool(
+            name, raw_args, video_id_whitelist=None, embedding_cache=None, is_member=False
+        ):
+            return {"ok": True, "text": "context", "chunks": source_citations}
+
+        test_user_id = str(uuid4())
+        test_conv_id = str(uuid4())
+        valid_token = encode_token(test_user_id)
+
+        async def mock_get_user_by_id(user_id):
+            return {
+                "id": test_user_id,
+                "email": "test@example.com",
+                "password_hash": "hashed",
+                "created_at": "2026-01-01T00:00:00Z",
+            }
+
+        async def mock_get_conversation(conv_id, user_id):
+            return {
+                "id": test_conv_id,
+                "user_id": test_user_id,
+                "title": "Test",
+                "created_at": "2026-01-01T00:00:00Z",
+            }
+
+        mock_create = AsyncMock(side_effect=[{"id": str(uuid4())}, {"id": str(uuid4())}])
+
+        async def mock_list_messages(conv_id, user_id):
+            return []
+
+        async def mock_list_videos():
+            return [{"id": "v1", "title": "Test Video", "url": "u"}]
+
+        with (
+            patch("backend.auth.dependencies.users_repo.get_user_by_id", mock_get_user_by_id),
+            patch("backend.db.repository.get_conversation", mock_get_conversation),
+            patch("backend.db.repository.create_message", mock_create),
+            patch("backend.db.repository.list_messages", mock_list_messages),
+            patch("backend.db.repository.list_videos", mock_list_videos),
+            patch("backend.routes.messages.stream_chat", mock_stream_chat),
+            patch("backend.routes.messages.execute_tool", mock_execute_tool),
+        ):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                response = await client.post(
+                    f"/api/conversations/{test_conv_id}/messages",
+                    json={"content": "off-topic question"},
+                    headers={"Cookie": f"session={valid_token}"},
+                )
+
+        output = response.text
+        assert "event: sources" not in output, (
+            f"Expected no 'event: sources' in output, but got: {output}"
+        )
+        assert mock_create.call_count == 2, f"expected 2 calls, got {mock_create.call_count}"
+        assistant_kwargs = mock_create.call_args_list[1].kwargs
+        assert assistant_kwargs["sources"] is None, (
+            f"refusal should persist sources=None; got {assistant_kwargs['sources']!r}"
+        )
