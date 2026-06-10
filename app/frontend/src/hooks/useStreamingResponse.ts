@@ -42,10 +42,10 @@ export function useStreamingResponse(conversationId: string | null) {
     }
   }, []);
 
-  const startStream = useCallback(
+  const runStream = useCallback(
     async (
-      conversationId: string,
-      userMessage: string,
+      url: string,
+      body: string | null,
       onComplete: (result: StreamResult) => void,
     ): Promise<void> => {
       setIsStreaming(true);
@@ -61,11 +61,10 @@ export function useStreamingResponse(conversationId: string | null) {
         const abortController = new AbortController();
         streamAbortRef.current = abortController;
 
-        const res = await fetch(`/api/conversations/${conversationId}/messages`, {
+        const res = await fetch(url, {
           method: 'POST',
           credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content: userMessage }),
+          ...(body !== null ? { headers: { 'Content-Type': 'application/json' }, body } : {}),
           signal: abortController.signal,
         });
 
@@ -218,12 +217,33 @@ export function useStreamingResponse(conversationId: string | null) {
     [],
   );
 
+  const startStream = useCallback(
+    (
+      conversationId: string,
+      userMessage: string,
+      onComplete: (result: StreamResult) => void,
+    ): Promise<void> =>
+      runStream(
+        `/api/conversations/${conversationId}/messages`,
+        JSON.stringify({ content: userMessage }),
+        onComplete,
+      ),
+    [runStream],
+  );
+
+  const startRegenerate = useCallback(
+    (conversationId: string, onComplete: (result: StreamResult) => void): Promise<void> =>
+      runStream(`/api/conversations/${conversationId}/messages/regenerate`, null, onComplete),
+    [runStream],
+  );
+
   return {
     streamingContent,
     streamingSources,
     streamingStatus,
     isStreaming,
     startStream,
+    startRegenerate,
     abortStream,
   };
 }

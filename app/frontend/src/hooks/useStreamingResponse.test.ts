@@ -9,6 +9,7 @@
 
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { RateLimitError } from '../lib/api';
 import { useStreamingResponse } from './useStreamingResponse';
 
 function makeSseStream(chunks: string[]): ReadableStream<Uint8Array> {
@@ -534,6 +535,95 @@ describe('conversationId reset — state clears on navigation', () => {
 
     // onComplete was called by startStream when the stream completed above
     expect(onComplete).toHaveBeenCalledWith(expect.objectContaining({ fullText: 'Hello' }));
+  });
+});
+
+describe('startRegenerate — regenerate the last assistant response', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('POSTs to the regenerate endpoint with no body', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: makeSseStream(['data: "Hi"\n\n', 'data: [DONE]\n\n']),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await act(async () => {
+      await result.current.startRegenerate('conv-1', vi.fn());
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/conversations/conv-1/messages/regenerate');
+    expect(init.method).toBe('POST');
+    expect(init.credentials).toBe('include');
+    expect(init.body).toBeUndefined();
+    expect(init.headers).toBeUndefined();
+  });
+
+  it('parses tokens and sources identically to startStream', async () => {
+    const sseChunks = [
+      `event: sources\ndata: ${JSON.stringify([mockCitation])}\n\n`,
+      'data: "Fresh "\n\n',
+      'data: "answer."\n\n',
+      'data: [DONE]\n\n',
+    ];
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: makeSseStream(sseChunks),
+      }),
+    );
+
+    const onComplete = vi.fn();
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await act(async () => {
+      await result.current.startRegenerate('conv-1', onComplete);
+    });
+
+    expect(onComplete).toHaveBeenCalledWith({
+      fullText: 'Fresh answer.',
+      sources: [expect.objectContaining({ chunk_id: 'chunk-1' })],
+    });
+    // Streaming state is reset in the finally block
+    expect(result.current.isStreaming).toBe(false);
+  });
+
+  it('throws RateLimitError on 429', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 429,
+        json: async () => ({
+          error: 'rate_limit_exceeded',
+          limit: 25,
+          window_hours: 24,
+          reset_at: '2026-01-02T00:00:00+00:00',
+        }),
+      }),
+    );
+
+    const onComplete = vi.fn();
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await act(async () => {
+      await expect(result.current.startRegenerate('conv-1', onComplete)).rejects.toBeInstanceOf(
+        RateLimitError,
+      );
+    });
+
+    expect(onComplete).not.toHaveBeenCalled();
+    expect(result.current.isStreaming).toBe(false);
   });
 });
 

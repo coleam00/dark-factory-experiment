@@ -603,6 +603,36 @@ async def list_messages(conversation_id: str, user_id: str) -> list[dict]:
     return results
 
 
+async def delete_last_assistant_message(conversation_id: str, user_id: str) -> str | None:
+    """Delete the conversation's most recent message iff its role is 'assistant'.
+
+    Owner-scoped (JOIN on conversations.user_id) and atomic: the role check on
+    the DELETE itself (not just the subquery) makes concurrent regenerates safe —
+    a second request's subquery resolves to the now-last user message, the role
+    predicate fails, zero rows are deleted, and None is returned.
+
+    Returns the deleted message id, or None when nothing was deleted.
+    """
+    async with _acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            DELETE FROM messages
+            WHERE id = (
+                SELECT m.id FROM messages m
+                JOIN conversations c ON c.id = m.conversation_id
+                WHERE m.conversation_id = $1 AND c.user_id = $2
+                ORDER BY m.created_at DESC, m.id DESC
+                LIMIT 1
+            )
+            AND role = 'assistant'
+            RETURNING id
+            """,
+            conversation_id,
+            user_id,
+        )
+    return row["id"] if row else None
+
+
 # ---------------------------------------------------------------------------
 # Channel sync runs
 # ---------------------------------------------------------------------------

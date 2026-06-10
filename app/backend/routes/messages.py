@@ -1,5 +1,6 @@
 """
 Message routes — POST /api/conversations/{conv_id}/messages
+                 POST /api/conversations/{conv_id}/messages/regenerate
 
 Orchestrates the tool-driven RAG flow:
   1. Verify conversation ownership (404 cross-user, no leak)
@@ -12,6 +13,12 @@ Orchestrates the tool-driven RAG flow:
   6. Stream the response as SSE
   7. Send the sources event (populated from the model's tool calls) before [DONE]
   8. Persist the assistant message after the stream completes
+
+The regenerate flow (issue #280) reuses steps 5-8 via the shared
+`_stream_assistant_response` helper: it validates that the conversation ends
+with an assistant message, charges the same rate limit as a normal send,
+atomically deletes the trailing assistant message, then re-streams a fresh
+answer from the remaining history (which now ends with the user's question).
 """
 
 from __future__ import annotations
@@ -116,6 +123,98 @@ async def create_message(
     all_messages = await repository.list_messages(conv_id, user_id=user_id)
     llm_messages = [{"role": m["role"], "content": m["content"]} for m in all_messages]
 
+    return await _stream_assistant_response(
+        conv_id, user_id, current_user, llm_messages, user_content
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /api/conversations/{conv_id}/messages/regenerate
+# ---------------------------------------------------------------------------
+
+
+@router.post("/conversations/{conv_id}/messages/regenerate")
+async def regenerate_message(
+    conv_id: str,
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
+    """
+    Regenerate the most recent assistant response (issue #280).
+
+    Validates that the conversation ends with an assistant message preceded
+    by at least one user message, charges one message of quota (same 25/24h
+    cap as a normal send — a 429 leaves the conversation untouched), then
+    atomically deletes the trailing assistant message and re-streams a fresh
+    answer from the remaining history. The SSE output shape is identical to
+    a normal send.
+    """
+    user_id = str(current_user["id"])
+
+    # 1. Verify conversation exists AND belongs to current user.
+    # 404 (not 403) — don't leak existence of other users' conversations.
+    conv = await repository.get_conversation(conv_id, user_id=user_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # 2. Validate regenerability (read-only, before charging quota): the
+    # conversation must end with an assistant message that follows at least
+    # one user message. Invalid regenerates must not consume quota.
+    all_messages = await repository.list_messages(conv_id, user_id=user_id)
+    if (
+        not all_messages
+        or all_messages[-1]["role"] != "assistant"
+        or not any(m["role"] == "user" for m in all_messages[:-1])
+    ):
+        raise HTTPException(status_code=409, detail="Nothing to regenerate")
+
+    # 3. Enforce the 25 msg / user / 24h cap (MISSION §10 invariant #1).
+    #    Runs unconditionally BEFORE the delete and before any LLM work —
+    #    regenerate costs exactly one message of quota, and a 429 leaves the
+    #    conversation untouched (nothing has been deleted yet).
+    try:
+        await rate_limit.check_and_record(user_id)
+    except rate_limit.RateLimitExceeded as exc:
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": "rate_limit_exceeded",
+                "limit": rate_limit.DAILY_MESSAGE_CAP,
+                "window_hours": rate_limit.WINDOW_HOURS,
+                "reset_at": exc.reset_at.isoformat(),
+            },
+        )
+
+    # 4. Atomically delete the trailing assistant message. The repository
+    # function deletes the last message only if its role is 'assistant'
+    # (owner-scoped) — a concurrent regenerate that lost the race deletes
+    # zero rows and returns None.
+    deleted = await repository.delete_last_assistant_message(conv_id, user_id)
+    if deleted is None:
+        raise HTTPException(status_code=409, detail="Nothing to regenerate")
+
+    # 5. Re-stream from the remaining history (now ends with the user's
+    # last question).
+    llm_messages = [{"role": m["role"], "content": m["content"]} for m in all_messages[:-1]]
+    user_content = next(m["content"] for m in reversed(all_messages[:-1]) if m["role"] == "user")
+    return await _stream_assistant_response(
+        conv_id, user_id, current_user, llm_messages, user_content
+    )
+
+
+async def _stream_assistant_response(
+    conv_id: str,
+    user_id: str,
+    current_user: dict[str, Any],
+    llm_messages: list[dict[str, Any]],
+    user_content: str,
+) -> StreamingResponse:
+    """Shared streaming core for send and regenerate (steps 5-8 of the flow).
+
+    Wires the retrieval tools, streams the LLM response as SSE (marker
+    stripping, sources event, refusal suppression, citation collapse), and
+    persists the assistant message under asyncio.shield. Callers are
+    responsible for ownership checks, rate limiting, and history assembly.
+    """
     # 5. Set up tool plumbing. All retrieval happens inside the LLM loop via
     # tool calls — no pre-retrieval runs here. The executor closure collects
     # every chunk returned by any tool call so the final SSE `sources` event

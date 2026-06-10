@@ -301,6 +301,7 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
     streamingStatus,
     isStreaming,
     startStream,
+    startRegenerate,
     abortStream,
   } = useStreamingResponse(conversationId || null);
   const { addToast } = useToast();
@@ -559,6 +560,69 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
     ],
   );
 
+  // ── Regenerate handler — replace the last assistant message with a fresh stream ──
+  const handleRegenerate = useCallback(async () => {
+    if (isStreaming || !conversationId) return;
+    if (messages.length === 0 || messages[messages.length - 1]?.role !== 'assistant') return;
+
+    // Stash the message so it can be restored if the server rejects the
+    // regenerate (the backend checks the rate limit BEFORE deleting anything,
+    // so a 429 means the conversation is untouched server-side).
+    const removed = messages[messages.length - 1];
+    setInlineError(null);
+    setFailedMessageText(null);
+    setMessages((prev) => prev.slice(0, -1));
+    autoScrollRef.current = true;
+    scrollToBottom();
+
+    try {
+      await startRegenerate(conversationId, ({ fullText, sources }) => {
+        const assistantMsg: MessageType = {
+          id: `temp-assistant-${Date.now()}`,
+          conversation_id: conversationId,
+          role: 'assistant',
+          content: fullText,
+          created_at: new Date().toISOString(),
+          sources: sources.length > 0 ? sources : undefined,
+        };
+        setMessages((prev) => [...prev, assistantMsg]);
+      });
+      // Pull fresh quota counter — regenerate spends one message of quota.
+      refreshAuth();
+    } catch (e) {
+      // Intentional abort (navigation or user cancel) — the server's shielded
+      // persist saves the partial; a reload reconciles. No error toast.
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        return;
+      }
+
+      if (e instanceof RateLimitError) {
+        // 429 happens before the server deletes anything — restore the
+        // original answer locally.
+        setMessages((prev) => [...prev, removed]);
+        const friendly = `You've hit your daily message limit (${e.limit}/day). Resets at ${formatResetTime(e.resetAt)}.`;
+        setInlineError(friendly);
+        addToast(friendly, 'error');
+        refreshAuth();
+        return;
+      }
+
+      setMessages((prev) => [...prev, removed]);
+      const errMsg = e instanceof Error ? e.message : 'Failed to regenerate the response';
+      setInlineError('Failed to regenerate the response. Please try again.');
+      addToast(errMsg || 'Network error — response not regenerated', 'error');
+    }
+  }, [
+    conversationId,
+    isStreaming,
+    messages,
+    setMessages,
+    startRegenerate,
+    scrollToBottom,
+    addToast,
+    refreshAuth,
+  ]);
+
   // Send pending message after conversation is created (post-route-change).
   // We read from `location.state.initialMessage`, which survives the
   // LandingPage → ConversationPage remount. Clear state with `replace`
@@ -708,13 +772,18 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
             {showEmptyInConversation ? (
               <EmptyState onStarterClick={handleStarterClick} />
             ) : (
-              messages.map((msg) => (
+              messages.map((msg, idx) => (
                 <Message
                   key={msg.id}
                   role={msg.role}
                   content={msg.content}
                   sources={msg.sources}
                   onCitationClick={handleCitationClick}
+                  onRegenerate={
+                    !isStreaming && msg.role === 'assistant' && idx === messages.length - 1
+                      ? handleRegenerate
+                      : undefined
+                  }
                 />
               ))
             )}

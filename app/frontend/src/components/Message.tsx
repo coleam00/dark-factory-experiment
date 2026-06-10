@@ -15,6 +15,8 @@ interface MessageProps {
   onCitationClick?: (citation: Citation) => void;
   /** Current tool-call status during streaming (ephemeral progress indicator) */
   streamingStatus?: StreamingStatus | null;
+  /** When provided (assistant messages only), renders a regenerate button */
+  onRegenerate?: () => void;
 }
 
 // ── Typing indicator (3 pulsing dots) ────────────────────────────
@@ -159,6 +161,48 @@ function SourceCitations({
   );
 }
 
+// ── Regenerate button ─────────────────────────────────────────────
+function RegenerateButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+      style={{
+        background: 'transparent',
+        border: 'none',
+        cursor: 'pointer',
+        color: '#94a3b8',
+        fontSize: 12,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 5,
+        padding: 0,
+        marginTop: 8,
+        transition: 'color 0.15s',
+        fontFamily: 'inherit',
+      }}
+      onMouseEnter={(e) => (e.currentTarget.style.color = '#f1f5f9')}
+      onMouseLeave={(e) => (e.currentTarget.style.color = '#94a3b8')}
+      aria-label="Regenerate response"
+    >
+      <svg
+        width="12"
+        height="12"
+        viewBox="0 0 12 12"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M10.5 6a4.5 4.5 0 1 1-1.3-3.2" />
+        <polyline points="9.5,0.8 9.5,3.3 7,3.3" />
+      </svg>
+      Regenerate
+    </button>
+  );
+}
+
 // ── Main message component ────────────────────────────────────────
 export function Message({
   role,
@@ -167,6 +211,7 @@ export function Message({
   sources,
   onCitationClick,
   streamingStatus,
+  onRegenerate,
 }: MessageProps) {
   const isUser = role === 'user';
   const hasSources = !isUser && Array.isArray(sources) && sources.length > 0;
@@ -204,6 +249,7 @@ export function Message({
           <>
             <MarkdownRenderer content={content} />
             {hasSources && <SourceCitations sources={sources} onCitationClick={onCitationClick} />}
+            {onRegenerate && !isStreaming && <RegenerateButton onClick={onRegenerate} />}
           </>
         )}
       </div>
