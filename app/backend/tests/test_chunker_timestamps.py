@@ -8,7 +8,17 @@ Verifies:
   - chunk_video_fallback evenly distributes estimated duration across chunks
 """
 
+import pytest
+
 from backend.rag.chunker import chunk_video_fallback, chunk_video_timestamped
+
+# Long, varied text well above the 512-token chunk budget so HybridChunker is
+# guaranteed to split a single segment into multiple sub-chunks (exercising the
+# timestamp-distribution branch). Varied (not a single repeated word) so the
+# tokenizer genuinely overflows max_tokens.
+_LONG_TEXT = " ".join(
+    f"Sentence number {i} of the transcript talks about topic {i}." for i in range(400)
+)
 
 
 class TestChunkVideoTimestamped:
@@ -54,6 +64,43 @@ class TestChunkVideoTimestamped:
         result, _ = chunk_video_timestamped(segments)
         # Should not produce any chunks from the empty segment
         assert all("Real content" in c["content"] or "Real content" in c["snippet"] for c in result)
+
+    def test_zero_duration_segment_keeps_boundary_timestamps(self) -> None:
+        """A zero-width segment (end == start) that splits into multiple sub-chunks
+        keeps each sub-chunk on the original boundary instead of collapsing every
+        timestamp with a zero step."""
+        segments = [{"start": 120.0, "end": 120.0, "text": _LONG_TEXT}]
+        result, _ = chunk_video_timestamped(segments)
+
+        # The distribution branch is only exercised when the segment splits.
+        assert len(result) > 1
+        for chunk in result:
+            assert chunk["start_seconds"] == 120.0
+            assert chunk["end_seconds"] == 120.0
+
+    def test_negative_duration_segment_keeps_boundary_timestamps(self) -> None:
+        """A malformed segment (end < start) is not redistributed; each sub-chunk
+        keeps the original boundary values."""
+        segments = [{"start": 50.0, "end": 40.0, "text": _LONG_TEXT}]
+        result, _ = chunk_video_timestamped(segments)
+
+        assert len(result) > 1
+        for chunk in result:
+            assert chunk["start_seconds"] == 50.0
+            assert chunk["end_seconds"] == 40.0
+
+    def test_positive_duration_segment_distributes_evenly(self) -> None:
+        """Normal positive-duration segments keep their even-distribution behavior."""
+        segments = [{"start": 0.0, "end": 100.0, "text": _LONG_TEXT}]
+        result, _ = chunk_video_timestamped(segments)
+
+        assert len(result) > 1
+        assert result[0]["start_seconds"] == pytest.approx(0.0)
+        assert result[-1]["end_seconds"] == pytest.approx(100.0)
+        for i, chunk in enumerate(result):
+            assert chunk["end_seconds"] > chunk["start_seconds"]
+            if i > 0:
+                assert chunk["start_seconds"] == pytest.approx(result[i - 1]["end_seconds"])
 
 
 class TestChunkVideoFallback:
