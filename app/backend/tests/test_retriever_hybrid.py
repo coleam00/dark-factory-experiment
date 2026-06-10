@@ -152,10 +152,14 @@ class TestRetrieveHybrid:
 
             # Verify correct arguments passed (over-fetch factor applied)
             mock_kw.assert_called_once_with(
-                "test query", top_k=fetch_k, language="english", allowed_source_types=["youtube"]
+                "test query",
+                top_k=fetch_k,
+                language="english",
+                allowed_source_types=["youtube"],
+                video_ids=None,
             )
             mock_vec.assert_called_once_with(
-                [0.1] * 1536, top_k=fetch_k, allowed_source_types=["youtube"]
+                [0.1] * 1536, top_k=fetch_k, allowed_source_types=["youtube"], video_ids=None
             )
 
             # Verify result shape has all required citation fields
@@ -167,6 +171,57 @@ class TestRetrieveHybrid:
                 assert "start_seconds" in item
                 assert "end_seconds" in item
                 assert "snippet" in item
+
+    async def test_forwards_video_ids_to_both_legs(self):
+        """retrieve_hybrid(video_ids=[...]) forwards the scope to both the
+        keyword and vector search calls (issue #279)."""
+        with (
+            patch(
+                "backend.rag.retriever_hybrid.repository.keyword_search",
+                new_callable=AsyncMock,
+            ) as mock_kw,
+            patch(
+                "backend.rag.retriever_hybrid.repository.vector_search_pg",
+                new_callable=AsyncMock,
+            ) as mock_vec,
+            patch(
+                "backend.rag.retriever_hybrid.repository.get_video",
+                new_callable=AsyncMock,
+            ) as mock_video,
+        ):
+            mock_kw.return_value = [_CHUNK_A]
+            mock_vec.return_value = [_CHUNK_A]
+            mock_video.return_value = {"title": "T", "url": "u"}
+
+            await retrieve_hybrid("test query", [0.1] * 1536, top_k=5, video_ids=["v1", "v2"])
+
+            assert mock_kw.call_args.kwargs["video_ids"] == ["v1", "v2"]
+            assert mock_vec.call_args.kwargs["video_ids"] == ["v1", "v2"]
+
+    async def test_video_ids_defaults_to_none(self):
+        """Without video_ids, both legs receive video_ids=None (unscoped)."""
+        with (
+            patch(
+                "backend.rag.retriever_hybrid.repository.keyword_search",
+                new_callable=AsyncMock,
+            ) as mock_kw,
+            patch(
+                "backend.rag.retriever_hybrid.repository.vector_search_pg",
+                new_callable=AsyncMock,
+            ) as mock_vec,
+            patch(
+                "backend.rag.retriever_hybrid.repository.get_video",
+                new_callable=AsyncMock,
+            ) as mock_video,
+        ):
+            mock_kw.return_value = []
+            mock_vec.return_value = []
+            mock_video.return_value = {"title": "T", "url": "u"}
+
+            await retrieve_hybrid("test query", [0.1] * 1536, top_k=5)
+
+            assert mock_kw.call_args.kwargs["video_ids"] is None
+            assert mock_vec.call_args.kwargs["video_ids"] is None
 
     async def test_rare_exact_term_boosted_by_keyword_path(self):
         """A technical acronym (weak in cosine space) ranks higher via hybrid.

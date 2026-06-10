@@ -25,6 +25,16 @@ class ConversationRename(BaseModel):
     title: str
 
 
+class ConversationScopeUpdate(BaseModel):
+    """Per-conversation video scope (issue #279).
+
+    ``video_ids`` is the set of video ids the conversation should draw from.
+    None or an empty list clears the scope (search the whole library).
+    """
+
+    video_ids: list[str] | None = None
+
+
 @router.get("/conversations")
 async def list_conversations(current_user: dict[str, Any] = Depends(get_current_user)):
     return await repository.list_conversations(user_id=str(current_user["id"]))
@@ -92,6 +102,41 @@ async def rename_conversation(
         raise HTTPException(status_code=404, detail="Conversation not found")
     conv = await repository.get_conversation(conv_id, user_id=str(current_user["id"]))
     return conv
+
+
+@router.patch("/conversations/{conv_id}/scope")
+async def update_conversation_scope(
+    conv_id: str,
+    body: ConversationScopeUpdate,
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
+    """Set or clear the videos a conversation is scoped to (issue #279).
+
+    An empty list (or null) clears the scope so retrieval searches the whole
+    library again. A non-null list is validated against the library — unknown
+    ids are rejected with 422 to avoid the silent "scope matches nothing" trap.
+    Owner-scoped: a conversation that doesn't exist or isn't owned returns 404
+    (no existence leak), matching the rename handler's semantics.
+    """
+    user_id = str(current_user["id"])
+
+    # Normalize [] → None: a cleared scope is identical to never-scoped.
+    video_ids = body.video_ids or None
+
+    if video_ids is not None:
+        all_videos = await repository.list_videos()
+        known_ids = {v["id"] for v in all_videos if v.get("id")}
+        unknown = [vid for vid in video_ids if vid not in known_ids]
+        if unknown:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Unknown video id(s): {', '.join(unknown)}",
+            )
+
+    updated = await repository.update_conversation_scope(conv_id, user_id, video_ids)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return await repository.get_conversation(conv_id, user_id=user_id)
 
 
 @router.get("/videos")

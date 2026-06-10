@@ -93,6 +93,42 @@ class TestKeywordSearch:
         args = call_args[0]
         assert args[2] == 3
 
+    async def test_keyword_search_applies_video_id_scope(self):
+        """When video_ids is given, keyword_search adds AND video_id = ANY(...)
+        and binds the list as $4 (issue #279)."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])
+
+        mock_acquire = AsyncMock()
+        mock_acquire.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_acquire.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(repository, "_acquire", return_value=mock_acquire):
+            await repository.keyword_search("test", top_k=5, video_ids=["v1", "v2"])
+
+        call_args = mock_conn.fetch.call_args
+        sql = call_args[0][0]
+        assert "video_id = ANY($4::text[])" in sql
+        args = call_args[0]
+        assert args[4] == ["v1", "v2"]
+
+    async def test_keyword_search_omits_scope_clause_when_none_or_empty(self):
+        """None or [] video_ids must NOT add the video_id filter (unscoped)."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])
+
+        mock_acquire = AsyncMock()
+        mock_acquire.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_acquire.__aexit__ = AsyncMock(return_value=None)
+
+        for scope in (None, []):
+            with patch.object(repository, "_acquire", return_value=mock_acquire):
+                await repository.keyword_search("test", top_k=5, video_ids=scope)
+            sql = mock_conn.fetch.call_args[0][0]
+            assert "video_id = ANY" not in sql
+            # No $4 bound — only sql, query, top_k, allowed_source_types.
+            assert len(mock_conn.fetch.call_args[0]) == 4
+
 
 class TestVectorSearchPg:
     """Tests for vector_search_pg() SQL execution."""
@@ -191,3 +227,39 @@ class TestVectorSearchPg:
 
         parsed = json.loads(args[1])
         assert parsed == embedding
+
+    async def test_vector_search_pg_applies_video_id_scope(self):
+        """When video_ids is given, vector_search_pg adds AND video_id = ANY(...)
+        and binds the list as $4 (issue #279)."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])
+
+        mock_acquire = AsyncMock()
+        mock_acquire.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_acquire.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(repository, "_acquire", return_value=mock_acquire):
+            await repository.vector_search_pg([0.1] * 1536, top_k=5, video_ids=["v1", "v2"])
+
+        call_args = mock_conn.fetch.call_args
+        sql = call_args[0][0]
+        assert "video_id = ANY($4::text[])" in sql
+        args = call_args[0]
+        assert args[4] == ["v1", "v2"]
+
+    async def test_vector_search_pg_omits_scope_clause_when_none_or_empty(self):
+        """None or [] video_ids must NOT add the video_id filter (unscoped)."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])
+
+        mock_acquire = AsyncMock()
+        mock_acquire.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_acquire.__aexit__ = AsyncMock(return_value=None)
+
+        for scope in (None, []):
+            with patch.object(repository, "_acquire", return_value=mock_acquire):
+                await repository.vector_search_pg([0.1] * 1536, top_k=5, video_ids=scope)
+            sql = mock_conn.fetch.call_args[0][0]
+            assert "video_id = ANY" not in sql
+            # No $4 bound — only sql, embedding_json, top_k, allowed_source_types.
+            assert len(mock_conn.fetch.call_args[0]) == 4

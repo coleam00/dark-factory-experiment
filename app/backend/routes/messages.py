@@ -139,6 +139,19 @@ async def create_message(
             )
             video_id_whitelist = set()
 
+        # Per-conversation video scope (issue #279). asyncpg returns TEXT[] as a
+        # Python list; `or None` collapses an empty array to "unscoped". When a
+        # scope is set, the search tools restrict retrieval to it and the
+        # transcript whitelist is intersected with it so neither retrieval nor a
+        # full-transcript pull can reach an out-of-scope video.
+        scoped_video_ids: list[str] | None = conv.get("scoped_video_ids") or None
+        if scoped_video_ids is not None:
+            scope_set = set(scoped_video_ids)
+            # Intersect with the library whitelist when it loaded; otherwise fall
+            # back to the scope set itself as the guard rather than leaving the
+            # transcript tool unguarded.
+            video_id_whitelist = video_id_whitelist & scope_set if video_id_whitelist else scope_set
+
         # Captured at the start of the turn so the entire tool sequence sees
         # consistent ACL — even if /me later flips is_member, the in-flight
         # turn won't change behavior mid-flight.
@@ -147,7 +160,9 @@ async def create_message(
         async def _executor(name: str, raw_args: str) -> str:
             # Pass `None` (not empty set) when the whitelist failed to load so
             # the transcript tool falls back to open lookups instead of rejecting
-            # every id.
+            # every id. NB: when a scope is set the whitelist is never empty
+            # (it's at minimum the scope set), so scoped transcript pulls stay
+            # guarded even if the library load failed.
             whitelist = video_id_whitelist if video_id_whitelist else None
             result = await execute_tool(
                 name,
@@ -155,6 +170,7 @@ async def create_message(
                 video_id_whitelist=whitelist,
                 embedding_cache=embedding_cache,
                 is_member=is_member_for_turn,
+                video_ids=scoped_video_ids,
             )
             if result.get("ok") and result.get("chunks"):
                 tool_chunks_acc.extend(result["chunks"])

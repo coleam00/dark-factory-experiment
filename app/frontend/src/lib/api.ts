@@ -41,6 +41,12 @@ export interface Conversation {
   created_at: string;
   updated_at: string;
   preview?: string | null;
+  /**
+   * Video ids this conversation is scoped to (issue #279). When set, the
+   * assistant's answers and citations only come from these videos. null or
+   * absent means unscoped — search the whole library.
+   */
+  scoped_video_ids?: string[] | null;
 }
 
 export interface Citation {
@@ -156,6 +162,13 @@ export const renameConversation = (id: string, title: string) =>
   request<Conversation>(`/conversations/${id}`, {
     method: 'PATCH',
     body: JSON.stringify({ title }),
+  });
+// Scope a conversation to specific videos (issue #279). Pass null (or an
+// empty array) to clear the scope and search the whole library again.
+export const updateConversationScope = (id: string, videoIds: string[] | null) =>
+  request<Conversation>(`/conversations/${id}/scope`, {
+    method: 'PATCH',
+    body: JSON.stringify({ video_ids: videoIds }),
   });
 
 // Videos
