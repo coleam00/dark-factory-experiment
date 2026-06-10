@@ -714,6 +714,116 @@ class TestExtractTextFromSse:
         assert _extract_text_from_sse(chunks) == "Hello"
 
 
+class TestFinalizeSources:
+    """Unit tests for _finalize_sources — the single source-finalization
+    pipeline (dedup → is_cited → collapse-by-video → cap → refusal gate).
+
+    Both the live `event: sources` emit and the persisted row come from this
+    one function, so the live and reloaded views always agree (issue #277).
+    """
+
+    def _chunk(self, chunk_id: str, video_id: str, start: float = 0.0) -> dict:
+        return {
+            "chunk_id": chunk_id,
+            "video_id": video_id,
+            "video_title": f"Video {video_id}",
+            "video_url": f"https://youtube.com/watch?v={video_id}",
+            "start_seconds": start,
+            "end_seconds": start + 10.0,
+            "snippet": f"snippet {chunk_id}",
+        }
+
+    def test_empty_input_returns_empty(self) -> None:
+        from backend.routes.messages import _finalize_sources
+
+        assert _finalize_sources([], "any text") == []
+
+    def test_dedup_by_chunk_id(self) -> None:
+        """Same chunk_id appearing twice collapses to a single entry."""
+        from backend.routes.messages import _finalize_sources
+
+        chunks = [
+            self._chunk("c1", "v1"),
+            self._chunk("c1", "v1"),  # duplicate id
+        ]
+        result = _finalize_sources(chunks, "no markers")
+        assert len(result) == 1
+        assert result[0]["chunk_id"] == "c1"
+
+    def test_skips_falsy_chunk_ids(self) -> None:
+        """Chunks with a missing/empty chunk_id are dropped."""
+        from backend.routes.messages import _finalize_sources
+
+        chunks = [
+            {"chunk_id": "", "video_id": "v1", "video_title": "t", "video_url": "u"},
+            {"video_id": "v2", "video_title": "t", "video_url": "u"},  # no chunk_id
+            self._chunk("c3", "v3"),
+        ]
+        result = _finalize_sources(chunks, "no markers")
+        assert len(result) == 1
+        assert result[0]["chunk_id"] == "c3"
+
+    def test_same_video_collapses_with_segment_count(self) -> None:
+        """Two chunks from one video collapse to one entry carrying
+        segment_count == 2."""
+        from backend.routes.messages import _finalize_sources
+
+        chunks = [
+            self._chunk("c1", "v1", start=10.0),
+            self._chunk("c2", "v1", start=20.0),
+        ]
+        result = _finalize_sources(chunks, "no markers")
+        assert len(result) == 1
+        assert result[0]["video_id"] == "v1"
+        assert result[0]["segment_count"] == 2
+
+    def test_is_cited_marked_from_markers(self) -> None:
+        """A [c:<id>] marker in the final text flags the matching entry."""
+        from backend.routes.messages import _finalize_sources
+
+        chunks = [self._chunk("c1", "v1"), self._chunk("c2", "v2")]
+        result = _finalize_sources(chunks, "As shown [c:c1] this works.")
+        by_video = {r["video_id"]: r for r in result}
+        assert by_video["v1"]["is_cited"] is True
+        assert by_video["v2"]["is_cited"] is False
+
+    def test_cap_uncited_sliced_cited_pass_through(self) -> None:
+        """Cited entries always pass through; uncited are sliced to
+        CITATIONS_MAX_COUNT."""
+        from backend.config import CITATIONS_MAX_COUNT
+        from backend.routes.messages import _finalize_sources
+
+        # 3 cited videos + (CAP + 5) uncited videos, all distinct video_ids.
+        cited_chunks = [self._chunk(f"cited{i}", f"cv{i}") for i in range(3)]
+        uncited_chunks = [self._chunk(f"unc{i}", f"uv{i}") for i in range(CITATIONS_MAX_COUNT + 5)]
+        markers = " ".join(f"[c:cited{i}]" for i in range(3))
+        result = _finalize_sources(cited_chunks + uncited_chunks, f"answer {markers}")
+
+        cited = [r for r in result if r.get("is_cited")]
+        uncited = [r for r in result if not r.get("is_cited")]
+        assert len(cited) == 3
+        assert len(uncited) == CITATIONS_MAX_COUNT
+
+    def test_refusal_returns_empty_even_with_chunks(self) -> None:
+        """A refusal answer persists/emits no sources, regardless of chunks."""
+        from backend.routes.messages import _finalize_sources
+
+        chunks = [self._chunk("c1", "v1")]
+        refusal = "I'm sorry, the video library does not cover that topic."
+        assert _finalize_sources(chunks, refusal) == []
+
+    def test_does_not_mutate_input(self) -> None:
+        """The accumulator dicts are copied, never mutated (purity guard)."""
+        from backend.routes.messages import _finalize_sources
+
+        chunk = self._chunk("c1", "v1")
+        original = dict(chunk)
+        _finalize_sources([chunk], "As shown [c:c1].")
+        assert chunk == original
+        assert "is_cited" not in chunk
+        assert "segment_count" not in chunk
+
+
 class TestRefusalSourcesSuppressionIntegration:
     """Integration tests for SSE sources suppression on refusals.
 
