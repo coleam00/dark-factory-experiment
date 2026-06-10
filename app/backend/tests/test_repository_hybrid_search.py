@@ -93,6 +93,42 @@ class TestKeywordSearch:
         args = call_args[0]
         assert args[2] == 3
 
+    async def test_keyword_search_with_video_ids_filters_by_scope(self):
+        """video_ids adds `video_id = ANY($4::text[])` and passes the list as $4."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])
+
+        mock_acquire = AsyncMock()
+        mock_acquire.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_acquire.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(repository, "_acquire", return_value=mock_acquire):
+            await repository.keyword_search("hello", top_k=5, video_ids=["v1", "v2"])
+
+        call_args = mock_conn.fetch.call_args
+        sql = call_args[0][0]
+        assert "video_id = ANY($4::text[])" in sql
+        args = call_args[0]
+        assert args[4] == ["v1", "v2"]
+
+    async def test_keyword_search_without_video_ids_keeps_unscoped_sql(self):
+        """Regression: video_ids=None leaves the SQL unfiltered with only 3 args."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])
+
+        mock_acquire = AsyncMock()
+        mock_acquire.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_acquire.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(repository, "_acquire", return_value=mock_acquire):
+            await repository.keyword_search("hello", top_k=5, video_ids=None)
+
+        call_args = mock_conn.fetch.call_args
+        sql = call_args[0][0]
+        assert "video_id = ANY" not in sql
+        # (sql, query, top_k, allowed_source_types) — no 4th query param
+        assert len(call_args[0]) == 4
+
 
 class TestVectorSearchPg:
     """Tests for vector_search_pg() SQL execution."""
@@ -191,3 +227,41 @@ class TestVectorSearchPg:
 
         parsed = json.loads(args[1])
         assert parsed == embedding
+
+    async def test_vector_search_pg_with_video_ids_filters_by_scope(self):
+        """video_ids adds `video_id = ANY($4::text[])` and passes the list as $4."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])
+
+        mock_acquire = AsyncMock()
+        mock_acquire.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_acquire.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(repository, "_acquire", return_value=mock_acquire):
+            await repository.vector_search_pg([0.1] * 1536, top_k=5, video_ids=["v1", "v2"])
+
+        call_args = mock_conn.fetch.call_args
+        sql = call_args[0][0]
+        assert "video_id = ANY($4::text[])" in sql
+        # The existing ACL filter must stay in place alongside the scope.
+        assert "source_type = ANY($3::text[])" in sql
+        args = call_args[0]
+        assert args[4] == ["v1", "v2"]
+
+    async def test_vector_search_pg_without_video_ids_keeps_unscoped_sql(self):
+        """Regression: video_ids=None leaves the SQL unfiltered with only 3 args."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])
+
+        mock_acquire = AsyncMock()
+        mock_acquire.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_acquire.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(repository, "_acquire", return_value=mock_acquire):
+            await repository.vector_search_pg([0.1] * 1536, top_k=5, video_ids=None)
+
+        call_args = mock_conn.fetch.call_args
+        sql = call_args[0][0]
+        assert "video_id = ANY" not in sql
+        # (sql, embedding_json, top_k, allowed_source_types) — no 4th query param
+        assert len(call_args[0]) == 4

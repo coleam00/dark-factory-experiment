@@ -41,6 +41,13 @@ export interface Conversation {
   created_at: string;
   updated_at: string;
   preview?: string | null;
+  /**
+   * Video scope (issue #279). null/absent = unscoped (search everything);
+   * a non-empty array restricts retrieval and citations to those videos
+   * for the life of the conversation. Write-once — set at creation or via
+   * setConversationScope while the conversation is still unscoped.
+   */
+  scoped_video_ids?: string[] | null;
 }
 
 export interface Citation {
@@ -146,8 +153,16 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 export const getConversations = () => request<Conversation[]>('/conversations');
 export const searchConversations = (q: string) =>
   request<Conversation[]>(`/conversations/search?q=${encodeURIComponent(q)}`);
-export const createConversation = () =>
-  request<Conversation>('/conversations', { method: 'POST', body: '{}' });
+export const createConversation = (videoIds?: string[]) =>
+  request<Conversation>('/conversations', {
+    method: 'POST',
+    body: JSON.stringify(videoIds?.length ? { video_ids: videoIds } : {}),
+  });
+export const setConversationScope = (id: string, videoIds: string[]) =>
+  request<Conversation>(`/conversations/${id}/scope`, {
+    method: 'POST',
+    body: JSON.stringify({ video_ids: videoIds }),
+  });
 export const getConversation = (id: string) =>
   request<ConversationWithMessages>(`/conversations/${id}`);
 export const deleteConversation = (id: string) =>

@@ -121,7 +121,10 @@ async def create_message(
     # every chunk returned by any tool call so the final SSE `sources` event
     # lists exactly what the model actually read. The video_id whitelist is
     # only consulted by the transcript tool (it guards against hallucinated
-    # ids); the search tools ignore it.
+    # ids). The search tools honour the conversation's video scope (issue
+    # #279) via `video_ids`; the whitelist is narrowed to the scope too so
+    # the transcript tool can't read outside it.
+    scoped_ids: list[str] | None = conv.get("scoped_video_ids") or None
     source_citations: list[dict] = []
     tool_chunks_acc: list[dict] = []
     embedding_cache: dict[str, list[float]] = {}
@@ -139,6 +142,14 @@ async def create_message(
             )
             video_id_whitelist = set()
 
+        # Conversation scope narrows the transcript whitelist — the model
+        # cannot pull a transcript outside the scope even if the library
+        # whitelist failed to load (issue #279).
+        if scoped_ids:
+            video_id_whitelist = (
+                video_id_whitelist & set(scoped_ids) if video_id_whitelist else set(scoped_ids)
+            )
+
         # Captured at the start of the turn so the entire tool sequence sees
         # consistent ACL — even if /me later flips is_member, the in-flight
         # turn won't change behavior mid-flight.
@@ -155,6 +166,7 @@ async def create_message(
                 video_id_whitelist=whitelist,
                 embedding_cache=embedding_cache,
                 is_member=is_member_for_turn,
+                video_ids=scoped_ids,
             )
             if result.get("ok") and result.get("chunks"):
                 tool_chunks_acc.extend(result["chunks"])

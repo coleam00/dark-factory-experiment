@@ -5,11 +5,12 @@ import { useMessages } from '../hooks/useMessages';
 import { useStreamingResponse } from '../hooks/useStreamingResponse';
 import { useToast } from '../hooks/useToast';
 import type { Citation, Message as MessageType } from '../lib/api';
-import { RateLimitError, createConversation } from '../lib/api';
+import { ApiError, RateLimitError, createConversation, setConversationScope } from '../lib/api';
 import { exportConversationAsMarkdown } from '../lib/exportMarkdown';
 import { ChatInput, type ChatInputHandle } from './ChatInput';
 import { CitationModal } from './CitationModal';
 import { Message } from './Message';
+import { VideoScopePicker } from './VideoScopePicker';
 
 function formatResetTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -292,9 +293,8 @@ interface ConvLocationState {
 export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaProps) {
   const navigate = useNavigate();
   const location = useLocation() as Location & { state: ConvLocationState | null };
-  const { messages, setMessages, loading, error, notFound, conversation } = useMessages(
-    conversationId || null,
-  );
+  const { messages, setMessages, loading, error, notFound, conversation, applyScope } =
+    useMessages(conversationId || null);
   const {
     streamingContent,
     streamingSources,
@@ -325,6 +325,12 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
   const pendingUserMsgIdRef = useRef<string | null>(null);
   // Citation modal state
   const [selectedCitation, setSelectedCitation] = useState<Citation | null>(null);
+  // Video scope state (issue #279). pendingScopeIds holds a selection made
+  // before the conversation exists; it's passed to createConversation on the
+  // first send. For an already-created empty conversation the scope is
+  // persisted immediately via setConversationScope.
+  const [pendingScopeIds, setPendingScopeIds] = useState<string[]>([]);
+  const [scopePickerOpen, setScopePickerOpen] = useState(false);
 
   // ── Auto-scroll logic ──
   // Defer scroll to the next paint cycle so streaming DOM updates are applied first.
@@ -459,7 +465,9 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
       if (!conversationId) {
         if (isStreaming) return;
         try {
-          const conv = await createConversation();
+          const conv = await createConversation(
+            pendingScopeIds.length ? pendingScopeIds : undefined,
+          );
           navigate(`/c/${conv.id}`, {
             state: { initialMessage: content } satisfies ConvLocationState,
           });
@@ -550,6 +558,7 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
       conversationId,
       isStreaming,
       navigate,
+      pendingScopeIds,
       setMessages,
       startStream,
       scrollToBottom,
@@ -557,6 +566,30 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
       refreshAuth,
       refreshConversationsRef,
     ],
+  );
+
+  // ── Video scope confirm handler ──
+  const handleScopeConfirm = useCallback(
+    async (ids: string[]) => {
+      setScopePickerOpen(false);
+      if (!conversationId) {
+        // No conversation yet — hold the selection; handleSend passes it to
+        // createConversation on the first message.
+        setPendingScopeIds(ids);
+        return;
+      }
+      try {
+        await setConversationScope(conversationId, ids);
+        applyScope(ids);
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 409) {
+          addToast('This conversation already has a video scope.', 'error');
+          return;
+        }
+        addToast('Could not set the video scope. Please try again.', 'error');
+      }
+    },
+    [conversationId, applyScope, addToast],
   );
 
   // Send pending message after conversation is created (post-route-change).
@@ -601,6 +634,21 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
   // before dispatchedInitialRef fires (#205).
   const showEmptyInConversation =
     messages.length === 0 && !inlineError && !isStreaming && !location.state?.initialMessage;
+
+  // ── Video scope render state ──
+  // The picker entry point is only available while the conversation can
+  // still be scoped: landing page (no conversation yet), or an existing
+  // conversation with no messages and no persisted scope. Once persisted,
+  // the scope is immutable — only the chip is shown.
+  const persistedScopeCount = conversation?.scoped_video_ids?.length ?? 0;
+  const scopeChipCount = persistedScopeCount || (!conversationId ? pendingScopeIds.length : 0);
+  const canSetScope =
+    !isStreaming &&
+    (!conversationId ||
+      (messages.length === 0 &&
+        conversation != null &&
+        conversation.scoped_video_ids == null &&
+        !location.state?.initialMessage));
 
   const handleExport = useCallback(() => {
     try {
@@ -766,6 +814,59 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
           zIndex: 2,
         }}
       >
+        {(canSetScope || scopeChipCount > 0) && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              marginBottom: 8,
+            }}
+          >
+            {scopeChipCount > 0 && (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '4px 10px',
+                  borderRadius: 999,
+                  background: 'rgba(59,130,246,0.12)',
+                  border: '1px solid rgba(59,130,246,0.3)',
+                  color: '#93c5fd',
+                  fontSize: 12,
+                }}
+              >
+                Scoped to {scopeChipCount} video{scopeChipCount === 1 ? '' : 's'}
+              </span>
+            )}
+            {canSetScope && (
+              <button
+                onClick={() => setScopePickerOpen(true)}
+                style={{
+                  background: '#1e293b',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  borderRadius: 999,
+                  color: '#94a3b8',
+                  cursor: 'pointer',
+                  padding: '4px 10px',
+                  fontSize: 12,
+                  transition: 'color 0.15s, border-color 0.15s',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.color = '#f1f5f9';
+                  e.currentTarget.style.borderColor = 'rgba(59,130,246,0.3)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.color = '#94a3b8';
+                  e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)';
+                }}
+              >
+                {scopeChipCount > 0 ? 'Change selection' : 'Focus on specific videos'}
+              </button>
+            )}
+          </div>
+        )}
         <ChatInput
           ref={chatInputRef}
           onSend={handleSend}
@@ -774,6 +875,14 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
           onStop={abortStream}
         />
       </div>
+
+      {/* ── Video scope picker ── */}
+      <VideoScopePicker
+        open={scopePickerOpen}
+        initialSelected={pendingScopeIds}
+        onConfirm={handleScopeConfirm}
+        onClose={() => setScopePickerOpen(false)}
+      />
 
       {/* ── Citation modal ── */}
       {selectedCitation && (

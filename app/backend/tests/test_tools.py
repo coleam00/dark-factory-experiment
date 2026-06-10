@@ -96,7 +96,7 @@ _FAKE_CHUNKS = [
 
 @pytest.mark.asyncio
 async def test_execute_search_hybrid_happy_path(monkeypatch) -> None:
-    async def fake_retrieve(_q, _emb, top_k=5, is_member=False):
+    async def fake_retrieve(_q, _emb, top_k=5, is_member=False, video_ids=None):
         assert top_k == 10
         return _FAKE_CHUNKS
 
@@ -112,7 +112,9 @@ async def test_execute_search_hybrid_happy_path(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_execute_search_keyword_hydrates_raw_chunks(monkeypatch) -> None:
-    async def fake_keyword(_q, top_k=10, language="english", allowed_source_types=None):
+    async def fake_keyword(
+        _q, top_k=10, language="english", allowed_source_types=None, video_ids=None
+    ):
         return [
             {
                 "id": "c1",
@@ -140,7 +142,7 @@ async def test_execute_search_keyword_hydrates_raw_chunks(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_execute_search_semantic_embeds_and_hydrates(monkeypatch) -> None:
-    async def fake_vector(_emb, top_k=10, allowed_source_types=None):
+    async def fake_vector(_emb, top_k=10, allowed_source_types=None, video_ids=None):
         return [
             {
                 "id": "c2",
@@ -169,7 +171,9 @@ async def test_execute_search_semantic_embeds_and_hydrates(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_search_empty_results_returns_canned_message(monkeypatch) -> None:
-    async def fake_keyword(_q, top_k=10, language="english", allowed_source_types=None):
+    async def fake_keyword(
+        _q, top_k=10, language="english", allowed_source_types=None, video_ids=None
+    ):
         return []
 
     monkeypatch.setattr(tools_module.repository, "keyword_search", fake_keyword)
@@ -178,6 +182,94 @@ async def test_search_empty_results_returns_canned_message(monkeypatch) -> None:
     assert result["ok"] is True
     assert "No relevant chunks found" in result["text"]
     assert result["chunks"] == []
+
+
+# --- Conversation video scope forwarding (issue #279) ----------------------
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_forwards_video_ids_to_hybrid(monkeypatch) -> None:
+    captured: dict = {}
+
+    async def fake_retrieve(_q, _emb, top_k=5, is_member=False, video_ids=None):
+        captured["video_ids"] = video_ids
+        return []
+
+    monkeypatch.setattr("backend.rag.retriever_hybrid.retrieve_hybrid", fake_retrieve)
+    monkeypatch.setattr("backend.rag.embeddings.embed_text", lambda _s: [0.0] * 1536)
+
+    result = await execute_tool("search_videos", {"query": "q"}, video_ids=["v1", "v2"])
+    assert result["ok"] is True
+    assert captured["video_ids"] == ["v1", "v2"]
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_forwards_video_ids_to_keyword(monkeypatch) -> None:
+    captured: dict = {}
+
+    async def fake_keyword(
+        _q, top_k=10, language="english", allowed_source_types=None, video_ids=None
+    ):
+        captured["video_ids"] = video_ids
+        return []
+
+    monkeypatch.setattr(tools_module.repository, "keyword_search", fake_keyword)
+
+    result = await execute_tool("keyword_search_videos", {"query": "q"}, video_ids=["v1"])
+    assert result["ok"] is True
+    assert captured["video_ids"] == ["v1"]
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_forwards_video_ids_to_semantic(monkeypatch) -> None:
+    captured: dict = {}
+
+    async def fake_vector(_emb, top_k=10, allowed_source_types=None, video_ids=None):
+        captured["video_ids"] = video_ids
+        return []
+
+    monkeypatch.setattr(tools_module.repository, "vector_search_pg", fake_vector)
+    monkeypatch.setattr("backend.rag.embeddings.embed_text", lambda _s: [0.0] * 1536)
+
+    result = await execute_tool("semantic_search_videos", {"query": "q"}, video_ids=["v1"])
+    assert result["ok"] is True
+    assert captured["video_ids"] == ["v1"]
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_omitted_video_ids_defaults_to_none(monkeypatch) -> None:
+    """Regression: an unscoped conversation passes video_ids=None all the way down."""
+    captured: dict = {"video_ids": "sentinel"}
+
+    async def fake_keyword(
+        _q, top_k=10, language="english", allowed_source_types=None, video_ids=None
+    ):
+        captured["video_ids"] = video_ids
+        return []
+
+    monkeypatch.setattr(tools_module.repository, "keyword_search", fake_keyword)
+
+    result = await execute_tool("keyword_search_videos", {"query": "q"})
+    assert result["ok"] is True
+    assert captured["video_ids"] is None
+
+
+@pytest.mark.asyncio
+async def test_executors_never_treat_empty_list_as_filter(monkeypatch) -> None:
+    """Belt-and-suspenders: [] is normalized to None before hitting the repository."""
+    captured: dict = {"video_ids": "sentinel"}
+
+    async def fake_keyword(
+        _q, top_k=10, language="english", allowed_source_types=None, video_ids=None
+    ):
+        captured["video_ids"] = video_ids
+        return []
+
+    monkeypatch.setattr(tools_module.repository, "keyword_search", fake_keyword)
+
+    result = await execute_search_keyword({"query": "q"}, video_ids=[])
+    assert result["ok"] is True
+    assert captured["video_ids"] is None
 
 
 # --- Per-video diversity cap ----------------------------------------------
@@ -257,7 +349,7 @@ async def test_execute_search_hybrid_respects_per_video_cap(monkeypatch) -> None
         for i in range(6)
     ]
 
-    async def fake_retrieve(_q, _emb, top_k=10, is_member=False):
+    async def fake_retrieve(_q, _emb, top_k=10, is_member=False, video_ids=None):
         return many_chunks
 
     monkeypatch.setattr("backend.rag.retriever_hybrid.retrieve_hybrid", fake_retrieve)
@@ -273,7 +365,9 @@ async def test_execute_search_hybrid_respects_per_video_cap(monkeypatch) -> None
 async def test_execute_search_keyword_respects_per_video_cap(monkeypatch) -> None:
     """Cap must be enforced end-to-end inside execute_search_keyword."""
 
-    async def fake_keyword(_q, top_k=10, language="english", allowed_source_types=None):
+    async def fake_keyword(
+        _q, top_k=10, language="english", allowed_source_types=None, video_ids=None
+    ):
         return [
             {
                 "id": f"c{i}",
@@ -303,7 +397,7 @@ async def test_execute_search_keyword_respects_per_video_cap(monkeypatch) -> Non
 async def test_execute_search_semantic_respects_per_video_cap(monkeypatch) -> None:
     """Cap must be enforced end-to-end inside execute_search_semantic."""
 
-    async def fake_vector(_emb, top_k=10, allowed_source_types=None):
+    async def fake_vector(_emb, top_k=10, allowed_source_types=None, video_ids=None):
         return [
             {
                 "id": f"c{i}",
