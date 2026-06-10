@@ -614,3 +614,138 @@ describe('sources event — hook state via renderHook', () => {
     expect(onComplete).toHaveBeenCalledWith(expect.objectContaining({ sources: [] }));
   });
 });
+
+describe('mid-stream error payload', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('does not call onComplete and throws the error', async () => {
+    const sseChunks = [
+      'data: "Partial answer"\n\n',
+      'data: {"error": "upstream failed"}\n\n',
+      'data: "More tokens"\n\n',
+      'data: [DONE]\n\n',
+    ];
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: makeSseStream(sseChunks),
+      }),
+    );
+
+    const onComplete = vi.fn();
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await expect(
+      act(async () => {
+        await result.current.startStream('conv-1', 'hi', onComplete);
+      }),
+    ).rejects.toThrow('upstream failed');
+
+    expect(onComplete).not.toHaveBeenCalled();
+  });
+
+  it('stops reading promptly after error payload', async () => {
+    const encoder = new TextEncoder();
+    let pullCount = 0;
+    const chunks = [
+      'data: "Partial answer"\n\n',
+      'data: {"error": "upstream failed"}\n\n',
+      'data: "Should not be read"\n\n',
+      'data: [DONE]\n\n',
+    ];
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (pullCount < chunks.length) {
+          controller.enqueue(encoder.encode(chunks[pullCount]));
+          pullCount++;
+        } else {
+          controller.close();
+        }
+      },
+    });
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: stream,
+      }),
+    );
+
+    const onComplete = vi.fn();
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await expect(
+      act(async () => {
+        await result.current.startStream('conv-1', 'hi', onComplete);
+      }),
+    ).rejects.toThrow('upstream failed');
+
+    expect(onComplete).not.toHaveBeenCalled();
+    expect(pullCount).toBeLessThan(chunks.length);
+  });
+
+  it('runs finally cleanup exactly once', async () => {
+    const sseChunks = [
+      'data: "Partial answer"\n\n',
+      'data: {"error": "upstream failed"}\n\n',
+      'data: [DONE]\n\n',
+    ];
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: makeSseStream(sseChunks),
+      }),
+    );
+
+    const onComplete = vi.fn();
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await expect(
+      act(async () => {
+        await result.current.startStream('conv-1', 'hi', onComplete);
+      }),
+    ).rejects.toThrow('upstream failed');
+
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.streamingContent).toBe('');
+    expect(result.current.streamingSources).toHaveLength(0);
+    expect(result.current.streamingStatus).toBeNull();
+  });
+
+  it('uses default error message on unparseable error payload', async () => {
+    const sseChunks = [
+      'data: {"error"broken\n\n',
+      'data: [DONE]\n\n',
+    ];
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: makeSseStream(sseChunks),
+      }),
+    );
+
+    const onComplete = vi.fn();
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await expect(
+      act(async () => {
+        await result.current.startStream('conv-1', 'hi', onComplete);
+      }),
+    ).rejects.toThrow('Stream error from server');
+
+    expect(onComplete).not.toHaveBeenCalled();
+  });
+});
