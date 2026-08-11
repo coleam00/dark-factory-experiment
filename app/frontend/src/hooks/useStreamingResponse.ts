@@ -107,7 +107,12 @@ export function useStreamingResponse(conversationId: string | null) {
         // Buffer for incomplete SSE data between reader.read() calls
         let buffer = '';
 
-        while (true) {
+        // Condition is `!streamError`, not `true`: the mid-stream error branch
+        // below can only `break` out of the inner per-event loop, and the
+        // server does not send [DONE] after an error. Left as `while (true)`,
+        // this kept calling reader.read() until the connection closed and then
+        // fell through to onComplete with a partial answer. Issue #244.
+        while (!streamError) {
           const { done, value } = await reader.read();
           if (done) break;
 
@@ -184,6 +189,9 @@ export function useStreamingResponse(conversationId: string | null) {
                 // Use default message
               }
               streamError = new Error(errMsg);
+              // Nothing further is coming, so release the connection rather
+              // than leaving the body un-drained now that we stop reading.
+              void reader.cancel().catch(() => {});
               break;
             } else if (data) {
               // Tokens are JSON-encoded strings to safely handle newlines/special chars
@@ -203,8 +211,11 @@ export function useStreamingResponse(conversationId: string | null) {
           }
         }
 
-        // Stream completed successfully
-        onComplete({ fullText, sources });
+        // Only on a clean finish. On a mid-stream error the caller persists
+        // nothing and the throw below surfaces it instead.
+        if (!streamError) {
+          onComplete({ fullText, sources });
+        }
       } finally {
         // Always reset streaming state — React 18 batches this with the onComplete
         // state updates, ensuring a seamless transition to the persisted message.

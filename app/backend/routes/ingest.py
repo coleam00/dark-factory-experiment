@@ -270,6 +270,11 @@ async def ingest_from_url(body: IngestFromUrlRequest) -> IngestFromUrlResponse:
         embeddings = embed_batch(chunk_texts)
     except Exception as exc:
         logger.error("Embedding batch failed for video '%s': %s", title, exc)
+        # Clean up the orphan video record to avoid leaving cruft.
+        # `video_id` is the id returned by create_video above — never look the
+        # row up by URL here, because chunks cascade on delete and a substring
+        # match could take out a different video.
+        await repository.delete_video(video_id)
         raise HTTPException(
             status_code=502,
             detail=f"Embeddings API request failed: {exc}",

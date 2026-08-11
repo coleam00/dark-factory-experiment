@@ -614,3 +614,108 @@ describe('sources event — hook state via renderHook', () => {
     expect(onComplete).toHaveBeenCalledWith(expect.objectContaining({ sources: [] }));
   });
 });
+
+describe('useStreamingResponse mid-stream error handling (issue #244)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('does not call onComplete when the server errors after partial tokens', async () => {
+    // The server streams some tokens, then fails. It does NOT send [DONE]
+    // after an error, so the old code kept reading until the connection
+    // closed and then fell through to onComplete with the partial answer,
+    // which the caller persisted as if it were a finished response.
+    const sseChunks = [
+      `data: "The first half of an answer"\n\n`,
+      `data: {"error": "upstream model timed out"}\n\n`,
+    ];
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: makeSseStream(sseChunks),
+      }),
+    );
+
+    const onComplete = vi.fn();
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    let thrown: unknown;
+    await act(async () => {
+      try {
+        await result.current.startStream('conv-1', 'hi', onComplete);
+      } catch (e) {
+        thrown = e;
+      }
+    });
+
+    expect(onComplete).not.toHaveBeenCalled();
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toBe('upstream model timed out');
+  });
+
+  it('still resets streaming state after a mid-stream error', async () => {
+    const sseChunks = [`data: "partial"\n\n`, `data: {"error": "boom"}\n\n`];
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: makeSseStream(sseChunks),
+      }),
+    );
+
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await act(async () => {
+      try {
+        await result.current.startStream('conv-1', 'hi', vi.fn());
+      } catch {
+        // expected
+      }
+    });
+
+    expect(result.current.streamingContent).toBe('');
+    expect(result.current.streamingSources).toEqual([]);
+    expect(result.current.streamingStatus).toBeNull();
+    expect(result.current.isStreaming).toBe(false);
+  });
+
+  it('still calls onComplete with full text and sources on a clean stream', async () => {
+    // The other half of the guard. A fix that suppressed onComplete too
+    // broadly would make every successful answer vanish from the screen the
+    // instant streaming ended, which is far worse than the bug.
+    const sseChunks = [
+      `event: sources\ndata: ${JSON.stringify([mockCitation])}\n\n`,
+      `data: "A complete answer."\n\n`,
+      'data: [DONE]\n\n',
+    ];
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: makeSseStream(sseChunks),
+      }),
+    );
+
+    const onComplete = vi.fn();
+    const { result } = renderHook(() => useStreamingResponse('conv-1'));
+
+    await act(async () => {
+      await result.current.startStream('conv-1', 'hi', onComplete);
+    });
+
+    expect(onComplete).toHaveBeenCalledTimes(1);
+    expect(onComplete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fullText: 'A complete answer.',
+        sources: expect.arrayContaining([expect.objectContaining({ chunk_id: 'chunk-1' })]),
+      }),
+    );
+  });
+});

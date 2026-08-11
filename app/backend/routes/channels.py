@@ -42,6 +42,9 @@ class SyncResponse(BaseModel):
     videos_total: int
     videos_new: int
     videos_error: int
+    # Videos already present and skipped this run. Reported but not persisted:
+    # channel_sync_runs has no column for it and adding one is a migration.
+    videos_skipped: int = 0
 
 
 class SyncRun(BaseModel):
@@ -134,6 +137,7 @@ async def sync_channel(limit: int | None = None, force: bool = False) -> SyncRes
     videos_total = len(all_video_ids)
     videos_new = 0
     videos_error = 0
+    videos_skipped = 0
 
     logger.info(
         "Channel %s has %d videos (type=%s)",
@@ -156,7 +160,11 @@ async def sync_channel(limit: int | None = None, force: bool = False) -> SyncRes
             existing = await repo.get_video_by_youtube_id(youtube_video_id)
             if existing is not None and not force:
                 logger.info("Video %s already ingested, skipping", youtube_video_id)
-                videos_new += 1
+                # A skip is not an ingest. Counting it as new inflated
+                # videos_new on every routine sync, which made the
+                # `videos_new == 0` arm of the status check below unreachable
+                # and hid genuinely failed runs as "completed".
+                videos_skipped += 1
                 await repo.update_sync_video_status(
                     video_id=sync_video_record["id"],
                     status="ingested",
@@ -365,11 +373,13 @@ async def sync_channel(limit: int | None = None, force: bool = False) -> SyncRes
     )
 
     logger.info(
-        "Channel sync run %s complete: total=%d new=%d error=%d",
+        "Channel sync run %s complete: total=%d new=%d skipped=%d error=%d status=%s",
         sync_run_id,
         videos_total,
         videos_new,
+        videos_skipped,
         videos_error,
+        status,
     )
 
     return SyncResponse(
@@ -378,6 +388,7 @@ async def sync_channel(limit: int | None = None, force: bool = False) -> SyncRes
         videos_total=videos_total,
         videos_new=videos_new,
         videos_error=videos_error,
+        videos_skipped=videos_skipped,
     )
 
 

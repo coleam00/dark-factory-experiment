@@ -223,3 +223,41 @@ class TestRetrieveHybrid:
 
         result = _rrf_merge(keyword, vector, k=60, top_k=5)
         assert result[0]["id"] == "c_concept"
+
+
+class TestInvalidateCache:
+    """Issue #225 — the invalidation log did not say how much was cleared.
+
+    Without the count there is no way to tell a cache that was populated and
+    flushed from one that was already empty, which is exactly what you want to
+    know when debugging a stale-metadata report.
+    """
+
+    def test_logs_number_of_entries_cleared(self, caplog) -> None:
+        from backend.rag import retriever_hybrid
+
+        retriever_hybrid._video_cache.update(
+            {
+                "v1": {"title": "One", "url": "u1"},
+                "v2": {"title": "Two", "url": "u2"},
+                "v3": {"title": "Three", "url": "u3"},
+            }
+        )
+
+        with caplog.at_level("INFO", logger=retriever_hybrid.logger.name):
+            retriever_hybrid.invalidate_cache()
+
+        assert retriever_hybrid._video_cache == {}
+        # The count must be the size BEFORE the clear. Reading len() after
+        # .clear() always yields 0, which is the obvious way to get this wrong.
+        assert "3 entries cleared" in caplog.text
+
+    def test_logs_zero_when_cache_was_already_empty(self, caplog) -> None:
+        from backend.rag import retriever_hybrid
+
+        assert retriever_hybrid._video_cache == {}
+
+        with caplog.at_level("INFO", logger=retriever_hybrid.logger.name):
+            retriever_hybrid.invalidate_cache()
+
+        assert "0 entries cleared" in caplog.text

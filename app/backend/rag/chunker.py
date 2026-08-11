@@ -165,10 +165,26 @@ def chunk_video_timestamped(segments: list[TimestampedSegment]) -> tuple[list[di
             # proportional timestamps, which are explicitly accepted).
             if len(sub_chunks) > 1:
                 duration = end_s - start_s
-                step = duration / len(sub_chunks)
-                for i, sc in enumerate(sub_chunks):
-                    sc["start_seconds"] = start_s + i * step
-                    sc["end_seconds"] = start_s + (i + 1) * step
+                # Only distribute when there is a span to distribute.
+                #
+                # For duration == 0 this guard is a no-op by arithmetic --
+                # step is 0, so start_s + i*0 == start_s either way -- and
+                # that is the honest answer: a zero-width segment has no
+                # information to spread, and manufacturing one would invent
+                # deep-link targets. Sources with no per-segment duration
+                # (Dynamous lesson bodies with no timestamp markers, a
+                # Supadata segment with duration absent) land here.
+                #
+                # It is NOT a no-op for duration < 0, which is what makes it
+                # worth keeping: dividing a negative duration produced a run
+                # of progressively *earlier* windows (90->70, 70->50, 50->30)
+                # that look like real, distinct, precise timestamps and are
+                # entirely fabricated.
+                if duration > 0:
+                    step = duration / len(sub_chunks)
+                    for i, sc in enumerate(sub_chunks):
+                        sc["start_seconds"] = start_s + i * step
+                        sc["end_seconds"] = start_s + (i + 1) * step
 
             results.extend(sub_chunks)
         except Exception as exc:

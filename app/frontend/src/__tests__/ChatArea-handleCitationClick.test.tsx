@@ -44,8 +44,12 @@ vi.mock('../hooks/useStreamingResponse', () => ({
   }),
 }));
 
+// Hoisted so the same spy instance is returned on every render, otherwise
+// each useToast() call hands back a fresh vi.fn() and nothing is assertable.
+const { mockAddToast } = vi.hoisted(() => ({ mockAddToast: vi.fn() }));
+
 vi.mock('../hooks/useToast', () => ({
-  useToast: () => ({ addToast: vi.fn(), removeToast: vi.fn() }),
+  useToast: () => ({ addToast: mockAddToast, removeToast: vi.fn() }),
 }));
 
 vi.mock('../hooks/useAuth', () => ({
@@ -148,7 +152,12 @@ describe('handleCitationClick', () => {
     expect(screen.queryByTitle('YouTube video player')).not.toBeInTheDocument();
   });
 
-  it('does nothing when Dynamous citation has no lesson_url', async () => {
+  it('tells the user when a Dynamous citation has no lesson_url (issue #247)', async () => {
+    // Previously this branch did nothing at all: the chip looked identical to
+    // a working one and the click was silently swallowed, which reads as a
+    // broken UI. The no-blank-tab and no-modal assertions below are unchanged
+    // from when this test was written for issue #216 — the toast is added on
+    // top, not in place of them.
     mockMessages = [makeAssistantMessage(dynaCitationNoUrl)];
 
     render(
@@ -166,6 +175,31 @@ describe('handleCitationClick', () => {
     // window.open must NOT be called — no blank tab opened
     expect(openSpy).not.toHaveBeenCalled();
     expect(screen.queryByTitle('YouTube video player')).not.toBeInTheDocument();
+
+    // ...but the click is acknowledged rather than swallowed.
+    expect(mockAddToast).toHaveBeenCalledTimes(1);
+    expect(mockAddToast).toHaveBeenCalledWith(expect.stringMatching(/lesson link/i), 'info');
+  });
+
+  it('does not toast when the Dynamous citation does have a lesson_url', async () => {
+    // Guards the other direction: a fix that toasted unconditionally would
+    // nag on every working citation click.
+    mockMessages = [makeAssistantMessage(dynaCitation)];
+
+    render(
+      <MemoryRouter>
+        <ChatArea conversationId="conv-1" />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Lesson One/i)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText(/Lesson One/i));
+
+    expect(openSpy).toHaveBeenCalledTimes(1);
+    expect(mockAddToast).not.toHaveBeenCalled();
   });
 
   it('opens the citation modal for YouTube citations', async () => {
