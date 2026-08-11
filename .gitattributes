@@ -1,6 +1,29 @@
+# Normalize every text file to LF in the working tree, on every platform.
+#
+# Without this, a Windows checkout with core.autocrlf=true (the default) writes
+# CRLF, and `bun run lint` then fails on all 42 frontend source files with
+# format errors that do not exist on Linux — biome.json declares
+# "lineEnding": "lf". The factory validates on Linux and passes; a human
+# running the same gate on Windows sees 42 phantom failures. Same command,
+# different verdict, which is exactly the kind of gate you cannot trust.
+#
+# Git already stores LF in the object database, so this changes only what gets
+# written to disk. Run `git add --renormalize .` after editing this file.
+* text=auto eol=lf
+
+# Binary files must never be touched by the rule above.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+
 # Force LF on shell scripts and Dockerfile so they work on Linux when this
-# repo is checked out on Windows. Without this rule, Windows' default CRLF
-# would break `bash` on the VPS.
+# repo is checked out on Windows. These are now redundant with the blanket
+# rule above, but kept explicit because breaking them breaks the VPS.
 *.sh text eol=lf
 Dockerfile text eol=lf
 *.dockerfile text eol=lf
