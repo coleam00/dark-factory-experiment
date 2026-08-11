@@ -2,7 +2,9 @@
 
 ## What this is
 
-A 4-cell matrix benchmark to answer: *where does reasoning matter — planning, implementation, both, or neither?* Each cell runs the same 6-node workflow against the same set of issues, varying only the model for the plan + implement steps. Held-constant: explore + self-review on Sonnet.
+A matrix benchmark to answer: *where does reasoning matter — planning, implementation, both, or neither?* Each cell runs the same 6-node workflow against the same set of issues, varying only the model for the plan + implement steps. Held-constant: explore + self-review on Sonnet.
+
+It started as the 4 Opus/Kimi cells below and grew to 10. `X` = the plan node is removed entirely (no-plan baseline), `F` = `claude-fable-5`.
 
 | Cell | Plan model | Impl model |
 |---|---|---|
@@ -10,12 +12,46 @@ A 4-cell matrix benchmark to answer: *where does reasoning matter — planning, 
 | `benchmark-OK` | claude/opus | pi/kimi-coding |
 | `benchmark-KO` | pi/kimi-coding | claude/opus |
 | `benchmark-KK` | pi/kimi-coding | pi/kimi-coding |
+| `benchmark-XO` | *(no plan node)* | claude/opus |
+| `benchmark-XK` | *(no plan node)* | pi/kimi-coding |
+| `benchmark-FF` | claude-fable-5 | claude-fable-5 |
+| `benchmark-FK` | claude-fable-5 | pi/kimi-coding |
+| `benchmark-FO` | claude-fable-5 | claude/opus |
+| `benchmark-OF` | claude/opus | claude-fable-5 |
+
+## Known confound — read before trusting a number
+
+**`benchmark-OO` is not prompt-identical to the cells it is compared against.** Seven of the
+eight two-model cells (FF, FK, FO, KK, KO, OF, OK) share one prompt set; OO alone carries a
+materially richer one:
+
+| Node | The other 7 cells | `benchmark-OO` | Delta |
+|---|---|---|---|
+| explore | 784 chars | 810 | +3% |
+| plan | 559 | 750 | **+34%** |
+| implement | 476 | 852 | **+79%** |
+| self-review | 575 | 1095 | **+90%** |
+
+OO's plan prompt asks for *"function names, line ranges if known, what to add/remove/replace"*;
+the others just ask for an *"ordered bullet list of code edits."* That biases **toward** OO,
+which is the premium baseline every other cell is measured against.
+
+Two consequences. Any result where OO wins is confounded and should not be quoted. Any result
+where a cell **beats** OO is, if anything, understated — the comparison was tilted against it.
+
+Fix by levelling the prompts up to OO's across all cells and re-running, not by adjusting
+scores. Until then, treat cross-cell deltas involving OO as directional only.
 
 ## Files
 
-- `.archon/workflows/benchmark-OO.yaml`, `-OK.yaml`, `-KO.yaml`, `-KK.yaml`
-- `.archon/workflows/benchmark-evaluator.yaml` — 7-dimension Opus scorer
-- `.archon/workflows/BENCHMARK-PLAYBOOK.md` — this file
+All of it lives in `.archon/workflows/benchmark/` (moved out of `.archon/workflows/` on
+2026-08-11 so the four `dark-factory-*.yaml` production workflows are the visible content of
+that directory):
+
+- `benchmark-OO.yaml`, `-OK.yaml`, `-KO.yaml`, `-KK.yaml`, `-XO.yaml`, `-XK.yaml`,
+  `-FF.yaml`, `-FK.yaml`, `-FO.yaml`, `-OF.yaml`
+- `benchmark-evaluator.yaml` — 7-dimension Opus scorer
+- `BENCHMARK-PLAYBOOK.md` — this file
 
 ## Prereqs
 
@@ -43,12 +79,15 @@ ARCHON_SUPPRESS_NESTED_CLAUDE_WARNING=1 IS_SANDBOX=1 \
 
 ## Dispatch — full matrix (12 runs)
 
-For each of 3 issues × 4 cells. **Run in waves of 4 to avoid VPS-style thrash and 5-hour rate-limit pressure on Anthropic.** Approx timing per run from the smoke test: ~3 min per workflow + ~45s per evaluator.
+For each of 3 issues × N cells. **Run in waves of 4 to avoid VPS-style thrash and 5-hour rate-limit pressure on Anthropic.** Approx timing per run from the smoke test: ~3 min per workflow + ~45s per evaluator.
+
+`CELLS` below is the original 4. Widen it to whichever cells you are testing — but if OO is in
+the list, read the "Known confound" section above first.
 
 ```bash
 # Set once
 ISSUES=(225 226 227)   # ← replace 225/226/227 with the 3 real benchmark issues
-CELLS=(OO OK KO KK)
+CELLS=(OO OK KO KK)    # ← full set: OO OK KO KK XO XK FF FK FO OF
 ROOT="C:/Users/colem/dark-factory-experiment"
 export ARCHON_SUPPRESS_NESTED_CLAUDE_WARNING=1 IS_SANDBOX=1
 

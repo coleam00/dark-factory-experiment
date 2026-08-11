@@ -1,0 +1,154 @@
+name: benchmark-FO
+description: |
+  Benchmark cell: plan=Fable, impl=Opus. Tests whether Fable's edge lives in
+  the PLANNING step. See benchmark-OO.yaml for the full design notes. This file
+  differs only in the plan and implement node provider/model overrides + label.
+
+provider: claude
+model: sonnet
+
+nodes:
+  - id: fetch-issue
+    bash: |
+      set -euo pipefail
+      ISSUE_NUM=$(echo "$ARGUMENTS" | grep -oE '[0-9]+' | head -1)
+      if [ -z "$ISSUE_NUM" ]; then
+        echo "ERROR: No issue number in arguments: $ARGUMENTS" >&2
+        exit 1
+      fi
+      echo "$ISSUE_NUM" > "$ARTIFACTS_DIR/.issue-number"
+      gh issue view "$ISSUE_NUM" --json number,title,body,labels,author,createdAt
+    timeout: 20000
+
+  - id: explore
+    prompt: |
+      You are a codebase explorer. Read the issue and gather context needed
+      to plan a fix. Do NOT edit anything in this node.
+
+      ## Issue
+      $fetch-issue.output
+
+      ## Instructions
+
+      Use Read, Grep, and Glob to explore the repository. Look for:
+      - Files and modules involved in the issue
+      - Existing patterns and conventions to follow
+      - Tests that cover the affected code
+      - Constraints in CLAUDE.md, MISSION.md, or FACTORY_RULES.md
+
+      Write your output to `$ARTIFACTS_DIR/exploration.md` with sections:
+      - **What the issue asks**: one paragraph rephrasing the issue
+      - **Relevant files**: bullet list with paths
+      - **Relevant patterns**: any code patterns or constraints the fix must respect
+      - **Risks / edge cases**: what could go wrong
+
+      Keep it focused — under 500 words. Do NOT propose a solution here.
+    depends_on: [fetch-issue]
+    context: fresh
+
+  - id: plan
+    prompt: |
+      You are a planner. Based on the issue and exploration, write a concrete
+      implementation plan.
+
+      ## Issue
+      $fetch-issue.output
+
+      ## Exploration
+      Read `$ARTIFACTS_DIR/exploration.md`.
+
+      ## Instructions
+
+      Write your plan to `$ARTIFACTS_DIR/plan.md` with sections:
+      - **Approach**: one paragraph
+      - **Files to change**: bullet list with paths and brief reason per file
+      - **Specific changes**: ordered bullet list of code edits
+      - **Tests**: what tests to add or update
+      - **Out of scope**: what NOT to touch
+
+      Prefer minimal, surgical changes. Do NOT execute any edits here.
+    provider: claude
+    model: claude-fable-5
+    depends_on: [explore]
+    context: fresh
+
+  - id: implement
+    prompt: |
+      You are the implementer. Execute the plan exactly as written.
+
+      ## Issue
+      $fetch-issue.output
+
+      ## Plan
+      Read `$ARTIFACTS_DIR/plan.md` and `$ARTIFACTS_DIR/exploration.md`.
+
+      ## Instructions
+
+      1. Make the edits the plan calls for. Use Read/Edit/Write/Bash tools.
+      2. Stay strictly in scope. Only touch files the plan lists.
+      3. Run cheap sanity checks if applicable.
+      4. When done, stage and commit:
+         `git add -A && git commit -m "impl: address issue"`
+      5. Do NOT push or create a PR.
+    provider: claude
+    model: opus
+    depends_on: [plan]
+    context: fresh
+
+  - id: self-review
+    prompt: |
+      You are an independent reviewer. Read the current diff and review it
+      against the issue and the plan.
+
+      ## Issue
+      $fetch-issue.output
+
+      ## Plan
+      Read `$ARTIFACTS_DIR/plan.md`.
+
+      ## Instructions
+
+      1. Run `git diff main...HEAD` to see what changed.
+      2. Critique the diff for: solves-issue, subtle correctness, scope creep,
+         missing tests.
+      3. Fix anything you find. Do NOT add new scope.
+      4. If you make changes, commit them:
+         `git add -A && git commit -m "review: address self-review findings"`
+      5. Write a brief summary or `NOTHING_TO_FIX` to
+         `$ARTIFACTS_DIR/review-result.txt`.
+    depends_on: [implement]
+    context: fresh
+
+  - id: create-pr
+    bash: |
+      set -euo pipefail
+      ISSUE_NUM=$(cat "$ARTIFACTS_DIR/.issue-number")
+      BRANCH=$(git branch --show-current)
+      CELL="FO"
+      CELL_DESC="plan=Fable, impl=Opus"
+      RUN_ID=$(basename "$ARTIFACTS_DIR")
+
+      git push -u origin "$BRANCH"
+
+      BODY="Fixes #${ISSUE_NUM}
+
+      **Benchmark cell:** \`${CELL}\` (${CELL_DESC})
+      **Source run-id:** \`${RUN_ID}\`
+
+      Held-constant: explore + self-review on Sonnet.
+
+      Produced by the mixed-provider routing benchmark.
+      See \`benchmark-evaluator\` workflow for the scored verdict."
+
+      PR_URL=$(gh pr create \
+        --draft \
+        --title "[bench-${CELL}] $(git log -1 --pretty=%s)" \
+        --body "$BODY" \
+        --label "benchmark:${CELL}")
+
+      echo "Created draft PR: $PR_URL"
+      PR_NUM=$(echo "$PR_URL" | grep -oE '[0-9]+$' | tail -1)
+      echo "$PR_NUM" > "$ARTIFACTS_DIR/.pr-number"
+      echo "PR #${PR_NUM}"
+    depends_on: [self-review]
+    timeout: 60000
