@@ -3,7 +3,11 @@ Signup rate-limiter (issue #54).
 
 Two independent sliding windows protect `POST /api/auth/signup`:
 
-- **Per-IP**: 1 accepted signup per IP per hour (PER_IP_LIMIT / PER_IP_WINDOW_SECONDS)
+- **Per-IP**: 3 accepted signups per IP per hour (PER_IP_LIMIT / PER_IP_WINDOW_SECONDS).
+  The limit is per-IP, not per-person: offices, households, and CGNAT carriers
+  share one public IP, so a cap of 1 locked out any colleague of a recent
+  signup (support ticket 2026-07-31). 3/hour absorbs small-group onboarding
+  while the global cap below still bounds coordinated abuse.
 - **Global**: 25 signup attempts per 10 minutes across the whole service
   (GLOBAL_LIMIT / GLOBAL_WINDOW_SECONDS)
 
@@ -36,7 +40,7 @@ from backend.db import signup_attempts_repo
 
 # Hardcoded — do not change. Any adjustment requires a human-reviewed PR.
 PER_IP_WINDOW_SECONDS: int = 3600  # 1 hour
-PER_IP_LIMIT: int = 1
+PER_IP_LIMIT: int = 3
 GLOBAL_WINDOW_SECONDS: int = 600  # 10 minutes
 GLOBAL_LIMIT: int = 25
 
@@ -55,7 +59,7 @@ class SignupRateLimited(Exception):
 
 # Human-facing copy rendered verbatim by the frontend.
 _IP_MESSAGE = (
-    "Only one signup per hour from this network. "
+    "Too many signups from this network in the past hour. "
     "Please try again later or log in if you already have an account."
 )
 _GLOBAL_MESSAGE = "We're receiving a lot of signups right now. Please try again in a few minutes."

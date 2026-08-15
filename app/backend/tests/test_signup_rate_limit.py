@@ -179,17 +179,30 @@ async def test_first_signup_records_accepted_and_returns_201(db, client, monkeyp
     assert await _count(db) == 1
 
 
-async def test_second_signup_same_ip_within_hour_returns_429_ip_scope(db, client, monkeypatch):
+async def test_signup_same_ip_within_limit_succeeds(db, client, monkeypatch):
+    """Regression for the shared-NAT lockout: a colleague signing up from the
+    same office IP must not block the next person (support ticket 2026-07-31).
+    Fails on main where PER_IP_LIMIT == 1."""
     _with_ip(monkeypatch, "10.0.0.2")
     r1 = await _signup(client, "first@example.com")
     assert r1.status_code == 201
     r2 = await _signup(client, "second@example.com")
-    assert r2.status_code == 429, r2.text
-    body = r2.json()
+    assert r2.status_code == 201, r2.text
+    assert await _count(db, "accepted") == 2
+
+
+async def test_signup_same_ip_over_limit_returns_429_ip_scope(db, client, monkeypatch):
+    _with_ip(monkeypatch, "10.0.0.3")
+    for i in range(signup_rate_limit.PER_IP_LIMIT):
+        r = await _signup(client, f"user{i}@example.com")
+        assert r.status_code == 201, r.text
+    r_over = await _signup(client, "overflow@example.com")
+    assert r_over.status_code == 429, r_over.text
+    body = r_over.json()
     assert body["error"] == "signup_rate_limited"
     assert body["scope"] == "ip"
     assert isinstance(body["message"], str) and body["message"]
-    assert await _count(db, "accepted") == 1
+    assert await _count(db, "accepted") == signup_rate_limit.PER_IP_LIMIT
     assert await _count(db, "ip_limited") == 1
 
 
@@ -255,13 +268,14 @@ async def test_global_window_rolls_off_after_10_min(db, client, monkeypatch):
 
 
 async def test_per_ip_window_rolls_off_after_1h(db, client, monkeypatch):
-    await db.execute(
-        """
-        INSERT INTO signup_attempts (ip, email_attempted, outcome, created_at)
-        VALUES ('10.3.0.1'::inet, 'ancient@example.com', 'accepted',
-                now() - interval '61 minutes')
-        """
-    )
+    for i in range(signup_rate_limit.PER_IP_LIMIT):
+        await db.execute(
+            """
+            INSERT INTO signup_attempts (ip, email_attempted, outcome, created_at)
+            VALUES ('10.3.0.1'::inet, $1, 'accepted', now() - interval '61 minutes')
+            """,
+            f"ancient{i}@example.com",
+        )
     _with_ip(monkeypatch, "10.3.0.1")
     r = await _signup(client, "reborn@example.com")
     assert r.status_code == 201, r.text
@@ -274,15 +288,16 @@ async def test_per_ip_window_rolls_off_after_1h(db, client, monkeypatch):
 
 async def test_ip_precedence_over_global(db, client, monkeypatch):
     target_ip = "10.4.0.99"
-    await db.execute(
-        """
-        INSERT INTO signup_attempts (ip, email_attempted, outcome, created_at)
-        VALUES ($1::inet, 'target@example.com', 'accepted',
-                now() - interval '30 seconds')
-        """,
-        target_ip,
-    )
-    for i in range(signup_rate_limit.GLOBAL_LIMIT - 1):
+    for i in range(signup_rate_limit.PER_IP_LIMIT):
+        await db.execute(
+            """
+            INSERT INTO signup_attempts (ip, email_attempted, outcome, created_at)
+            VALUES ($1::inet, $2, 'accepted', now() - interval '30 seconds')
+            """,
+            target_ip,
+            f"target{i}@example.com",
+        )
+    for i in range(signup_rate_limit.GLOBAL_LIMIT - signup_rate_limit.PER_IP_LIMIT):
         await db.execute(
             """
             INSERT INTO signup_attempts (ip, email_attempted, outcome, created_at)
@@ -300,12 +315,14 @@ async def test_ip_precedence_over_global(db, client, monkeypatch):
 async def test_429_ip_does_not_call_bcrypt(db, client, monkeypatch):
     """Rate-limit check must run before password hashing — attackers shouldn't
     be able to burn server CPU via repeated 429'd requests."""
-    await db.execute(
-        """
-        INSERT INTO signup_attempts (ip, email_attempted, outcome, created_at)
-        VALUES ('10.5.0.1'::inet, 'prior@example.com', 'accepted', now())
-        """
-    )
+    for i in range(signup_rate_limit.PER_IP_LIMIT):
+        await db.execute(
+            """
+            INSERT INTO signup_attempts (ip, email_attempted, outcome, created_at)
+            VALUES ('10.5.0.1'::inet, $1, 'accepted', now())
+            """,
+            f"prior{i}@example.com",
+        )
 
     called = {"hashed": False}
 
@@ -332,7 +349,7 @@ async def test_429_ip_does_not_call_bcrypt(db, client, monkeypatch):
 
 def test_constants_are_hardcoded_exact_values():
     assert signup_rate_limit.PER_IP_WINDOW_SECONDS == 3600
-    assert signup_rate_limit.PER_IP_LIMIT == 1
+    assert signup_rate_limit.PER_IP_LIMIT == 3
     assert signup_rate_limit.GLOBAL_WINDOW_SECONDS == 600
     assert signup_rate_limit.GLOBAL_LIMIT == 25
 
